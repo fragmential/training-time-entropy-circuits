@@ -1,0 +1,107 @@
+# Tracing the Representation Geometry of Language Models
+
+[![arXiv](https://img.shields.io/badge/arXiv-2509.23024-b31b1b.svg)](https://arxiv.org/abs/2509.23024)
+[![NeurIPS 2025](https://img.shields.io/badge/NeurIPS-2025-blue.svg)](https://neurips.cc/virtual/2025/loc/san-diego/poster/119054)
+
+Official code for our NeurIPS 2025 paper on analyzing LLM training through geometric phases.
+
+## Overview
+
+We use spectral methods (RankMe and α-ReQ) to track how LLM representations evolve during training. We find three consistent phases:
+
+1. **Warmup**: Rapid representational collapse
+2. **Entropy-seeking**: Expansion of dimensionality, peak memorization
+3. **Compression-seeking**: Anisotropic consolidation, improved generalization
+
+## Installation
+
+```bash
+pip install torch transformers datasets numpy matplotlib seaborn scikit-learn tqdm jsonargparse
+```
+
+## Quick Start
+
+### Compute metrics for Pythia models
+
+```bash
+python rankme_alpha_scripts/compute_alpha_pythia.py --model_name EleutherAI/pythia-6.9b
+```
+
+### Compute metrics for OLMo models
+
+```bash
+python rankme_alpha_scripts/compute_alpha_rankme_olmo2.py \
+    --model_name allenai/OLMo-2-1124-7B 
+```
+
+### Visualize results
+
+```bash
+python analysis/plot_alpha_traj.py 
+```
+###  ∞-gram and LLM likelihood analysis
+
+```bash
+python memorization_scripts/compute_infgrams.py
+python memorization_scripts/compute_llm_likelihood.py
+```
+
+## Repository Structure
+
+```
+├── analysis/                       # Visualization scripts
+│   └── plot_alpha_traj.py
+    └── llm_prob.py     
+├── memorization_scripts/           # ∞-gram and LLM likelihood analysis
+│   ├── compute_infgrams.py
+│   └── compute_llm_likelihood.py
+├── rankme_alpha_scripts/          # Compute geometric metrics
+│   ├── compute_alpha_pythia.py
+│   ├── compute_rankme_pythia.py
+│   └── compute_alpha_rankme_olmo2.py
+└── utils/
+    ├── powerlaw.py                # Eigenspectrum and metric utilities         
+```
+
+## Key Metrics
+
+**RankMe (Effective Rank)**
+- Measures effective dimensionality of representations
+- Higher = more isotropic (entropy-seeking phase)
+- Lower = more collapsed (compression-seeking phase)
+
+**α-ReQ (Power-law Exponent)**
+- Measures eigenspectrum decay rate
+- Lower α = more uniform (entropy-seeking)
+- Higher α = more concentrated (compression-seeking)
+
+## Results Format
+
+Output saved as `.npy` files containing:
+
+```python
+{
+    step_num: {
+        'rankme': float,
+        'alpha': float,
+        'eigenspectrum': array,
+        'r2': float
+    }
+}
+```
+
+## Citation
+
+```bibtex
+@inproceedings{li2025tracing,
+  title={Tracing the Representation Geometry of Language Models from Pretraining to Post-training},
+  author={Li, Melody Zixuan and Agrawal, Kumar Krishna and Ghosh, Arna and Teru, Komal Kumar and Santoro, Adam and Lajoie, Guillaume and Richards, Blake A.},
+  booktitle={Advances in Neural Information Processing Systems (NeurIPS) 2025},
+  year={2025},
+  url={https://arxiv.org/abs/2509.23024}
+}
+```
+
+## License
+
+MIT License
