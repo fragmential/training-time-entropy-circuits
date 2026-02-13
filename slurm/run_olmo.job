@@ -26,7 +26,7 @@ echo "=== Running model: ${MODEL_NAME} with ${REV_FILE} (array task ${SLURM_ARRA
 module purge
 
 export HF_HOME="/projects/prjs1815/hf_cache"
-cd /projects/prjs1815/representation-geometry || exit 1
+cd "$HOME/Tracing-representation-geometry-reproduction" || exit 1
 
 uv run rankme_alpha_scripts/compute_alpha_rankme_olmo2.py \
     --model_name "${MODEL_NAME}" \

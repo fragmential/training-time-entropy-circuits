@@ -36,7 +36,7 @@ echo "=== Running model: ${MODEL_NAME} (array task ${SLURM_ARRAY_TASK_ID}) ==="
 module purge
 
 export HF_HOME="/projects/prjs1815/hf_cache"
-cd /projects/prjs1815/representation-geometry || exit 1
+cd "$HOME/Tracing-representation-geometry-reproduction" || exit 1
 
 uv run rankme_alpha_scripts/compute_alpha_pythia.py \
     --model_name "${MODEL_NAME}" \
