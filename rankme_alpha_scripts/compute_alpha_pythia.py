@@ -102,7 +102,8 @@ def main(model_name: str = "EleutherAI/pythia-70m-deduped",
 
     # Filter dataset, caching to disk so subsequent runs skip filtering
     import json
-    cache_path = os.path.join('results', f'filtered_texts_{dataset_name}_{num_samples}.json')
+    os.makedirs('data/cache', exist_ok=True)
+    cache_path = os.path.join('data', 'cache', f'filtered_texts_{dataset_name}_{num_samples}.json')
     if os.path.exists(cache_path):
         with open(cache_path) as f:
             filtered_texts = json.load(f)
