@@ -6,7 +6,7 @@ import datasets
 import torch.nn as nn
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from data import wikitext_loader
+from data import fineweb_loader
 from utils import powerlaw
 
 
@@ -21,7 +21,7 @@ def prefetch_checkpoint(model_name, step_num):
 
 def get_metrics(model_name: str, step_num: int,
                 filtered_texts: list, tokenizer,
-                max_length: int = 128, batch_size: int = 32) -> dict:
+                max_length: int = 512, batch_size: int = 16) -> dict:
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     model = GPTNeoXForCausalLM.from_pretrained(model_name,
@@ -61,15 +61,17 @@ def get_metrics(model_name: str, step_num: int,
 
 
 def main(model_name: str = "EleutherAI/pythia-70m-deduped",
-         dataset_name: str = "wikitext",
-         num_samples: int = 2000,
-         batch_size: int = 32):
+         dataset_name: str = "fineweb",
+         num_samples: int = 15000,
+         max_length: int = 512,
+         min_length: int = 32,
+         batch_size: int = 16):
     print(model_name, dataset_name)
-    assert dataset_name in ['wikitext'], NotImplementedError
+    assert dataset_name in ['fineweb'], NotImplementedError
 
     short_name = model_name.split("/")[-1] if "/" in model_name else model_name
 
-    dataset = wikitext_loader.get_dataset()
+    dataset = fineweb_loader.get_dataset()
 
     # step_nums = [0,1,2,4,8,16,32,64,128,256,512] + list(np.arange(1000,143000+1,10000))
     step_nums = [0,8,16,32,64,128,256,512] + list(np.arange(1000,143000+1,1000))
@@ -112,7 +114,7 @@ def main(model_name: str = "EleutherAI/pythia-70m-deduped",
         filtered_texts = []
         for seq in tqdm(dataset, desc="Filtering"):
             text = seq["text"]
-            if len(text.strip()) > 20 and tokenizer(text, return_tensors="pt").input_ids.shape[-1] > 10:
+            if tokenizer(text, return_tensors="pt").input_ids.shape[-1] > min_length:
                 filtered_texts.append(text)
                 if len(filtered_texts) >= num_samples:
                     break
@@ -130,7 +132,7 @@ def main(model_name: str = "EleutherAI/pythia-70m-deduped",
 
         try:
             res_dict[step_num] = get_metrics(model_name, step_num, filtered_texts, tokenizer,
-                                             batch_size=batch_size)
+                                             max_length=max_length, batch_size=batch_size)
             tqdm.write(f"Step {step_num}: rankme={res_dict[step_num]['rankme']:.3f}, "
                        f"alpha={res_dict[step_num]['alpha']:.3f}, "
                        f"r2_100={res_dict[step_num]['r2_100']:.3f}")

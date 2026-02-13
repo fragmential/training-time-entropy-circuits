@@ -17,7 +17,7 @@ def get_dataset(split: str = "train", num_samples: int = 10000, streaming: bool 
     """
     if streaming:
         dataset = load_dataset(
-            "HuggingFaceFW/fineweb-edu",
+            "HuggingFaceFW/fineweb",
             name="sample-10BT",
             split=split,
             streaming=True
@@ -26,7 +26,7 @@ def get_dataset(split: str = "train", num_samples: int = 10000, streaming: bool 
         dataset = dataset.take(num_samples)
     else:
         dataset = load_dataset(
-            "HuggingFaceFW/fineweb-edu",
+            "HuggingFaceFW/fineweb",
             name="sample-10BT",
             split=f"{split}[:{num_samples}]"
         )

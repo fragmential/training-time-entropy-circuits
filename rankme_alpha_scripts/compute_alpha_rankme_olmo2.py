@@ -101,7 +101,7 @@ def get_available_checkpoints(filepath: str) -> dict:
 
 def run_all_checkpoints(model_name="allenai/OLMo-1B", dataset_name="fineweb",
                         dataset_content_key="text", min_length=32, max_length=512,
-                        batch_size=32, num_samples=2000,
+                        batch_size=16, num_samples=15000,
                         revisions_file="1b_revisions.txt"):
     short_name = model_name.split("/")[-1] if "/" in model_name else model_name
 
