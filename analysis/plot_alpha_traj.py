@@ -48,26 +48,28 @@ def plot_alpha_model_training_isoflops(model_name: str,
     # tqdm.write(f'{model_name} {flops_per_step} {flops_mapper[-1]} {flops_mapper[0]}')
     plt.scatter(xs, ys, marker=marker, color=plot_colors) #, label=f'{model_name}')
 
-model_names = ['pythia-14m', 'pythia-31m', 
-               'pythia-70m', 'pythia-70m-deduped', 
-               'pythia-160m', 'pythia-160m-deduped', 
+model_names = ['pythia-14m', 'pythia-31m',
+               'pythia-70m', 'pythia-70m-deduped',
+               'pythia-160m', 'pythia-160m-deduped',
                'pythia-410m', 'pythia-410m-deduped',
                'pythia-1b', 'pythia-1b-deduped',
                'pythia-1.4b', 'pythia-1.4b-deduped',
                'pythia-2.8b', 'pythia-2.8b-deduped',
                'pythia-6.9b', 'pythia-6.9b-deduped',
                'pythia-12b', 'pythia-12b-deduped',
+               'OLMo-2-1124-7B',
                ]
 
-colors = ['turquoise', 'cornflowerblue', 
+colors = ['turquoise', 'cornflowerblue',
           'dodgerblue', 'dodgerblue',
-          'gold', 'gold', 
+          'gold', 'gold',
           'lime', 'lime',
           'darkgreen', 'darkgreen',
           'magenta', 'magenta',
           'deeppink', 'deeppink',
           'purple', 'purple',
           'brown', 'brown',
+          'red',
           ]
 
 filter_model_names = [

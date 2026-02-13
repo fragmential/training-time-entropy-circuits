@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "representation-geometry"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "torch",
+    "transformers",
+    "datasets",
+    "numpy",
+    "matplotlib",
+    "seaborn",
+    "scikit-learn",
+    "tqdm",
+    "jsonargparse",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["data", "utils"]

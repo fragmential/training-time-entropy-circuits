@@ -1,12 +1,12 @@
+import os, sys, torch, numpy as np
+from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import datasets
 import torch.nn as nn
-from tqdm import tqdm
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from data import fineweb_loader
-import numpy as np
 from utils import powerlaw
-import torch
-import os
 
 
 def prepare_dataset(dataset: datasets.arrow_dataset.Dataset,
@@ -29,22 +29,22 @@ def prepare_dataset(dataset: datasets.arrow_dataset.Dataset,
     return encoded_dataset
 
 
-def get_rankme(model_path: str, step_num: int,
+def get_rankme(model_name: str, step_num: int,
                dataset: datasets.arrow_dataset.Dataset) -> dict:
-    base_dir = '/network/scratch/z/zixuan.li/160m-v2/'
-    model_path = f"{base_dir}checkpoint-{step_num}"
-    model = AutoModelForCausalLM.from_pretrained(model_path)
-    model.embed_out = nn.Identity()
-    model.cuda()
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    model = AutoModelForCausalLM.from_pretrained(model_name, revision=f"step{step_num}")
+    model.embed_out = nn.Identity()
+    model.to(device)
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name, revision=f"step{step_num}")
     tokenized_dataset = prepare_dataset(dataset, tokenizer)
 
     activations_arr = []
     with torch.no_grad():
         for seq in tokenized_dataset:
             for k, v in seq.items():
-                seq[k] = v.cuda()
+                seq[k] = v.to(device)
             out = model(**seq)
             activations_arr.append(out.logits[0, -1].cpu().numpy())
 
@@ -55,28 +55,38 @@ def get_rankme(model_path: str, step_num: int,
             'rankme': rankme}
 
 
-def main(model_name: str = "pythia-70m-deduped",
+def main(model_name: str = "EleutherAI/pythia-70m-deduped",
          dataset_name: str = "fineweb"):
     assert dataset_name in ['fineweb'], NotImplementedError
 
+    short_name = model_name.split("/")[-1] if "/" in model_name else model_name
+
     dataset = fineweb_loader.get_dataset()
     step_nums = list(range(5000, 1000000, 5000))
-    tmp_save_fname = os.path.join('/network/scratch/z/zixuan.li/160m-v2/rankme_results', f'results_gpt2_temp.npy')
 
-    # Load existing results if they exist
+    os.makedirs('results', exist_ok=True)
+    tmp_save_fname = os.path.join('results', f'results_{short_name}_temp.npy')
+    final_save_fname = os.path.join('results', f'results_{short_name}.npy')
+
+    res_dict = {}
+    if os.path.exists(final_save_fname):
+        try:
+            res_dict = np.load(final_save_fname, allow_pickle=True).item()
+        except:
+            pass
+
     if os.path.exists(tmp_save_fname):
-        print(f"Loading existing results from {tmp_save_fname}")
-        res_dict = np.load(tmp_save_fname, allow_pickle=True).item()
-    else:
-        res_dict = {}
+        try:
+            temp = np.load(tmp_save_fname, allow_pickle=True).item()
+            res_dict.update(temp)
+        except:
+            pass
 
-    # Skip already computed checkpoints
-    completed_steps = set(res_dict.keys())
-    step_nums = [step for step in step_nums if step not in completed_steps]
+    completed = set(res_dict.keys())
+    to_process = [step for step in step_nums if step not in completed]
 
-    print(f"Remaining steps to compute: {len(step_nums)}")
-
-    for step_num in tqdm(step_nums):
+    print(f"Processing {len(to_process)} remaining checkpoints...")
+    for step_num in tqdm(to_process):
         try:
             res_dict[step_num] = get_rankme(model_name, step_num, dataset)
             tqdm.write(f"Step {step_num}: rankme = {res_dict[step_num]['rankme']:.3f}")
@@ -85,10 +95,10 @@ def main(model_name: str = "pythia-70m-deduped",
 
         np.save(tmp_save_fname, res_dict)
 
-    save_fname = os.path.join('/network/scratch/z/zixuan.li/160m-v2/rankme_results', f'results_gpt2.npy')
-    print(f"Saving final results to {save_fname}")
-    np.save(save_fname, res_dict)
-    os.system(f'rm {tmp_save_fname}')
+    print(f"Saving results to {final_save_fname}")
+    np.save(final_save_fname, res_dict)
+    if os.path.exists(tmp_save_fname):
+        os.remove(tmp_save_fname)
 
 
 if __name__ == "__main__":

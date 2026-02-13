@@ -1,0 +1,26 @@
+#!/bin/bash
+#SBATCH --partition=gpu_h100
+#SBATCH --gpus=1
+#SBATCH --job-name=test-olmo
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --time=00:30:00
+#SBATCH --output=slurm/logs/test_olmo_%j.out
+#SBATCH --error=slurm/logs/test_olmo_%j.err
+
+MODEL_NAME="allenai/OLMo-2-0425-1B"
+REV_FILE="1b_revisions.txt"
+echo "=== Test run: ${MODEL_NAME} ==="
+
+module purge
+
+export HF_HOME="/projects/prjs1815/hf_cache"
+cd /projects/prjs1815/representation-geometry || exit 1
+
+uv run rankme_alpha_scripts/compute_alpha_rankme_olmo2.py \
+    --model_name "${MODEL_NAME}" \
+    --revisions_file "${REV_FILE}" \
+    --num_samples 100 \
+    --batch_size 64
+
+echo "=== Done: ${MODEL_NAME} ==="

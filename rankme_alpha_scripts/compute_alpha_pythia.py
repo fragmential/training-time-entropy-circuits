@@ -1,93 +1,142 @@
+import os, sys, torch, numpy as np
+from concurrent.futures import ThreadPoolExecutor
+from tqdm import tqdm
 from transformers import GPTNeoXForCausalLM, AutoTokenizer
 import datasets
 import torch.nn as nn
-from tqdm import tqdm
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from data import wikitext_loader
-import numpy as np
 from utils import powerlaw
-import torch
-import os
 
-def prepare_dataset(dataset: datasets.arrow_dataset.Dataset,
-                    tokenizer: AutoTokenizer,
-                    content_key: str = "text",
-                    min_length: int = 10,
-                    max_length: int = 128,
-                    ) -> list:
-    encoded_dataset = []
-    for seq in dataset:
-        encoded_seq = tokenizer(seq[content_key], max_length=max_length,
-                                       return_tensors="pt", truncation=True)
-        try:
-            if encoded_seq['input_ids'].shape[-1] > min_length:
-                encoded_dataset.append(encoded_seq)
-        except:
-            continue
-    
-    print(f"Number of valid sequences tokenized: {len(encoded_dataset)}/{len(dataset)}")
-    return encoded_dataset
 
-def get_alpha(model_name: str, step_num: int, 
-              dataset: datasets.arrow_dataset.Dataset) -> dict:    
+def prefetch_checkpoint(model_name, step_num):
+    """Download model weights in background so they're cached for next iteration."""
+    try:
+        from huggingface_hub import snapshot_download
+        snapshot_download(model_name, revision=f"step{step_num}")
+    except Exception:
+        pass
 
-    model = GPTNeoXForCausalLM.from_pretrained(f"EleutherAI/{model_name}",
+
+def get_metrics(model_name: str, step_num: int,
+                filtered_texts: list, tokenizer,
+                max_length: int = 128, batch_size: int = 32) -> dict:
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    model = GPTNeoXForCausalLM.from_pretrained(model_name,
                                             revision=f"step{step_num}")
     model.embed_out = nn.Identity()
-    model.cuda()
-
-    tokenizer = AutoTokenizer.from_pretrained(f"EleutherAI/{model_name}",
-                                            revision=f"step{step_num}")
-
-    tokenized_dataset = prepare_dataset(dataset, tokenizer)
+    model.to(device)
 
     activations_arr = []
     with torch.no_grad():
-        for seq in tokenized_dataset:
-            for k,v in seq.items():
-                seq[k] = v.cuda()
-            out = model(**seq)
-            # print(out.logits.shape)
-            activations_arr.append(out.logits[0,-1].cpu().numpy())
+        for bidx in tqdm(range(0, len(filtered_texts), batch_size), desc="Inference"):
+            batch = filtered_texts[bidx:bidx+batch_size]
+            tokenized = tokenizer(batch, padding="longest", return_tensors="pt",
+                                  max_length=max_length, truncation=True)
+            input_ids = tokenized.input_ids.to(device)
+            attention_mask = tokenized.attention_mask.to(device)
 
-    activations_arr = np.array(activations_arr)
-    eigen = powerlaw.get_eigenspectrum(activations_arr)
+            out = model(input_ids=input_ids, attention_mask=attention_mask)
+
+            last_indices = attention_mask.sum(dim=1) - 1
+            batch_indices = torch.arange(input_ids.shape[0])
+            activations = out.logits[batch_indices, last_indices, ...]
+            activations_arr.append(activations.cpu().numpy())
+
+    del model
+    torch.cuda.empty_cache()
+
+    all_activations = np.vstack(activations_arr)
+    eigen = powerlaw.get_eigenspectrum(all_activations)
+    rankme = powerlaw.rankme(eigen)
     alpha, ypred, fit_r2, fit_r2_100 = powerlaw.stringer_get_powerlaw(eigen, np.arange(11,100))
     return {'eigenspectrum': eigen,
-            'ypred': ypred, 
+            'rankme': rankme,
+            'ypred': ypred,
             'alpha': alpha,
-            'r2': fit_r2, 
+            'r2': fit_r2,
             'r2_100': fit_r2_100}
 
 
-def main(model_name: str = "pythia-70m-deduped",
-         dataset_name: str = "wikitext"):
+def main(model_name: str = "EleutherAI/pythia-70m-deduped",
+         dataset_name: str = "wikitext",
+         num_samples: int = 2000,
+         batch_size: int = 32):
     print(model_name, dataset_name)
     assert dataset_name in ['wikitext'], NotImplementedError
+
+    short_name = model_name.split("/")[-1] if "/" in model_name else model_name
 
     dataset = wikitext_loader.get_dataset()
 
     # step_nums = [0,1,2,4,8,16,32,64,128,256,512] + list(np.arange(1000,143000+1,10000))
     step_nums = [0,8,16,32,64,128,256,512] + list(np.arange(1000,143000+1,1000))
-    # step_nums = [0, 141000]
 
-    tmp_save_fname = os.path.join('results',f'results_{model_name}_temp.npy')
+    os.makedirs('results', exist_ok=True)
+    tmp_save_fname = os.path.join('results', f'results_{short_name}_temp.npy')
+    final_save_fname = os.path.join('results', f'results_{short_name}.npy')
+
     res_dict = {}
-    for step_num in tqdm(step_nums):
+    if os.path.exists(final_save_fname):
         try:
-            res_dict[step_num] = get_alpha(model_name, step_num, dataset)
-            tqdm.write(f"Step {step_num}: alpha = {res_dict[step_num]['alpha']:.3f}, \
-                    r2_100 = {res_dict[step_num]['r2_100']:.3f}")
+            res_dict = np.load(final_save_fname, allow_pickle=True).item()
+        except:
+            pass
+
+    if os.path.exists(tmp_save_fname):
+        try:
+            temp = np.load(tmp_save_fname, allow_pickle=True).item()
+            res_dict.update(temp)
+        except:
+            pass
+
+    completed = set(res_dict.keys())
+    to_process = [s for s in step_nums if s not in completed]
+
+    # Load tokenizer once for filtering (all Pythia checkpoints share the same tokenizer)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, revision=f"step{to_process[0]}" if to_process else "step0")
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    # Filter and cap dataset size
+    filtered_texts = [seq["text"] for seq in tqdm(dataset, desc="Filtering")
+                      if len(seq["text"].strip()) > 20
+                      and tokenizer(seq["text"], return_tensors="pt").input_ids.shape[-1] > 10]
+    if len(filtered_texts) > num_samples:
+        filtered_texts = filtered_texts[:num_samples]
+    print(f"Using {len(filtered_texts)} sequences")
+
+    executor = ThreadPoolExecutor(max_workers=1)
+
+    print(f"Processing {len(to_process)} remaining checkpoints...")
+    for idx, step_num in enumerate(tqdm(to_process, desc="Checkpoints")):
+        # Prefetch next checkpoint in background
+        if idx + 1 < len(to_process):
+            executor.submit(prefetch_checkpoint, model_name, to_process[idx + 1])
+
+        try:
+            res_dict[step_num] = get_metrics(model_name, step_num, filtered_texts, tokenizer,
+                                             batch_size=batch_size)
+            tqdm.write(f"Step {step_num}: rankme={res_dict[step_num]['rankme']:.3f}, "
+                       f"alpha={res_dict[step_num]['alpha']:.3f}, "
+                       f"r2_100={res_dict[step_num]['r2_100']:.3f}")
         except Exception as e:
             tqdm.write(f"Skipping step {step_num}: {e}")
 
         np.save(tmp_save_fname, res_dict)
 
-    save_fname = os.path.join('results',f'results_{model_name}.npy')
-    print(f"Saving results to {save_fname}")
-    np.save(save_fname, res_dict)
-    os.system(f'rm {tmp_save_fname}')   # removing tmp result file
+    executor.shutdown(wait=True)
+
+    print(f"Saving results to {final_save_fname}")
+    np.save(final_save_fname, res_dict)
+    if os.path.exists(tmp_save_fname):
+        os.remove(tmp_save_fname)
 
 if __name__ == "__main__":
     from jsonargparse import CLI
-
+    torch.set_num_threads(1)
+    os.environ['OMP_NUM_THREADS'] = '1'
+    os.environ['MKL_NUM_THREADS'] = '1'
     CLI(main)

@@ -1,0 +1,37 @@
+#!/bin/bash
+#SBATCH --partition=gpu_h100
+#SBATCH --gpus=1
+#SBATCH --job-name=olmo-metrics
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --time=08:00:00
+#SBATCH --output=slurm/logs/olmo_%A_%a.out
+#SBATCH --error=slurm/logs/olmo_%A_%a.err
+#SBATCH --array=0-1
+
+MODELS=(
+    "allenai/OLMo-2-0425-1B"
+    "allenai/OLMo-2-1124-7B"
+)
+
+REVFILES=(
+    "1b_revisions.txt"
+    "7b_revisions.txt"
+)
+
+MODEL_NAME="${MODELS[$SLURM_ARRAY_TASK_ID]}"
+REV_FILE="${REVFILES[$SLURM_ARRAY_TASK_ID]}"
+echo "=== Running model: ${MODEL_NAME} with ${REV_FILE} (array task ${SLURM_ARRAY_TASK_ID}) ==="
+
+module purge
+
+export HF_HOME="/projects/prjs1815/hf_cache"
+cd /projects/prjs1815/representation-geometry || exit 1
+
+uv run rankme_alpha_scripts/compute_alpha_rankme_olmo2.py \
+    --model_name "${MODEL_NAME}" \
+    --revisions_file "${REV_FILE}" \
+    --num_samples 2000 \
+    --batch_size 64
+
+echo "=== Done: ${MODEL_NAME} ==="
