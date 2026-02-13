@@ -37,13 +37,13 @@ def delete_cached_revision(model_name, revision):
 
 def get_metrics(model_name: str, step_num: int,
                 filtered_texts: list, tokenizer,
-                max_length: int = 512, batch_size: int = 16) -> dict:
+                max_length: int = 512, batch_size: int = 128) -> dict:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     revision = f"step{step_num}"
 
     model = None
     try:
-        model = GPTNeoXForCausalLM.from_pretrained(model_name, revision=revision)
+        model = GPTNeoXForCausalLM.from_pretrained(model_name, revision=revision, torch_dtype=torch.float16)
         model.embed_out = nn.Identity()
         model.to(device)
 
@@ -83,10 +83,11 @@ def get_metrics(model_name: str, step_num: int,
 
 def main(model_name: str = "EleutherAI/pythia-70m-deduped",
          dataset_name: str = "fineweb",
-         num_samples: int = 15000,
+         num_samples: int = 2000,
          max_length: int = 512,
          min_length: int = 32,
-         batch_size: int = 16):
+         max_checkpoints: int = 50,
+         batch_size: int = 128):
     print(model_name, dataset_name)
     assert dataset_name in ['fineweb'], NotImplementedError
 
@@ -96,6 +97,12 @@ def main(model_name: str = "EleutherAI/pythia-70m-deduped",
 
     # step_nums = [0,1,2,4,8,16,32,64,128,256,512] + list(np.arange(1000,143000+1,10000))
     step_nums = [0,8,16,32,64,128,256,512] + list(np.arange(1000,143000+1,1000))
+
+    # Uniformly subsample to max_checkpoints if needed
+    if max_checkpoints and len(step_nums) > max_checkpoints:
+        indices = np.linspace(0, len(step_nums) - 1, max_checkpoints, dtype=int)
+        step_nums = [step_nums[i] for i in indices]
+        print(f"Subsampled to {len(step_nums)} checkpoints")
 
     os.makedirs('results', exist_ok=True)
     tmp_save_fname = os.path.join('results', f'results_{short_name}_temp.npy')

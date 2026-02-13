@@ -21,6 +21,6 @@ uv run rankme_alpha_scripts/compute_alpha_rankme_olmo2.py \
     --model_name "${MODEL_NAME}" \
     --revisions_file "${REV_FILE}" \
     --num_samples 100 \
-    --batch_size 64
+    --batch_size 128
 
 echo "=== Done: ${MODEL_NAME} ==="

@@ -48,7 +48,7 @@ def compute_metrics_for_checkpoint(model_name, revision, filtered_texts,
     try:
         model = AutoModelForCausalLM.from_pretrained(
             model_name, revision=revision,
-            torch_dtype=torch.float16, trust_remote_code=True
+            torch_dtype=torch.bfloat16, trust_remote_code=True
         ).to(device)
         tokenizer = AutoTokenizer.from_pretrained(
             model_name, revision=revision,
@@ -122,7 +122,8 @@ def get_available_checkpoints(filepath: str) -> dict:
 
 def run_all_checkpoints(model_name="allenai/OLMo-1B", dataset_name="fineweb",
                         dataset_content_key="text", min_length=32, max_length=512,
-                        batch_size=16, num_samples=15000,
+                        batch_size=128, num_samples=2000,
+                        max_checkpoints=50,
                         revisions_file="1b_revisions.txt"):
     short_name = model_name.split("/")[-1] if "/" in model_name else model_name
 
@@ -139,6 +140,12 @@ def run_all_checkpoints(model_name="allenai/OLMo-1B", dataset_name="fineweb",
             step_nums.append(s)
 
     step_nums = sorted(step_nums)
+
+    # Uniformly subsample to max_checkpoints if needed
+    if max_checkpoints and len(step_nums) > max_checkpoints:
+        indices = np.linspace(0, len(step_nums) - 1, max_checkpoints, dtype=int)
+        step_nums = [step_nums[i] for i in indices]
+        print(f"Subsampled to {len(step_nums)} checkpoints")
 
     tmp_save = os.path.join('results', f'results_{short_name}_temp.npy')
     final_save = os.path.join('results', f'results_{short_name}.npy')
