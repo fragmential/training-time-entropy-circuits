@@ -5,7 +5,7 @@ from transformers import AutoTokenizer
 from datasets import load_dataset
 from tqdm import tqdm
 
-save_dir = os.path.join(os.environ['SCRATCH'], 'llm_dynamics','results','infgram')
+save_dir = os.path.join('results', 'infgram')
 
 def main():
     tokenizer = AutoTokenizer.from_pretrained("shauray/Llava-Llama-2-13B-hf", add_bos_token=False, add_eos_token=False)

@@ -7,7 +7,7 @@ from datasets import load_dataset
 from tqdm import tqdm
 
 
-save_dir = os.path.join(os.environ['SCRATCH'], 'llm_dynamics','results','llm_likelihood')
+save_dir = os.path.join('results', 'llm_likelihood')
 
 class TokenProbabilityAnalyzer:
     def __init__(self, model_name: str = "EleutherAI/pythia-70m", revision: int = 10000):
