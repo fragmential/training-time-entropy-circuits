@@ -19,34 +19,55 @@ def prefetch_checkpoint(model_name, step_num):
         pass
 
 
+def delete_cached_revision(model_name, revision):
+    """Remove a specific revision from the HF cache to free disk space."""
+    try:
+        from huggingface_hub import scan_cache_dir
+        cache_info = scan_cache_dir()
+        for repo in cache_info.repos:
+            if repo.repo_id == model_name:
+                for rev in repo.revisions:
+                    if any(ref == revision for ref in rev.refs):
+                        strategy = cache_info.delete_revisions(rev.commit_hash)
+                        strategy.execute()
+                        return
+    except Exception as e:
+        print(f"Warning: could not clean cache for {revision}: {e}")
+
+
 def get_metrics(model_name: str, step_num: int,
                 filtered_texts: list, tokenizer,
                 max_length: int = 512, batch_size: int = 16) -> dict:
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    revision = f"step{step_num}"
 
-    model = GPTNeoXForCausalLM.from_pretrained(model_name,
-                                            revision=f"step{step_num}")
-    model.embed_out = nn.Identity()
-    model.to(device)
+    model = None
+    try:
+        model = GPTNeoXForCausalLM.from_pretrained(model_name, revision=revision)
+        model.embed_out = nn.Identity()
+        model.to(device)
 
-    activations_arr = []
-    with torch.no_grad():
-        for bidx in tqdm(range(0, len(filtered_texts), batch_size), desc="Inference"):
-            batch = filtered_texts[bidx:bidx+batch_size]
-            tokenized = tokenizer(batch, padding="longest", return_tensors="pt",
-                                  max_length=max_length, truncation=True)
-            input_ids = tokenized.input_ids.to(device)
-            attention_mask = tokenized.attention_mask.to(device)
+        activations_arr = []
+        with torch.no_grad():
+            for bidx in tqdm(range(0, len(filtered_texts), batch_size), desc="Inference"):
+                batch = filtered_texts[bidx:bidx+batch_size]
+                tokenized = tokenizer(batch, padding="longest", return_tensors="pt",
+                                      max_length=max_length, truncation=True)
+                input_ids = tokenized.input_ids.to(device)
+                attention_mask = tokenized.attention_mask.to(device)
 
-            out = model(input_ids=input_ids, attention_mask=attention_mask)
+                out = model(input_ids=input_ids, attention_mask=attention_mask)
 
-            last_indices = attention_mask.sum(dim=1) - 1
-            batch_indices = torch.arange(input_ids.shape[0])
-            activations = out.logits[batch_indices, last_indices, ...]
-            activations_arr.append(activations.cpu().numpy())
+                last_indices = attention_mask.sum(dim=1) - 1
+                batch_indices = torch.arange(input_ids.shape[0])
+                activations = out.logits[batch_indices, last_indices, ...]
+                activations_arr.append(activations.cpu().numpy())
+                del out, input_ids, attention_mask
+    finally:
+        del model
+        torch.cuda.empty_cache()
 
-    del model
-    torch.cuda.empty_cache()
+    delete_cached_revision(model_name, revision)
 
     all_activations = np.vstack(activations_arr)
     eigen = powerlaw.get_eigenspectrum(all_activations)

@@ -17,6 +17,22 @@ def prefetch_checkpoint(model_name, revision):
         pass
 
 
+def delete_cached_revision(model_name, revision):
+    """Remove a specific revision from the HF cache to free disk space."""
+    try:
+        from huggingface_hub import scan_cache_dir
+        cache_info = scan_cache_dir()
+        for repo in cache_info.repos:
+            if repo.repo_id == model_name:
+                for rev in repo.revisions:
+                    if any(ref == revision for ref in rev.refs):
+                        strategy = cache_info.delete_revisions(rev.commit_hash)
+                        strategy.execute()
+                        return
+    except Exception as e:
+        print(f"Warning: could not clean cache for {revision}: {e}")
+
+
 def compute_metrics_for_checkpoint(model_name, revision, filtered_texts,
                                    max_length, batch_size):
     print(f"Running model {model_name}/{revision}")
@@ -28,33 +44,38 @@ def compute_metrics_for_checkpoint(model_name, revision, filtered_texts,
         return None
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name, revision=revision,
-        torch_dtype=torch.float16, trust_remote_code=True
-    ).to(device)
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_name, revision=revision,
-        trust_remote_code=True
-    )
+    model = None
+    try:
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name, revision=revision,
+            torch_dtype=torch.float16, trust_remote_code=True
+        ).to(device)
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_name, revision=revision,
+            trust_remote_code=True
+        )
 
-    activations_arr = []
-    for bidx in tqdm(range(0, len(filtered_texts), batch_size), desc="Inference"):
-        batch_prompts = filtered_texts[bidx : bidx+batch_size]
-        tokenized = tokenizer(batch_prompts, padding="longest", return_tensors="pt",
-                              max_length=max_length, truncation=True)
-        input_ids = tokenized.input_ids.to(device)
-        attention_mask = tokenized.attention_mask.to(device)
+        activations_arr = []
+        for bidx in tqdm(range(0, len(filtered_texts), batch_size), desc="Inference"):
+            batch_prompts = filtered_texts[bidx : bidx+batch_size]
+            tokenized = tokenizer(batch_prompts, padding="longest", return_tensors="pt",
+                                  max_length=max_length, truncation=True)
+            input_ids = tokenized.input_ids.to(device)
+            attention_mask = tokenized.attention_mask.to(device)
 
-        with torch.no_grad():
-            outputs = model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
+            with torch.no_grad():
+                outputs = model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
 
-        last_indices = attention_mask.sum(dim=1) - 1
-        batch_indices = np.arange(attention_mask.shape[0])
-        activations = outputs.hidden_states[-1][batch_indices, last_indices, ...]
-        activations_arr.append(activations.cpu().numpy())
+            last_indices = attention_mask.sum(dim=1) - 1
+            batch_indices = np.arange(attention_mask.shape[0])
+            activations = outputs.hidden_states[-1][batch_indices, last_indices, ...]
+            activations_arr.append(activations.cpu().numpy())
+            del outputs, input_ids, attention_mask
+    finally:
+        del model
+        torch.cuda.empty_cache()
 
-    del model
-    torch.cuda.empty_cache()
+    delete_cached_revision(model_name, revision)
 
     if not activations_arr:
         print("No valid features extracted.")
