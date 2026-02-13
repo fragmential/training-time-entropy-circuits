@@ -100,13 +100,24 @@ def main(model_name: str = "EleutherAI/pythia-70m-deduped",
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Filter and cap dataset size
-    filtered_texts = [seq["text"] for seq in tqdm(dataset, desc="Filtering")
-                      if len(seq["text"].strip()) > 20
-                      and tokenizer(seq["text"], return_tensors="pt").input_ids.shape[-1] > 10]
-    if len(filtered_texts) > num_samples:
-        filtered_texts = filtered_texts[:num_samples]
-    print(f"Using {len(filtered_texts)} sequences")
+    # Filter dataset, caching to disk so subsequent runs skip filtering
+    import json
+    cache_path = os.path.join('results', f'filtered_texts_{dataset_name}_{num_samples}.json')
+    if os.path.exists(cache_path):
+        with open(cache_path) as f:
+            filtered_texts = json.load(f)
+        print(f"Loaded {len(filtered_texts)} cached sequences from {cache_path}")
+    else:
+        filtered_texts = []
+        for seq in tqdm(dataset, desc="Filtering"):
+            text = seq["text"]
+            if len(text.strip()) > 20 and tokenizer(text, return_tensors="pt").input_ids.shape[-1] > 10:
+                filtered_texts.append(text)
+                if len(filtered_texts) >= num_samples:
+                    break
+        with open(cache_path, 'w') as f:
+            json.dump(filtered_texts, f)
+        print(f"Filtered and cached {len(filtered_texts)} sequences to {cache_path}")
 
     executor = ThreadPoolExecutor(max_workers=1)
 

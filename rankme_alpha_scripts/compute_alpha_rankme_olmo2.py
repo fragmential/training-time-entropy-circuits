@@ -17,8 +17,8 @@ def prefetch_checkpoint(model_name, revision):
         pass
 
 
-def compute_metrics_for_checkpoint(model_name, revision, dataset, dataset_content_key,
-                                   min_length, max_length, batch_size, num_samples):
+def compute_metrics_for_checkpoint(model_name, revision, filtered_texts,
+                                   max_length, batch_size):
     print(f"Running model {model_name}/{revision}")
 
     try:
@@ -27,29 +27,23 @@ def compute_metrics_for_checkpoint(model_name, revision, dataset, dataset_conten
         print(f"Could not parse revision {revision} for model {model_name}\n{e}")
         return None
 
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     model = AutoModelForCausalLM.from_pretrained(
         model_name, revision=revision,
-        torch_dtype=torch.float16,
-        device_map="auto", trust_remote_code=True
-    )
+        torch_dtype=torch.float16, trust_remote_code=True
+    ).to(device)
     tokenizer = AutoTokenizer.from_pretrained(
         model_name, revision=revision,
         trust_remote_code=True
     )
 
-    filtered_dataset = [s for s in tqdm(dataset[dataset_content_key], desc="Filtering")
-                        if tokenizer(s, return_tensors="pt").input_ids.shape[-1] > min_length]
-    if len(filtered_dataset) > num_samples:
-        filtered_dataset = filtered_dataset[:num_samples]
-    print(f"Using {len(filtered_dataset)} sequences")
-
     activations_arr = []
-    for bidx in tqdm(range(0, len(filtered_dataset), batch_size), desc="Inference"):
-        batch_prompts = filtered_dataset[bidx : bidx+batch_size]
+    for bidx in tqdm(range(0, len(filtered_texts), batch_size), desc="Inference"):
+        batch_prompts = filtered_texts[bidx : bidx+batch_size]
         tokenized = tokenizer(batch_prompts, padding="longest", return_tensors="pt",
                               max_length=max_length, truncation=True)
-        input_ids = tokenized.input_ids.to(model.device)
-        attention_mask = tokenized.attention_mask.to(model.device)
+        input_ids = tokenized.input_ids.to(device)
+        attention_mask = tokenized.attention_mask.to(device)
 
         with torch.no_grad():
             outputs = model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
@@ -145,7 +139,27 @@ def run_all_checkpoints(model_name="allenai/OLMo-1B", dataset_name="fineweb",
     completed = set(res_dict.keys())
     to_process = [s for s in step_nums if s not in completed]
 
-    dataset = fineweb_loader.get_dataset()
+    # Filter dataset, caching to disk so subsequent runs skip filtering
+    import json
+    cache_path = os.path.join('results', f'filtered_texts_{dataset_name}_{num_samples}.json')
+    if os.path.exists(cache_path):
+        with open(cache_path) as f:
+            filtered_texts = json.load(f)
+        print(f"Loaded {len(filtered_texts)} cached sequences from {cache_path}")
+    else:
+        dataset = fineweb_loader.get_dataset()
+        first_rev = checkpoint_map[to_process[0]] if to_process else list(checkpoint_map.values())[0]
+        tokenizer = AutoTokenizer.from_pretrained(model_name, revision=first_rev, trust_remote_code=True)
+        filtered_texts = []
+        for text in tqdm(dataset[dataset_content_key], desc="Filtering"):
+            if tokenizer(text, return_tensors="pt").input_ids.shape[-1] > min_length:
+                filtered_texts.append(text)
+                if len(filtered_texts) >= num_samples:
+                    break
+        with open(cache_path, 'w') as f:
+            json.dump(filtered_texts, f)
+        print(f"Filtered and cached {len(filtered_texts)} sequences to {cache_path}")
+
     executor = ThreadPoolExecutor(max_workers=1)
 
     print(f"Processing {len(to_process)} remaining checkpoints...")
@@ -158,9 +172,8 @@ def run_all_checkpoints(model_name="allenai/OLMo-1B", dataset_name="fineweb",
             executor.submit(prefetch_checkpoint, model_name, next_rev)
 
         try:
-            result = compute_metrics_for_checkpoint(model_name, revision, dataset,
-                                                    dataset_content_key, min_length,
-                                                    max_length, batch_size, num_samples)
+            result = compute_metrics_for_checkpoint(model_name, revision, filtered_texts,
+                                                    max_length, batch_size)
             if result:
                 res_dict[step] = result
                 tqdm.write(f"Step {step}: rankme={result['rankme']:.3f}, alpha={result['alpha']:.3f}, r2_100={result['r2_100']:.3f}")
