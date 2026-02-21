@@ -1,0 +1,31 @@
+=== Running model: EleutherAI/pythia-2.8b-deduped (array task 10, batch_size 128) ===
+EleutherAI/pythia-2.8b-deduped fineweb
+Subsampled later checkpoints to 50
+Total checkpoints: 58 (8 early + 50 later)
+Loaded 2000 cached sequences from data/cache/filtered_texts_fineweb_2000.json
+Processing 52 remaining checkpoints...
+Step 256: rankme=14.714, alpha=1.935, r2_100=0.992
+Step 512: rankme=46.831, alpha=1.303, r2_100=0.991
+Step 1000: rankme=145.561, alpha=0.923, r2_100=0.997
+Step 3000: rankme=364.467, alpha=0.740, r2_100=0.999
+Step 6000: rankme=443.632, alpha=0.709, r2_100=0.999
+Step 9000: rankme=474.949, alpha=0.697, r2_100=0.998
+Step 12000: rankme=490.401, alpha=0.696, r2_100=0.998
+Step 15000: rankme=497.208, alpha=0.690, r2_100=0.998
+Step 18000: rankme=483.239, alpha=0.693, r2_100=0.997
+Step 21000: rankme=472.735, alpha=0.697, r2_100=0.998
+Step 24000: rankme=472.967, alpha=0.693, r2_100=0.997
+Step 27000: rankme=468.585, alpha=0.691, r2_100=0.996
+Step 29000: rankme=457.524, alpha=0.697, r2_100=0.996
+Step 32000: rankme=448.595, alpha=0.696, r2_100=0.996
+Step 35000: rankme=426.115, alpha=0.701, r2_100=0.996
+Step 38000: rankme=415.632, alpha=0.702, r2_100=0.996
+Step 41000: rankme=408.744, alpha=0.694, r2_100=0.997
+Step 44000: rankme=382.355, alpha=0.713, r2_100=0.996
+Step 47000: rankme=375.528, alpha=0.715, r2_100=0.996
+HF cache API failed for step50000: [Errno 2] No such file or directory: '/gpfs/work5/0/prjs1815/hf_cache/hub/models--EleutherAI--pythia-1b/snapshots/99263b59791b7f99c336c732308d25cc44a35332', trying forced cleanup...
+Step 50000: rankme=356.037, alpha=0.720, r2_100=0.995
+Step 53000: rankme=348.103, alpha=0.723, r2_100=0.996
+Step 56000: rankme=341.494, alpha=0.721, r2_100=0.995
+Step 58000: rankme=336.782, alpha=0.726, r2_100=0.995
+Step 61000: rankme=325.626, alpha=0.731, r2_100=0.995

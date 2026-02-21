@@ -1,0 +1,108 @@
+=== Running model: allenai/OLMo-2-1124-7B with 7b_revisions.txt (array task 1) ===
+Opening checkpoint file: 7b_revisions.txt
+Found 928 checkpoints
+Subsampled to 50 checkpoints
+Loaded 2000 cached sequences from data/cache/filtered_texts_fineweb_2000.json
+Processing 50 remaining checkpoints...
+Running model allenai/OLMo-2-1124-7B/stage1-step150-tokens1B
+Step 150: rankme=21.598, alpha=1.137, r2_100=0.983
+Running model allenai/OLMo-2-1124-7B/stage1-step700-tokens3B
+Error at step 700: CUDA out of memory. Tried to allocate 12.25 GiB. GPU 0 has a total capacity of 93.09 GiB of which 11.56 GiB is free. Including non-PyTorch memory, this process has 81.51 GiB memory in use. Of the allocated memory 74.19 GiB is allocated by PyTorch, and 6.66 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step900-tokens4B
+Error at step 900: CUDA out of memory. Tried to allocate 1024.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 543.00 MiB is free. Including non-PyTorch memory, this process has 92.55 GiB memory in use. Of the allocated memory 84.79 GiB is allocated by PyTorch, and 7.10 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step2000-tokens9B
+Error at step 2000: CUDA out of memory. Tried to allocate 1.34 GiB. GPU 0 has a total capacity of 93.09 GiB of which 893.00 MiB is free. Including non-PyTorch memory, this process has 92.21 GiB memory in use. Of the allocated memory 85.54 GiB is allocated by PyTorch, and 6.00 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step3000-tokens13B
+Error at step 3000: CUDA out of memory. Tried to allocate 1024.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 573.00 MiB is free. Including non-PyTorch memory, this process has 92.52 GiB memory in use. Of the allocated memory 88.91 GiB is allocated by PyTorch, and 2.94 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step5000-tokens21B
+Error at step 5000: CUDA out of memory. Tried to allocate 86.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 3.00 MiB is free. Including non-PyTorch memory, this process has 93.07 GiB memory in use. Of the allocated memory 91.58 GiB is allocated by PyTorch, and 850.27 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step7000-tokens30B
+Error at step 7000: CUDA out of memory. Tried to allocate 86.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 3.00 MiB is free. Including non-PyTorch memory, this process has 93.07 GiB memory in use. Of the allocated memory 91.58 GiB is allocated by PyTorch, and 850.27 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step10000-tokens42B
+Error at step 10000: CUDA out of memory. Tried to allocate 86.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 3.00 MiB is free. Including non-PyTorch memory, this process has 93.07 GiB memory in use. Of the allocated memory 91.58 GiB is allocated by PyTorch, and 850.27 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step30000-tokens126B
+Error at step 30000: CUDA out of memory. Tried to allocate 86.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 3.00 MiB is free. Including non-PyTorch memory, this process has 93.07 GiB memory in use. Of the allocated memory 91.58 GiB is allocated by PyTorch, and 850.27 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step50000-tokens210B
+Error at step 50000: CUDA out of memory. Tried to allocate 86.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 3.00 MiB is free. Including non-PyTorch memory, this process has 93.07 GiB memory in use. Of the allocated memory 91.58 GiB is allocated by PyTorch, and 850.27 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step70000-tokens294B
+Error at step 70000: CUDA out of memory. Tried to allocate 86.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 3.00 MiB is free. Including non-PyTorch memory, this process has 93.07 GiB memory in use. Of the allocated memory 91.58 GiB is allocated by PyTorch, and 850.27 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step90000-tokens378B
+Error at step 90000: CUDA out of memory. Tried to allocate 1024.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 93.00 MiB is free. Including non-PyTorch memory, this process has 92.99 GiB memory in use. Of the allocated memory 88.85 GiB is allocated by PyTorch, and 3.47 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step120000-tokens504B
+Error at step 120000: CUDA out of memory. Tried to allocate 1024.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 797.00 MiB is free. Including non-PyTorch memory, this process has 92.30 GiB memory in use. Of the allocated memory 90.41 GiB is allocated by PyTorch, and 1.22 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step140000-tokens588B
+Error at step 140000: CUDA out of memory. Tried to allocate 86.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 27.00 MiB is free. Including non-PyTorch memory, this process has 93.05 GiB memory in use. Of the allocated memory 91.42 GiB is allocated by PyTorch, and 984.73 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step170000-tokens714B
+Error at step 170000: CUDA out of memory. Tried to allocate 86.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 27.00 MiB is free. Including non-PyTorch memory, this process has 93.05 GiB memory in use. Of the allocated memory 91.42 GiB is allocated by PyTorch, and 984.73 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step190000-tokens797B
+Error at step 190000: CUDA out of memory. Tried to allocate 86.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 27.00 MiB is free. Including non-PyTorch memory, this process has 93.05 GiB memory in use. Of the allocated memory 91.42 GiB is allocated by PyTorch, and 984.73 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step210000-tokens881B
+Error at step 210000: CUDA out of memory. Tried to allocate 86.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 27.00 MiB is free. Including non-PyTorch memory, this process has 93.05 GiB memory in use. Of the allocated memory 91.42 GiB is allocated by PyTorch, and 984.73 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step230000-tokens965B
+Error at step 230000: CUDA out of memory. Tried to allocate 86.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 27.00 MiB is free. Including non-PyTorch memory, this process has 93.05 GiB memory in use. Of the allocated memory 91.42 GiB is allocated by PyTorch, and 984.73 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step250000-tokens1049B
+Error at step 250000: CUDA out of memory. Tried to allocate 86.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 27.00 MiB is free. Including non-PyTorch memory, this process has 93.05 GiB memory in use. Of the allocated memory 91.42 GiB is allocated by PyTorch, and 984.73 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step270000-tokens1133B
+Error at step 270000: CUDA out of memory. Tried to allocate 86.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 27.00 MiB is free. Including non-PyTorch memory, this process has 93.05 GiB memory in use. Of the allocated memory 91.42 GiB is allocated by PyTorch, and 984.73 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step290000-tokens1217B
+Error at step 290000: CUDA out of memory. Tried to allocate 1024.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 27.00 MiB is free. Including non-PyTorch memory, this process has 93.05 GiB memory in use. Of the allocated memory 87.92 GiB is allocated by PyTorch, and 4.47 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step320000-tokens1343B
+Error at step 320000: CUDA out of memory. Tried to allocate 1024.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 731.00 MiB is free. Including non-PyTorch memory, this process has 92.36 GiB memory in use. Of the allocated memory 87.79 GiB is allocated by PyTorch, and 3.91 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step340000-tokens1427B
+Error at step 340000: CUDA out of memory. Tried to allocate 1024.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 409.00 MiB is free. Including non-PyTorch memory, this process has 92.68 GiB memory in use. Of the allocated memory 88.35 GiB is allocated by PyTorch, and 3.66 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step360000-tokens1510B
+Error at step 360000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step380000-tokens1594B
+Error at step 380000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step400000-tokens1678B
+Error at step 400000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step420000-tokens1762B
+Error at step 420000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step440000-tokens1846B
+Error at step 440000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step470000-tokens1972B
+Error at step 470000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step490000-tokens2056B
+Error at step 490000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step510000-tokens2140B
+Error at step 510000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step530000-tokens2223B
+Error at step 530000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step550000-tokens2307B
+Error at step 550000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step570000-tokens2391B
+Error at step 570000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step590000-tokens2475B
+Error at step 590000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step620000-tokens2601B
+Error at step 620000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step640000-tokens2685B
+Error at step 640000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step660000-tokens2769B
+Error at step 660000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step680000-tokens2853B
+Error at step 680000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step700000-tokens2937B
+Error at step 700000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step720000-tokens3020B
+Error at step 720000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step740000-tokens3104B
+Error at step 740000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step770000-tokens3230B
+Error at step 770000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step790000-tokens3314B
+Error at step 790000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step810000-tokens3398B
+Error at step 810000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step830000-tokens3482B
+Error at step 830000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step850000-tokens3566B
+Error at step 850000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step870000-tokens3650B
+Error at step 870000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step890000-tokens3733B
+Error at step 890000: Data processing error: CAS service error : IO Error: Disk quota exceeded (os error 122)
+Running model allenai/OLMo-2-1124-7B/stage1-step920000-tokens3859B
+Error at step 920000: [Errno 122] Disk quota exceeded: '/projects/prjs1815/hf_cache/hub/models--allenai--OLMo-2-1124-7B/snapshots/ace10fa150b9bf06c3d9119ad42be2bd3e7797a6'
+Completed! Results saved to results/results_OLMo-2-1124-7B.npy
+=== Done: allenai/OLMo-2-1124-7B ===

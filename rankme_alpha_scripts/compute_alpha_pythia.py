@@ -1,4 +1,4 @@
-import os, sys, torch, numpy as np
+import gc, os, sys, torch, numpy as np
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 from transformers import GPTNeoXForCausalLM, AutoTokenizer
@@ -21,16 +21,57 @@ def prefetch_checkpoint(model_name, step_num):
 
 def delete_cached_revision(model_name, revision):
     """Remove a specific revision from the HF cache to free disk space."""
+    _force_delete_cached_revision(model_name, revision)
+
+
+def _force_delete_cached_revision(model_name, revision):
+    """Directly remove snapshot, ref, and orphaned blobs.
+    Uses inodes to track references (works with both symlinks and hardlinks)."""
+    import shutil
+    hf_home = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
+    model_cache = os.path.join(hf_home, "hub", f"models--{model_name.replace('/', '--')}")
+    if not os.path.isdir(model_cache):
+        return
+
+    ref_path = os.path.join(model_cache, "refs", revision)
+    if not os.path.exists(ref_path):
+        return
+
     try:
-        from huggingface_hub import scan_cache_dir
-        cache_info = scan_cache_dir()
-        for repo in cache_info.repos:
-            if repo.repo_id == model_name:
-                for rev in repo.revisions:
-                    if any(ref == revision for ref in rev.refs):
-                        strategy = cache_info.delete_revisions(rev.commit_hash)
-                        strategy.execute()
-                        return
+        with open(ref_path) as f:
+            commit_hash = f.read().strip()
+
+        snapshot_dir = os.path.join(model_cache, "snapshots", commit_hash)
+        if os.path.isdir(snapshot_dir):
+            shutil.rmtree(snapshot_dir)
+
+        os.remove(ref_path)
+
+        # Collect inodes still referenced by remaining snapshots
+        snapshots_base = os.path.join(model_cache, "snapshots")
+        referenced_inodes = set()
+        if os.path.isdir(snapshots_base):
+            for snap in os.listdir(snapshots_base):
+                snap_path = os.path.join(snapshots_base, snap)
+                if os.path.isdir(snap_path):
+                    for root, _, files in os.walk(snap_path):
+                        for fname in files:
+                            fpath = os.path.join(root, fname)
+                            try:
+                                referenced_inodes.add(os.stat(fpath).st_ino)
+                            except OSError:
+                                pass
+
+        # Delete orphaned blobs
+        blobs_dir = os.path.join(model_cache, "blobs")
+        if os.path.isdir(blobs_dir):
+            for fname in os.listdir(blobs_dir):
+                blob_path = os.path.join(blobs_dir, fname)
+                try:
+                    if os.stat(blob_path).st_ino not in referenced_inodes:
+                        os.remove(blob_path)
+                except OSError:
+                    pass
     except Exception as e:
         print(f"Warning: could not clean cache for {revision}: {e}")
 
@@ -61,13 +102,13 @@ def get_metrics(model_name: str, step_num: int,
                 last_indices = attention_mask.sum(dim=1) - 1
                 batch_indices = torch.arange(input_ids.shape[0])
                 activations = out.logits[batch_indices, last_indices, ...]
-                activations_arr.append(activations.cpu().numpy())
-                del out, input_ids, attention_mask
+                activations_arr.append(activations.float().cpu().numpy())
+                del out, activations, input_ids, attention_mask
     finally:
         del model
+        gc.collect()
         torch.cuda.empty_cache()
-
-    delete_cached_revision(model_name, revision)
+        delete_cached_revision(model_name, revision)
 
     all_activations = np.vstack(activations_arr)
     eigen = powerlaw.get_eigenspectrum(all_activations)
@@ -96,13 +137,17 @@ def main(model_name: str = "EleutherAI/pythia-70m-deduped",
     dataset = fineweb_loader.get_dataset()
 
     # step_nums = [0,1,2,4,8,16,32,64,128,256,512] + list(np.arange(1000,143000+1,10000))
-    step_nums = [0,8,16,32,64,128,256,512] + list(np.arange(1000,143000+1,1000))
+    early_steps = [0,8,16,32,64,128,256,512]
+    later_steps = list(np.arange(1000,143000+1,1000))
 
-    # Uniformly subsample to max_checkpoints if needed
-    if max_checkpoints and len(step_nums) > max_checkpoints:
-        indices = np.linspace(0, len(step_nums) - 1, max_checkpoints, dtype=int)
-        step_nums = [step_nums[i] for i in indices]
-        print(f"Subsampled to {len(step_nums)} checkpoints")
+    # Subsample only the later section to max_checkpoints
+    if max_checkpoints and len(later_steps) > max_checkpoints:
+        indices = np.linspace(0, len(later_steps) - 1, max_checkpoints, dtype=int)
+        later_steps = [later_steps[i] for i in indices]
+        print(f"Subsampled later checkpoints to {len(later_steps)}")
+
+    step_nums = early_steps + later_steps
+    print(f"Total checkpoints: {len(step_nums)} ({len(early_steps)} early + {len(later_steps)} later)")
 
     os.makedirs('results', exist_ok=True)
     tmp_save_fname = os.path.join('results', f'results_{short_name}_temp.npy')
@@ -126,7 +171,7 @@ def main(model_name: str = "EleutherAI/pythia-70m-deduped",
     to_process = [s for s in step_nums if s not in completed]
 
     # Load tokenizer once for filtering (all Pythia checkpoints share the same tokenizer)
-    tokenizer = AutoTokenizer.from_pretrained(model_name, revision=f"step{to_process[0]}" if to_process else "step0")
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 

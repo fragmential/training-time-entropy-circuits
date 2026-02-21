@@ -1,0 +1,51 @@
+=== Running model: EleutherAI/pythia-12b (array task 12, batch_size 128) ===
+EleutherAI/pythia-12b fineweb
+Subsampled later checkpoints to 50
+Total checkpoints: 58 (8 early + 50 later)
+Loaded 2000 cached sequences from data/cache/filtered_texts_fineweb_2000.json
+Processing 43 remaining checkpoints...
+Step 21000: rankme=527.741, alpha=0.700, r2_100=0.998
+Step 24000: rankme=549.683, alpha=0.687, r2_100=0.997
+Step 27000: rankme=568.242, alpha=0.673, r2_100=0.997
+Step 29000: rankme=558.847, alpha=0.679, r2_100=0.997
+Step 32000: rankme=536.187, alpha=0.680, r2_100=0.997
+Step 35000: rankme=631.810, alpha=0.640, r2_100=0.993
+Step 38000: rankme=567.640, alpha=0.662, r2_100=0.997
+Step 41000: rankme=569.365, alpha=0.672, r2_100=0.997
+Step 44000: rankme=649.210, alpha=0.605, r2_100=0.993
+Step 47000: rankme=546.355, alpha=0.680, r2_100=0.995
+Step 50000: rankme=387.404, alpha=0.748, r2_100=0.995
+Step 53000: rankme=524.327, alpha=0.682, r2_100=0.996
+Step 56000: rankme=505.824, alpha=0.681, r2_100=0.995
+Step 58000: rankme=225.826, alpha=0.860, r2_100=0.992
+Step 61000: rankme=503.606, alpha=0.684, r2_100=0.994
+Step 64000: rankme=485.900, alpha=0.685, r2_100=0.996
+Step 67000: rankme=462.619, alpha=0.699, r2_100=0.995
+Step 70000: rankme=452.794, alpha=0.694, r2_100=0.995
+Step 73000: rankme=449.158, alpha=0.700, r2_100=0.995
+Step 76000: rankme=424.634, alpha=0.706, r2_100=0.995
+Step 79000: rankme=415.218, alpha=0.717, r2_100=0.994
+Step 82000: rankme=397.463, alpha=0.720, r2_100=0.995
+Step 85000: rankme=382.883, alpha=0.732, r2_100=0.994
+Step 87000: rankme=385.620, alpha=0.730, r2_100=0.995
+Step 90000: rankme=356.997, alpha=0.747, r2_100=0.994
+Step 93000: rankme=348.754, alpha=0.751, r2_100=0.994
+Step 96000: rankme=335.054, alpha=0.761, r2_100=0.993
+Step 99000: rankme=322.554, alpha=0.769, r2_100=0.993
+Step 102000: rankme=313.915, alpha=0.776, r2_100=0.993
+Step 105000: rankme=299.964, alpha=0.788, r2_100=0.992
+Step 108000: rankme=290.401, alpha=0.793, r2_100=0.992
+Step 111000: rankme=278.822, alpha=0.806, r2_100=0.992
+Step 114000: rankme=268.121, alpha=0.814, r2_100=0.992
+Step 116000: rankme=260.737, alpha=0.824, r2_100=0.992
+Step 119000: rankme=258.343, alpha=0.824, r2_100=0.991
+Step 122000: rankme=250.959, alpha=0.836, r2_100=0.992
+Step 125000: rankme=248.852, alpha=0.842, r2_100=0.991
+Step 128000: rankme=239.548, alpha=0.847, r2_100=0.991
+Step 131000: rankme=239.844, alpha=0.849, r2_100=0.992
+Step 134000: rankme=239.213, alpha=0.849, r2_100=0.991
+Step 137000: rankme=233.628, alpha=0.854, r2_100=0.992
+Step 140000: rankme=228.472, alpha=0.858, r2_100=0.992
+Step 143000: rankme=225.826, alpha=0.860, r2_100=0.992
+Saving results to results/results_pythia-12b.npy
+=== Done: EleutherAI/pythia-12b ===

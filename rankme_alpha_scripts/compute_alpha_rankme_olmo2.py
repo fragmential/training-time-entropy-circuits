@@ -1,4 +1,4 @@
-import os, sys, torch, numpy as np
+import gc, os, sys, torch, numpy as np
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -19,22 +19,63 @@ def prefetch_checkpoint(model_name, revision):
 
 def delete_cached_revision(model_name, revision):
     """Remove a specific revision from the HF cache to free disk space."""
+    _force_delete_cached_revision(model_name, revision)
+
+
+def _force_delete_cached_revision(model_name, revision):
+    """Directly remove snapshot, ref, and orphaned blobs.
+    Uses inodes to track references (works with both symlinks and hardlinks)."""
+    import shutil
+    hf_home = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
+    model_cache = os.path.join(hf_home, "hub", f"models--{model_name.replace('/', '--')}")
+    if not os.path.isdir(model_cache):
+        return
+
+    ref_path = os.path.join(model_cache, "refs", revision)
+    if not os.path.exists(ref_path):
+        return
+
     try:
-        from huggingface_hub import scan_cache_dir
-        cache_info = scan_cache_dir()
-        for repo in cache_info.repos:
-            if repo.repo_id == model_name:
-                for rev in repo.revisions:
-                    if any(ref == revision for ref in rev.refs):
-                        strategy = cache_info.delete_revisions(rev.commit_hash)
-                        strategy.execute()
-                        return
+        with open(ref_path) as f:
+            commit_hash = f.read().strip()
+
+        snapshot_dir = os.path.join(model_cache, "snapshots", commit_hash)
+        if os.path.isdir(snapshot_dir):
+            shutil.rmtree(snapshot_dir)
+
+        os.remove(ref_path)
+
+        # Collect inodes still referenced by remaining snapshots
+        snapshots_base = os.path.join(model_cache, "snapshots")
+        referenced_inodes = set()
+        if os.path.isdir(snapshots_base):
+            for snap in os.listdir(snapshots_base):
+                snap_path = os.path.join(snapshots_base, snap)
+                if os.path.isdir(snap_path):
+                    for root, _, files in os.walk(snap_path):
+                        for fname in files:
+                            fpath = os.path.join(root, fname)
+                            try:
+                                referenced_inodes.add(os.stat(fpath).st_ino)
+                            except OSError:
+                                pass
+
+        # Delete orphaned blobs
+        blobs_dir = os.path.join(model_cache, "blobs")
+        if os.path.isdir(blobs_dir):
+            for fname in os.listdir(blobs_dir):
+                blob_path = os.path.join(blobs_dir, fname)
+                try:
+                    if os.stat(blob_path).st_ino not in referenced_inodes:
+                        os.remove(blob_path)
+                except OSError:
+                    pass
     except Exception as e:
         print(f"Warning: could not clean cache for {revision}: {e}")
 
 
 def compute_metrics_for_checkpoint(model_name, revision, filtered_texts,
-                                   max_length, batch_size):
+                                   tokenizer, max_length, batch_size):
     print(f"Running model {model_name}/{revision}")
 
     try:
@@ -50,10 +91,6 @@ def compute_metrics_for_checkpoint(model_name, revision, filtered_texts,
             model_name, revision=revision,
             torch_dtype=torch.bfloat16, trust_remote_code=True
         ).to(device)
-        tokenizer = AutoTokenizer.from_pretrained(
-            model_name, revision=revision,
-            trust_remote_code=True
-        )
 
         activations_arr = []
         for bidx in tqdm(range(0, len(filtered_texts), batch_size), desc="Inference"):
@@ -65,17 +102,16 @@ def compute_metrics_for_checkpoint(model_name, revision, filtered_texts,
 
             with torch.no_grad():
                 outputs = model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
-
-            last_indices = attention_mask.sum(dim=1) - 1
-            batch_indices = np.arange(attention_mask.shape[0])
-            activations = outputs.hidden_states[-1][batch_indices, last_indices, ...]
-            activations_arr.append(activations.cpu().numpy())
-            del outputs, input_ids, attention_mask
+                last_indices = attention_mask.sum(dim=1) - 1
+                batch_indices = np.arange(attention_mask.shape[0])
+                activations = outputs.hidden_states[-1][batch_indices, last_indices, ...]
+                activations_arr.append(activations.float().cpu().numpy())
+                del outputs, activations, input_ids, attention_mask
     finally:
         del model
+        gc.collect()
         torch.cuda.empty_cache()
-
-    delete_cached_revision(model_name, revision)
+        delete_cached_revision(model_name, revision)
 
     if not activations_arr:
         print("No valid features extracted.")
@@ -132,20 +168,17 @@ def run_all_checkpoints(model_name="allenai/OLMo-1B", dataset_name="fineweb",
     checkpoint_map = get_available_checkpoints(revisions_file)
 
     all_steps = sorted(checkpoint_map.keys())
-    step_nums = []
-    for s in all_steps:
-        if s <= 10000:
-            step_nums.append(s)
-        elif s % 10000 == 0:
-            step_nums.append(s)
+    early_steps = sorted(s for s in all_steps if s <= 10000)
+    later_steps = sorted(s for s in all_steps if s > 10000 and s % 10000 == 0)
 
-    step_nums = sorted(step_nums)
+    # Subsample only the later section to max_checkpoints
+    if max_checkpoints and len(later_steps) > max_checkpoints:
+        indices = np.linspace(0, len(later_steps) - 1, max_checkpoints, dtype=int)
+        later_steps = [later_steps[i] for i in indices]
+        print(f"Subsampled later checkpoints to {len(later_steps)}")
 
-    # Uniformly subsample to max_checkpoints if needed
-    if max_checkpoints and len(step_nums) > max_checkpoints:
-        indices = np.linspace(0, len(step_nums) - 1, max_checkpoints, dtype=int)
-        step_nums = [step_nums[i] for i in indices]
-        print(f"Subsampled to {len(step_nums)} checkpoints")
+    step_nums = early_steps + later_steps
+    print(f"Total checkpoints: {len(step_nums)} ({len(early_steps)} early + {len(later_steps)} later)")
 
     tmp_save = os.path.join('results', f'results_{short_name}_temp.npy')
     final_save = os.path.join('results', f'results_{short_name}.npy')
@@ -189,6 +222,10 @@ def run_all_checkpoints(model_name="allenai/OLMo-1B", dataset_name="fineweb",
             json.dump(filtered_texts, f)
         print(f"Filtered and cached {len(filtered_texts)} sequences to {cache_path}")
 
+    # Load tokenizer once (shared across all revisions)
+    first_rev = checkpoint_map[to_process[0]] if to_process else list(checkpoint_map.values())[0]
+    tokenizer = AutoTokenizer.from_pretrained(model_name, revision=first_rev, trust_remote_code=True)
+
     executor = ThreadPoolExecutor(max_workers=1)
 
     print(f"Processing {len(to_process)} remaining checkpoints...")
@@ -202,7 +239,7 @@ def run_all_checkpoints(model_name="allenai/OLMo-1B", dataset_name="fineweb",
 
         try:
             result = compute_metrics_for_checkpoint(model_name, revision, filtered_texts,
-                                                    max_length, batch_size)
+                                                    tokenizer, max_length, batch_size)
             if result:
                 res_dict[step] = result
                 tqdm.write(f"Step {step}: rankme={result['rankme']:.3f}, alpha={result['alpha']:.3f}, r2_100={result['r2_100']:.3f}")

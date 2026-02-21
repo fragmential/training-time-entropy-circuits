@@ -26,17 +26,26 @@ MODELS=(
 )
 
 MODEL_NAME="${MODELS[$SLURM_ARRAY_TASK_ID]}"
-echo "=== Running model: ${MODEL_NAME} (array task ${SLURM_ARRAY_TASK_ID}) ==="
+
+# # Use batch_size 64 for models > 6.9B, 128 for smaller
+# if [[ "${MODEL_NAME}" == *"6.9b"* ]] || [[ "${MODEL_NAME}" == *"12b"* ]]; then
+#     BATCH_SIZE=64
+# else
+#     BATCH_SIZE=128
+# fi
+BATCH_SIZE=128 # fuck it we ball
+
+echo "=== Running model: ${MODEL_NAME} (array task ${SLURM_ARRAY_TASK_ID}, batch_size ${BATCH_SIZE}) ==="
 
 module purge
 
 export HF_HOME="/projects/prjs1815/hf_cache"
 cd "$HOME/Tracing-representation-geometry-reproduction" || exit 1
 
-uv run rankme_alpha_scripts/compute_alpha_pythia.py \
+time uv run rankme_alpha_scripts/compute_alpha_pythia.py \
     --model_name "${MODEL_NAME}" \
     --num_samples 2000 \
     --max_length 512 \
-    --batch_size 128
+    --batch_size "${BATCH_SIZE}"
 
 echo "=== Done: ${MODEL_NAME} ==="

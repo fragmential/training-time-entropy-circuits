@@ -1,0 +1,79 @@
+=== Running model: allenai/OLMo-2-1124-7B with 7b_revisions.txt (array task 1, batch_size 64) ===
+Opening checkpoint file: 7b_revisions.txt
+Found 928 checkpoints
+Subsampled to 50 checkpoints
+Loaded 2000 cached sequences from data/cache/filtered_texts_fineweb_2000.json
+Processing 40 remaining checkpoints...
+Running model allenai/OLMo-2-1124-7B/stage1-step50000-tokens210B
+  GPU before model load: 0.00 GB
+  GPU after model load: 14.60 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 22.78 GB
+  GPU after cleanup: 14.63 GB
+  GPU before finally cleanup: 14.63 GB
+  GPU after finally cleanup: 0.03 GB
+Step 50000: rankme=465.651, alpha=0.795, r2_100=0.991
+Running model allenai/OLMo-2-1124-7B/stage1-step70000-tokens294B
+  GPU before model load: 0.03 GB
+  GPU after model load: 14.63 GB

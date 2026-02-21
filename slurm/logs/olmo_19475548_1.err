@@ -1,0 +1,37 @@
+Could not set the permissions on the file '/projects/prjs1815/hf_cache/hub/datasets--HuggingFaceFW--fineweb/blobs/501c2f8b14dc16857301f9e05f8a6587726261bc.incomplete'. Error: [Errno 2] No such file or directory: '/projects/prjs1815/hf_cache/hub/datasets--HuggingFaceFW--fineweb/blobs/501c2f8b14dc16857301f9e05f8a6587726261bc.incomplete'.
+Continuing without setting permissions.
+Traceback (most recent call last):
+  File "/gpfs/home2/dcampregher1/Tracing-representation-geometry-reproduction/rankme_alpha_scripts/compute_alpha_rankme_olmo2.py", line 227, in <module>
+    CLI(run_all_checkpoints)
+    ~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/gpfs/home2/dcampregher1/Tracing-representation-geometry-reproduction/.venv/lib/python3.14/site-packages/jsonargparse/_cli.py", line 27, in CLI
+    return auto_cli(*args, _stacklevel=3, **kwargs)
+  File "/gpfs/home2/dcampregher1/Tracing-representation-geometry-reproduction/.venv/lib/python3.14/site-packages/jsonargparse/_cli.py", line 106, in auto_cli
+    return _run_component(components, init)
+  File "/gpfs/home2/dcampregher1/Tracing-representation-geometry-reproduction/.venv/lib/python3.14/site-packages/jsonargparse/_cli.py", line 227, in _run_component
+    return component(**cfg)
+  File "/gpfs/home2/dcampregher1/Tracing-representation-geometry-reproduction/rankme_alpha_scripts/compute_alpha_rankme_olmo2.py", line 179, in run_all_checkpoints
+    dataset = fineweb_loader.get_dataset()
+  File "/gpfs/home2/dcampregher1/Tracing-representation-geometry-reproduction/data/fineweb_loader.py", line 28, in get_dataset
+    dataset = load_dataset(
+        "HuggingFaceFW/fineweb",
+        name="sample-10BT",
+        split=f"{split}[:{num_samples}]"
+    )
+  File "/gpfs/home2/dcampregher1/Tracing-representation-geometry-reproduction/.venv/lib/python3.14/site-packages/datasets/load.py", line 1488, in load_dataset
+    builder_instance = load_dataset_builder(
+        path=path,
+    ...<10 lines>...
+        **config_kwargs,
+    )
+  File "/gpfs/home2/dcampregher1/Tracing-representation-geometry-reproduction/.venv/lib/python3.14/site-packages/datasets/load.py", line 1133, in load_dataset_builder
+    dataset_module = dataset_module_factory(
+        path,
+    ...<5 lines>...
+        cache_dir=cache_dir,
+    )
+  File "/gpfs/home2/dcampregher1/Tracing-representation-geometry-reproduction/.venv/lib/python3.14/site-packages/datasets/load.py", line 1028, in dataset_module_factory
+    raise FileNotFoundError(
+    ...<2 lines>...
+    ) from None
+FileNotFoundError: Couldn't find any data file at /gpfs/home2/dcampregher1/Tracing-representation-geometry-reproduction/HuggingFaceFW/fineweb. Couldn't find 'HuggingFaceFW/fineweb' on the Hugging Face Hub either: FileNotFoundError: [Errno 2] No such file or directory: '/projects/prjs1815/hf_cache/hub/datasets--HuggingFaceFW--fineweb/blobs/501c2f8b14dc16857301f9e05f8a6587726261bc.incomplete'

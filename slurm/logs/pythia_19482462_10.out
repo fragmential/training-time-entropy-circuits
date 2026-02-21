@@ -1,0 +1,36 @@
+=== Running model: EleutherAI/pythia-2.8b-deduped (array task 10, batch_size 128) ===
+EleutherAI/pythia-2.8b-deduped fineweb
+Subsampled later checkpoints to 50
+Total checkpoints: 58 (8 early + 50 later)
+Loaded 2000 cached sequences from data/cache/filtered_texts_fineweb_2000.json
+Processing 28 remaining checkpoints...
+Step 64000: rankme=314.302, alpha=0.742, r2_100=0.995
+Step 67000: rankme=305.922, alpha=0.746, r2_100=0.995
+Step 70000: rankme=311.041, alpha=0.745, r2_100=0.995
+Step 73000: rankme=305.392, alpha=0.756, r2_100=0.994
+Step 76000: rankme=300.841, alpha=0.753, r2_100=0.994
+Step 79000: rankme=288.968, alpha=0.765, r2_100=0.995
+Step 82000: rankme=282.285, alpha=0.766, r2_100=0.994
+Step 85000: rankme=273.312, alpha=0.779, r2_100=0.995
+Step 87000: rankme=279.226, alpha=0.778, r2_100=0.995
+Step 90000: rankme=259.370, alpha=0.790, r2_100=0.995
+Step 93000: rankme=267.449, alpha=0.794, r2_100=0.995
+Step 96000: rankme=264.550, alpha=0.796, r2_100=0.995
+Step 99000: rankme=264.404, alpha=0.803, r2_100=0.994
+Step 102000: rankme=256.548, alpha=0.811, r2_100=0.995
+Step 105000: rankme=253.273, alpha=0.817, r2_100=0.994
+Step 108000: rankme=255.402, alpha=0.822, r2_100=0.994
+Step 111000: rankme=249.098, alpha=0.831, r2_100=0.995
+Step 114000: rankme=249.536, alpha=0.835, r2_100=0.994
+Step 116000: rankme=246.342, alpha=0.841, r2_100=0.994
+Step 119000: rankme=244.982, alpha=0.843, r2_100=0.994
+Step 122000: rankme=241.328, alpha=0.850, r2_100=0.994
+Step 125000: rankme=239.597, alpha=0.856, r2_100=0.995
+Step 128000: rankme=239.757, alpha=0.855, r2_100=0.995
+Step 131000: rankme=240.254, alpha=0.857, r2_100=0.995
+Step 134000: rankme=236.178, alpha=0.861, r2_100=0.995
+Step 137000: rankme=235.626, alpha=0.864, r2_100=0.995
+Step 140000: rankme=236.188, alpha=0.868, r2_100=0.995
+Step 143000: rankme=230.019, alpha=0.876, r2_100=0.995
+Saving results to results/results_pythia-2.8b-deduped.npy
+=== Done: EleutherAI/pythia-2.8b-deduped ===

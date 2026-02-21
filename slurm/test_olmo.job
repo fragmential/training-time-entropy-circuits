@@ -17,7 +17,7 @@ module purge
 export HF_HOME="/projects/prjs1815/hf_cache"
 cd "$HOME/Tracing-representation-geometry-reproduction" || exit 1
 
-uv run rankme_alpha_scripts/compute_alpha_rankme_olmo2.py \
+time uv run rankme_alpha_scripts/compute_alpha_rankme_olmo2.py \
     --model_name "${MODEL_NAME}" \
     --revisions_file "${REV_FILE}" \
     --num_samples 100 \

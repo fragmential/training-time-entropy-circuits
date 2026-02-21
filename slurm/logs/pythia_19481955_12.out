@@ -1,0 +1,17 @@
+=== Running model: EleutherAI/pythia-12b (array task 12, batch_size 128) ===
+EleutherAI/pythia-12b fineweb
+Subsampled later checkpoints to 50
+Total checkpoints: 58 (8 early + 50 later)
+Loaded 2000 cached sequences from data/cache/filtered_texts_fineweb_2000.json
+Processing 54 remaining checkpoints...
+Step 64: rankme=18.467, alpha=0.946, r2_100=0.936
+Step 128: rankme=6.377, alpha=1.579, r2_100=0.982
+Step 256: rankme=8.144, alpha=2.014, r2_100=0.999
+Step 512: rankme=20.843, alpha=1.836, r2_100=0.999
+Step 1000: rankme=82.009, alpha=1.168, r2_100=0.998
+Step 3000: rankme=325.207, alpha=0.816, r2_100=1.000
+Step 6000: rankme=426.959, alpha=0.752, r2_100=0.999
+Step 9000: rankme=466.842, alpha=0.729, r2_100=0.999
+Step 12000: rankme=494.728, alpha=0.716, r2_100=0.998
+Step 15000: rankme=516.644, alpha=0.699, r2_100=0.998
+Step 18000: rankme=525.239, alpha=0.695, r2_100=0.999

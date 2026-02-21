@@ -1,0 +1,67 @@
+=== Running model: EleutherAI/pythia-160m-deduped (array task 4, batch_size 128) ===
+EleutherAI/pythia-160m-deduped fineweb
+Subsampled later checkpoints to 50
+Total checkpoints: 58 (8 early + 50 later)
+Loaded 2000 cached sequences from data/cache/filtered_texts_fineweb_2000.json
+Processing 58 remaining checkpoints...
+Step 0: rankme=92.964, alpha=0.722, r2_100=0.984
+Step 8: rankme=98.956, alpha=0.721, r2_100=0.983
+Step 16: rankme=98.417, alpha=0.714, r2_100=0.981
+Warning: could not clean cache for step32: [Errno 2] No such file or directory: '/gpfs/work5/0/prjs1815/hf_cache/hub/models--EleutherAI--pythia-31m/refs/step128'
+Step 32: rankme=16.641, alpha=0.718, r2_100=0.990
+Step 64: rankme=8.660, alpha=1.356, r2_100=0.981
+Step 128: rankme=15.486, alpha=1.620, r2_100=0.995
+Step 256: rankme=25.512, alpha=1.459, r2_100=0.999
+Step 512: rankme=63.818, alpha=1.146, r2_100=0.995
+Step 1000: rankme=122.464, alpha=0.850, r2_100=0.995
+Step 3000: rankme=204.243, alpha=0.718, r2_100=0.999
+Step 6000: rankme=255.913, alpha=0.669, r2_100=0.999
+Step 9000: rankme=251.441, alpha=0.655, r2_100=0.999
+Step 12000: rankme=238.396, alpha=0.651, r2_100=0.999
+Step 15000: rankme=220.957, alpha=0.647, r2_100=0.999
+Step 18000: rankme=209.119, alpha=0.637, r2_100=1.000
+Step 21000: rankme=194.512, alpha=0.647, r2_100=0.999
+Step 24000: rankme=186.216, alpha=0.639, r2_100=0.999
+Step 27000: rankme=180.060, alpha=0.658, r2_100=0.999
+Step 29000: rankme=170.346, alpha=0.666, r2_100=0.999
+Step 32000: rankme=171.007, alpha=0.650, r2_100=0.999
+Step 35000: rankme=161.299, alpha=0.662, r2_100=0.999
+Step 38000: rankme=151.226, alpha=0.669, r2_100=0.999
+Step 41000: rankme=151.582, alpha=0.650, r2_100=0.999
+Step 44000: rankme=142.984, alpha=0.661, r2_100=0.999
+Step 47000: rankme=140.303, alpha=0.659, r2_100=0.999
+Step 50000: rankme=134.971, alpha=0.675, r2_100=0.999
+Step 53000: rankme=134.181, alpha=0.681, r2_100=0.999
+Step 56000: rankme=127.955, alpha=0.690, r2_100=0.999
+Step 58000: rankme=129.595, alpha=0.687, r2_100=0.999
+Step 61000: rankme=127.277, alpha=0.689, r2_100=0.999
+Step 64000: rankme=120.655, alpha=0.698, r2_100=0.999
+Step 67000: rankme=119.586, alpha=0.702, r2_100=0.999
+Step 70000: rankme=125.693, alpha=0.706, r2_100=0.998
+Step 73000: rankme=118.185, alpha=0.714, r2_100=0.999
+Step 76000: rankme=111.637, alpha=0.716, r2_100=0.999
+Step 79000: rankme=116.268, alpha=0.727, r2_100=0.997
+Step 82000: rankme=110.519, alpha=0.735, r2_100=0.998
+Step 85000: rankme=108.248, alpha=0.741, r2_100=0.997
+Step 87000: rankme=107.765, alpha=0.750, r2_100=0.997
+Step 90000: rankme=110.183, alpha=0.745, r2_100=0.998
+Step 93000: rankme=120.460, alpha=0.746, r2_100=0.997
+Step 96000: rankme=135.180, alpha=0.750, r2_100=0.997
+Step 99000: rankme=153.597, alpha=0.745, r2_100=0.999
+Step 102000: rankme=169.587, alpha=0.722, r2_100=0.998
+Step 105000: rankme=191.941, alpha=0.687, r2_100=0.998
+Step 108000: rankme=200.968, alpha=0.659, r2_100=0.998
+Step 111000: rankme=211.748, alpha=0.638, r2_100=0.998
+Step 114000: rankme=229.334, alpha=0.627, r2_100=0.999
+Step 116000: rankme=200.008, alpha=0.629, r2_100=0.998
+Step 119000: rankme=159.650, alpha=0.643, r2_100=0.997
+Step 122000: rankme=166.980, alpha=0.648, r2_100=0.998
+Step 125000: rankme=200.620, alpha=0.628, r2_100=0.999
+Step 128000: rankme=228.652, alpha=0.611, r2_100=0.998
+Step 131000: rankme=222.228, alpha=0.609, r2_100=0.999
+Step 134000: rankme=251.389, alpha=0.631, r2_100=0.999
+Step 137000: rankme=248.446, alpha=0.628, r2_100=0.999
+Step 140000: rankme=243.979, alpha=0.614, r2_100=0.999
+Step 143000: rankme=253.360, alpha=0.613, r2_100=0.998
+Saving results to results/results_pythia-160m-deduped.npy
+=== Done: EleutherAI/pythia-160m-deduped ===

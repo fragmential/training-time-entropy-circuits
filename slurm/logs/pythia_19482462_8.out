@@ -1,0 +1,14 @@
+=== Running model: EleutherAI/pythia-1.4b-deduped (array task 8, batch_size 128) ===
+EleutherAI/pythia-1.4b-deduped fineweb
+Subsampled later checkpoints to 50
+Total checkpoints: 58 (8 early + 50 later)
+Loaded 2000 cached sequences from data/cache/filtered_texts_fineweb_2000.json
+Processing 6 remaining checkpoints...
+Step 128000: rankme=176.835, alpha=0.821, r2_100=0.996
+Step 131000: rankme=173.652, alpha=0.825, r2_100=0.996
+Step 134000: rankme=171.337, alpha=0.826, r2_100=0.996
+Step 137000: rankme=168.037, alpha=0.831, r2_100=0.996
+Step 140000: rankme=169.446, alpha=0.831, r2_100=0.996
+Step 143000: rankme=163.631, alpha=0.837, r2_100=0.996
+Saving results to results/results_pythia-1.4b-deduped.npy
+=== Done: EleutherAI/pythia-1.4b-deduped ===

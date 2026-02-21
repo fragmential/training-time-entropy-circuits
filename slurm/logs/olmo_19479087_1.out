@@ -1,0 +1,333 @@
+=== Running model: allenai/OLMo-2-1124-7B with 7b_revisions.txt (array task 1, batch_size 64) ===
+Opening checkpoint file: 7b_revisions.txt
+Found 928 checkpoints
+Subsampled to 50 checkpoints
+Loaded 2000 cached sequences from data/cache/filtered_texts_fineweb_2000.json
+Processing 44 remaining checkpoints...
+Running model allenai/OLMo-2-1124-7B/stage1-step5000-tokens21B
+  GPU before model load: 0.00 GB
+  GPU after model load: 14.60 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 47.25 GB
+  GPU after cleanup: 14.63 GB
+  GPU after forward (seq_len=512): 22.78 GB
+  GPU after cleanup: 14.63 GB
+  GPU before finally cleanup: 14.63 GB
+  GPU after finally cleanup: 12.99 GB
+Step 5000: rankme=608.824, alpha=0.664, r2_100=0.997
+Running model allenai/OLMo-2-1124-7B/stage1-step7000-tokens30B
+  GPU before model load: 12.99 GB
+  GPU after model load: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 60.20 GB
+  GPU after cleanup: 27.58 GB
+  GPU after forward (seq_len=512): 35.74 GB
+  GPU after cleanup: 27.58 GB
+  GPU before finally cleanup: 27.58 GB
+  GPU after finally cleanup: 25.94 GB
+Step 7000: rankme=655.107, alpha=0.655, r2_100=0.995
+Running model allenai/OLMo-2-1124-7B/stage1-step10000-tokens42B
+  GPU before model load: 25.94 GB
+  GPU after model load: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 73.15 GB
+  GPU after cleanup: 40.54 GB
+  GPU after forward (seq_len=512): 48.69 GB
+  GPU after cleanup: 40.54 GB
+  GPU before finally cleanup: 40.54 GB
+  GPU after finally cleanup: 38.89 GB
+Step 10000: rankme=686.083, alpha=0.648, r2_100=0.995
+Running model allenai/OLMo-2-1124-7B/stage1-step30000-tokens126B
+  GPU before model load: 38.89 GB
+  GPU after model load: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 86.11 GB
+  GPU after cleanup: 53.49 GB
+  GPU after forward (seq_len=512): 61.64 GB
+  GPU after cleanup: 53.49 GB
+  GPU before finally cleanup: 53.49 GB
+  GPU after finally cleanup: 51.85 GB
+Step 30000: rankme=594.644, alpha=0.707, r2_100=0.993
+Running model allenai/OLMo-2-1124-7B/stage1-step50000-tokens210B
+  GPU before model load: 51.85 GB
+  GPU after model load: 66.44 GB
+  GPU before finally cleanup: 92.48 GB
+  GPU after finally cleanup: 92.48 GB
+Error at step 50000: CUDA out of memory. Tried to allocate 6.12 GiB. GPU 0 has a total capacity of 93.09 GiB of which 2.95 GiB is free. Including non-PyTorch memory, this process has 90.12 GiB memory in use. Of the allocated memory 86.13 GiB is allocated by PyTorch, and 3.33 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step70000-tokens294B
+  GPU before model load: 64.80 GB
+  GPU after model load: 79.40 GB
+  GPU before finally cleanup: 94.18 GB
+  GPU after finally cleanup: 94.18 GB
+Error at step 70000: CUDA out of memory. Tried to allocate 512.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 285.00 MiB is free. Including non-PyTorch memory, this process has 92.80 GiB memory in use. Of the allocated memory 88.71 GiB is allocated by PyTorch, and 3.42 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step90000-tokens378B
+  GPU before model load: 82.58 GB
+  GPU after model load: 97.18 GB
+  GPU before finally cleanup: 98.27 GB
+  GPU after finally cleanup: 98.27 GB
+Error at step 90000: CUDA out of memory. Tried to allocate 512.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 107.00 MiB is free. Including non-PyTorch memory, this process has 92.97 GiB memory in use. Of the allocated memory 91.52 GiB is allocated by PyTorch, and 801.99 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step120000-tokens504B
+  GPU before model load: 69.90 GB
+  GPU after model load: 84.50 GB
+  GPU before finally cleanup: 95.79 GB
+  GPU after finally cleanup: 95.79 GB
+Error at step 120000: CUDA out of memory. Tried to allocate 512.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 45.00 MiB is free. Including non-PyTorch memory, this process has 93.03 GiB memory in use. Of the allocated memory 89.96 GiB is allocated by PyTorch, and 2.41 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step140000-tokens588B
+  GPU before model load: 86.34 GB
+  GPU before finally cleanup: 98.23 GB
+  GPU after finally cleanup: 98.23 GB
+Error at step 140000: CUDA out of memory. Tried to allocate 86.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 49.00 MiB is free. Including non-PyTorch memory, this process has 93.03 GiB memory in use. Of the allocated memory 91.48 GiB is allocated by PyTorch, and 903.14 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step190000-tokens797B
+  GPU before model load: 86.34 GB
+  GPU before finally cleanup: 98.23 GB
+  GPU after finally cleanup: 98.23 GB
+Error at step 190000: CUDA out of memory. Tried to allocate 86.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 49.00 MiB is free. Including non-PyTorch memory, this process has 93.03 GiB memory in use. Of the allocated memory 91.48 GiB is allocated by PyTorch, and 903.14 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step210000-tokens881B
+  GPU before model load: 86.34 GB
+  GPU before finally cleanup: 98.23 GB
+  GPU after finally cleanup: 98.23 GB
+Error at step 210000: CUDA out of memory. Tried to allocate 86.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 49.00 MiB is free. Including non-PyTorch memory, this process has 93.03 GiB memory in use. Of the allocated memory 91.48 GiB is allocated by PyTorch, and 903.14 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step230000-tokens965B
+  GPU before model load: 86.34 GB
+  GPU before finally cleanup: 98.23 GB
+  GPU after finally cleanup: 98.23 GB
+Error at step 230000: CUDA out of memory. Tried to allocate 86.00 MiB. GPU 0 has a total capacity of 93.09 GiB of which 49.00 MiB is free. Including non-PyTorch memory, this process has 93.03 GiB memory in use. Of the allocated memory 91.48 GiB is allocated by PyTorch, and 903.14 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-1124-7B/stage1-step250000-tokens1049B
+  GPU before model load: 86.34 GB
+  GPU after model load: 31.07 GB

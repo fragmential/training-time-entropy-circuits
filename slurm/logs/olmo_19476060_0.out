@@ -1,0 +1,108 @@
+=== Running model: allenai/OLMo-2-0425-1B with 1b_revisions.txt (array task 0) ===
+Opening checkpoint file: 1b_revisions.txt
+Found 195 checkpoints
+Subsampled to 50 checkpoints
+Filtered and cached 2000 sequences to data/cache/filtered_texts_fineweb_2000.json
+Processing 50 remaining checkpoints...
+Running model allenai/OLMo-2-0425-1B/stage1-step0-tokens0B
+Error at step 0: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step20000-tokens42B
+Error at step 20000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step60000-tokens126B
+Error at step 60000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step100000-tokens210B
+Error at step 100000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step140000-tokens294B
+Error at step 140000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step180000-tokens378B
+Error at step 180000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step220000-tokens462B
+Error at step 220000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step260000-tokens546B
+Error at step 260000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step300000-tokens630B
+Error at step 300000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step340000-tokens714B
+Error at step 340000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step370000-tokens776B
+Error at step 370000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step410000-tokens860B
+Error at step 410000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step450000-tokens944B
+Error at step 450000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step490000-tokens1028B
+Error at step 490000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step530000-tokens1112B
+Error at step 530000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step570000-tokens1196B
+Error at step 570000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step610000-tokens1280B
+Error at step 610000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step650000-tokens1364B
+Error at step 650000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step690000-tokens1448B
+Error at step 690000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step730000-tokens1531B
+Error at step 730000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step760000-tokens1594B
+Error at step 760000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step800000-tokens1678B
+Error at step 800000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step840000-tokens1762B
+Error at step 840000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step880000-tokens1846B
+Error at step 880000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step920000-tokens1930B
+Error at step 920000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step960000-tokens2014B
+Error at step 960000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step1000000-tokens2098B
+Error at step 1000000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step1040000-tokens2182B
+Error at step 1040000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step1080000-tokens2265B
+Error at step 1080000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step1120000-tokens2349B
+Error at step 1120000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step1150000-tokens2412B
+Error at step 1150000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step1190000-tokens2496B
+Error at step 1190000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step1230000-tokens2580B
+Error at step 1230000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step1270000-tokens2664B
+Error at step 1270000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step1310000-tokens2748B
+Error at step 1310000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step1350000-tokens2832B
+Error at step 1350000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step1390000-tokens2916B
+Error at step 1390000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step1430000-tokens2999B
+Error at step 1430000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step1470000-tokens3083B
+Error at step 1470000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step1510000-tokens3167B
+Error at step 1510000: CUDA out of memory. Tried to allocate 12.25 GiB. GPU 0 has a total capacity of 93.09 GiB of which 4.25 GiB is free. Including non-PyTorch memory, this process has 88.83 GiB memory in use. Of the allocated memory 75.06 GiB is allocated by PyTorch, and 13.11 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-0425-1B/stage1-step1540000-tokens3230B
+Error at step 1540000: CUDA out of memory. Tried to allocate 12.25 GiB. GPU 0 has a total capacity of 93.09 GiB of which 4.25 GiB is free. Including non-PyTorch memory, this process has 88.83 GiB memory in use. Of the allocated memory 77.06 GiB is allocated by PyTorch, and 11.11 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-0425-1B/stage1-step1580000-tokens3314B
+Error at step 1580000: CUDA out of memory. Tried to allocate 12.25 GiB. GPU 0 has a total capacity of 93.09 GiB of which 4.25 GiB is free. Including non-PyTorch memory, this process has 88.83 GiB memory in use. Of the allocated memory 79.06 GiB is allocated by PyTorch, and 9.11 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-0425-1B/stage1-step1620000-tokens3398B
+Error at step 1620000: CUDA out of memory. Tried to allocate 12.25 GiB. GPU 0 has a total capacity of 93.09 GiB of which 4.25 GiB is free. Including non-PyTorch memory, this process has 88.83 GiB memory in use. Of the allocated memory 81.06 GiB is allocated by PyTorch, and 7.11 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-0425-1B/stage1-step1660000-tokens3482B
+Error at step 1660000: CUDA out of memory. Tried to allocate 12.25 GiB. GPU 0 has a total capacity of 93.09 GiB of which 4.25 GiB is free. Including non-PyTorch memory, this process has 88.83 GiB memory in use. Of the allocated memory 83.06 GiB is allocated by PyTorch, and 5.11 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Running model allenai/OLMo-2-0425-1B/stage1-step1700000-tokens3566B
+Error at step 1700000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step1740000-tokens3650B
+Error at step 1740000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step1780000-tokens3733B
+Error at step 1780000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step1820000-tokens3817B
+Error at step 1820000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step1860000-tokens3901B
+Error at step 1860000: Got unsupported ScalarType BFloat16
+Running model allenai/OLMo-2-0425-1B/stage1-step1900000-tokens3985B
+Error at step 1900000: Got unsupported ScalarType BFloat16
+Completed! Results saved to results/results_OLMo-2-0425-1B.npy
+=== Done: allenai/OLMo-2-0425-1B ===

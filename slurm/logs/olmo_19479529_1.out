@@ -1,0 +1,86 @@
+=== Running model: allenai/OLMo-2-1124-7B with 7b_revisions.txt (array task 1, batch_size 128) ===
+Opening checkpoint file: 7b_revisions.txt
+Found 928 checkpoints
+Subsampled to 50 checkpoints
+Loaded 2000 cached sequences from data/cache/filtered_texts_fineweb_2000.json
+Processing 39 remaining checkpoints...
+Running model allenai/OLMo-2-1124-7B/stage1-step70000-tokens294B
+Step 70000: rankme=378.196, alpha=0.863, r2_100=0.990
+Running model allenai/OLMo-2-1124-7B/stage1-step90000-tokens378B
+Step 90000: rankme=340.613, alpha=0.909, r2_100=0.991
+Running model allenai/OLMo-2-1124-7B/stage1-step120000-tokens504B
+Step 120000: rankme=334.008, alpha=0.943, r2_100=0.991
+Running model allenai/OLMo-2-1124-7B/stage1-step140000-tokens588B
+Step 140000: rankme=325.581, alpha=0.962, r2_100=0.991
+Running model allenai/OLMo-2-1124-7B/stage1-step190000-tokens797B
+Step 190000: rankme=301.307, alpha=0.987, r2_100=0.993
+Running model allenai/OLMo-2-1124-7B/stage1-step210000-tokens881B
+Step 210000: rankme=273.821, alpha=1.007, r2_100=0.993
+Running model allenai/OLMo-2-1124-7B/stage1-step230000-tokens965B
+Step 230000: rankme=272.062, alpha=1.009, r2_100=0.995
+Running model allenai/OLMo-2-1124-7B/stage1-step250000-tokens1049B
+Step 250000: rankme=289.941, alpha=1.020, r2_100=0.995
+Running model allenai/OLMo-2-1124-7B/stage1-step270000-tokens1133B
+Step 270000: rankme=294.207, alpha=1.033, r2_100=0.995
+Running model allenai/OLMo-2-1124-7B/stage1-step290000-tokens1217B
+Step 290000: rankme=287.678, alpha=1.035, r2_100=0.996
+Running model allenai/OLMo-2-1124-7B/stage1-step320000-tokens1343B
+Step 320000: rankme=278.814, alpha=1.029, r2_100=0.997
+Running model allenai/OLMo-2-1124-7B/stage1-step340000-tokens1427B
+Step 340000: rankme=276.033, alpha=1.037, r2_100=0.996
+Running model allenai/OLMo-2-1124-7B/stage1-step360000-tokens1510B
+Step 360000: rankme=278.466, alpha=1.041, r2_100=0.996
+Running model allenai/OLMo-2-1124-7B/stage1-step380000-tokens1594B
+Step 380000: rankme=286.928, alpha=1.036, r2_100=0.996
+Running model allenai/OLMo-2-1124-7B/stage1-step400000-tokens1678B
+Step 400000: rankme=288.993, alpha=1.058, r2_100=0.996
+Running model allenai/OLMo-2-1124-7B/stage1-step420000-tokens1762B
+Step 420000: rankme=304.687, alpha=1.065, r2_100=0.996
+Running model allenai/OLMo-2-1124-7B/stage1-step440000-tokens1846B
+Step 440000: rankme=284.230, alpha=1.080, r2_100=0.996
+Running model allenai/OLMo-2-1124-7B/stage1-step470000-tokens1972B
+Step 470000: rankme=293.864, alpha=1.065, r2_100=0.995
+Running model allenai/OLMo-2-1124-7B/stage1-step490000-tokens2056B
+Step 490000: rankme=298.725, alpha=1.082, r2_100=0.995
+Running model allenai/OLMo-2-1124-7B/stage1-step510000-tokens2140B
+Step 510000: rankme=296.607, alpha=1.079, r2_100=0.995
+Running model allenai/OLMo-2-1124-7B/stage1-step530000-tokens2223B
+Step 530000: rankme=295.663, alpha=1.079, r2_100=0.995
+Running model allenai/OLMo-2-1124-7B/stage1-step550000-tokens2307B
+Step 550000: rankme=282.588, alpha=1.091, r2_100=0.996
+Running model allenai/OLMo-2-1124-7B/stage1-step570000-tokens2391B
+Step 570000: rankme=282.591, alpha=1.080, r2_100=0.995
+Running model allenai/OLMo-2-1124-7B/stage1-step590000-tokens2475B
+Step 590000: rankme=297.752, alpha=1.082, r2_100=0.994
+Running model allenai/OLMo-2-1124-7B/stage1-step620000-tokens2601B
+Step 620000: rankme=306.850, alpha=1.075, r2_100=0.994
+Running model allenai/OLMo-2-1124-7B/stage1-step640000-tokens2685B
+Step 640000: rankme=315.585, alpha=1.059, r2_100=0.993
+Running model allenai/OLMo-2-1124-7B/stage1-step660000-tokens2769B
+Step 660000: rankme=312.624, alpha=1.043, r2_100=0.993
+Running model allenai/OLMo-2-1124-7B/stage1-step680000-tokens2853B
+Step 680000: rankme=318.797, alpha=1.050, r2_100=0.993
+Running model allenai/OLMo-2-1124-7B/stage1-step700000-tokens2937B
+Step 700000: rankme=324.353, alpha=1.039, r2_100=0.993
+Running model allenai/OLMo-2-1124-7B/stage1-step720000-tokens3020B
+Step 720000: rankme=326.451, alpha=1.036, r2_100=0.992
+Running model allenai/OLMo-2-1124-7B/stage1-step740000-tokens3104B
+Step 740000: rankme=314.922, alpha=1.047, r2_100=0.992
+Running model allenai/OLMo-2-1124-7B/stage1-step770000-tokens3230B
+Step 770000: rankme=316.891, alpha=1.054, r2_100=0.991
+Running model allenai/OLMo-2-1124-7B/stage1-step790000-tokens3314B
+Step 790000: rankme=323.878, alpha=1.043, r2_100=0.991
+Running model allenai/OLMo-2-1124-7B/stage1-step810000-tokens3398B
+Step 810000: rankme=332.044, alpha=1.029, r2_100=0.991
+Running model allenai/OLMo-2-1124-7B/stage1-step830000-tokens3482B
+Step 830000: rankme=342.098, alpha=1.017, r2_100=0.991
+Running model allenai/OLMo-2-1124-7B/stage1-step850000-tokens3566B
+Step 850000: rankme=346.504, alpha=1.004, r2_100=0.992
+Running model allenai/OLMo-2-1124-7B/stage1-step870000-tokens3650B
+Step 870000: rankme=357.759, alpha=0.983, r2_100=0.992
+Running model allenai/OLMo-2-1124-7B/stage1-step890000-tokens3733B
+Step 890000: rankme=363.381, alpha=0.974, r2_100=0.993
+Running model allenai/OLMo-2-1124-7B/stage1-step920000-tokens3859B
+Step 920000: rankme=365.444, alpha=0.967, r2_100=0.993
+Completed! Results saved to results/results_OLMo-2-1124-7B.npy
+=== Done: allenai/OLMo-2-1124-7B ===

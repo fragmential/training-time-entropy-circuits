@@ -1,0 +1,57 @@
+=== Running model: EleutherAI/pythia-1.4b-deduped (array task 8, batch_size 128) ===
+EleutherAI/pythia-1.4b-deduped fineweb
+Subsampled later checkpoints to 50
+Total checkpoints: 58 (8 early + 50 later)
+Loaded 2000 cached sequences from data/cache/filtered_texts_fineweb_2000.json
+Processing 57 remaining checkpoints...
+Step 8: rankme=153.877, alpha=0.650, r2_100=0.996
+Step 16: rankme=163.631, alpha=0.837, r2_100=0.996
+Step 32: rankme=6.007, alpha=0.926, r2_100=0.962
+Step 64: rankme=9.208, alpha=1.577, r2_100=0.979
+Step 128: rankme=12.352, alpha=1.610, r2_100=0.998
+Step 256: rankme=21.466, alpha=1.575, r2_100=0.994
+Step 512: rankme=51.082, alpha=1.242, r2_100=0.996
+Step 1000: rankme=143.553, alpha=0.853, r2_100=0.997
+Step 3000: rankme=321.261, alpha=0.696, r2_100=0.999
+Step 6000: rankme=380.274, alpha=0.661, r2_100=1.000
+Step 9000: rankme=404.775, alpha=0.653, r2_100=0.998
+Step 12000: rankme=408.964, alpha=0.640, r2_100=0.998
+Step 15000: rankme=398.790, alpha=0.640, r2_100=0.998
+Step 18000: rankme=392.076, alpha=0.643, r2_100=0.998
+Step 21000: rankme=373.736, alpha=0.640, r2_100=0.997
+Step 24000: rankme=371.647, alpha=0.633, r2_100=0.997
+Step 27000: rankme=346.210, alpha=0.638, r2_100=0.998
+Step 29000: rankme=342.813, alpha=0.634, r2_100=0.998
+Step 32000: rankme=331.456, alpha=0.638, r2_100=0.997
+Step 35000: rankme=309.258, alpha=0.651, r2_100=0.997
+Step 38000: rankme=302.057, alpha=0.660, r2_100=0.996
+Step 41000: rankme=306.091, alpha=0.657, r2_100=0.996
+Step 44000: rankme=272.894, alpha=0.658, r2_100=0.996
+Step 47000: rankme=269.164, alpha=0.666, r2_100=0.997
+Step 50000: rankme=258.265, alpha=0.667, r2_100=0.996
+Step 53000: rankme=251.867, alpha=0.668, r2_100=0.995
+Step 56000: rankme=235.335, alpha=0.671, r2_100=0.996
+Step 58000: rankme=230.650, alpha=0.684, r2_100=0.997
+Step 61000: rankme=231.524, alpha=0.673, r2_100=0.996
+Step 64000: rankme=217.246, alpha=0.681, r2_100=0.996
+Step 67000: rankme=216.227, alpha=0.688, r2_100=0.995
+Step 70000: rankme=209.655, alpha=0.696, r2_100=0.995
+Step 73000: rankme=199.001, alpha=0.698, r2_100=0.996
+Step 76000: rankme=196.118, alpha=0.701, r2_100=0.995
+Step 79000: rankme=194.776, alpha=0.705, r2_100=0.996
+Step 82000: rankme=190.122, alpha=0.711, r2_100=0.995
+Step 85000: rankme=190.095, alpha=0.725, r2_100=0.995
+Step 87000: rankme=193.703, alpha=0.729, r2_100=0.996
+Step 90000: rankme=189.876, alpha=0.728, r2_100=0.996
+Step 93000: rankme=186.204, alpha=0.735, r2_100=0.995
+Step 96000: rankme=183.064, alpha=0.735, r2_100=0.995
+Step 99000: rankme=189.761, alpha=0.750, r2_100=0.996
+Step 102000: rankme=186.945, alpha=0.756, r2_100=0.996
+Step 105000: rankme=177.854, alpha=0.760, r2_100=0.995
+Step 108000: rankme=184.102, alpha=0.776, r2_100=0.996
+Step 111000: rankme=179.190, alpha=0.771, r2_100=0.996
+Step 114000: rankme=181.518, alpha=0.794, r2_100=0.996
+Step 116000: rankme=181.574, alpha=0.800, r2_100=0.996
+Step 119000: rankme=175.979, alpha=0.796, r2_100=0.996
+Step 122000: rankme=171.817, alpha=0.803, r2_100=0.996
+Step 125000: rankme=177.773, alpha=0.818, r2_100=0.996

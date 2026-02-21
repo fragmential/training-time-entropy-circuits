@@ -1,0 +1,904 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Checkpoints:   0%|          | 0/54 [00:00<?, ?it/s]
+Fetching 9 files:   0%|          | 0/9 [00:00<?, ?it/s][A
+Fetching 9 files:  11%|█         | 1/9 [00:00<00:01,  4.37it/s][A
+
+Fetching 3 files:   0%|          | 0/3 [00:00<?, ?it/s][A[AException in thread Thread-auto_conversion:
+Traceback (most recent call last):
+  File "/home/dcampregher1/.local/share/uv/python/cpython-3.14.0-linux-x86_64-gnu/lib/python3.14/threading.py", line 1081, in _bootstrap_inner
+    self._context.run(self.run)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/home/dcampregher1/.local/share/uv/python/cpython-3.14.0-linux-x86_64-gnu/lib/python3.14/threading.py", line 1023, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/gpfs/home2/dcampregher1/Tracing-representation-geometry-reproduction/.venv/lib/python3.14/site-packages/transformers/safetensors_conversion.py", line 117, in auto_conversion
+    raise e
+  File "/gpfs/home2/dcampregher1/Tracing-representation-geometry-reproduction/.venv/lib/python3.14/site-packages/transformers/safetensors_conversion.py", line 96, in auto_conversion
+    sha = get_conversion_pr_reference(api, pretrained_model_name_or_path, **cached_file_kwargs)
+  File "/gpfs/home2/dcampregher1/Tracing-representation-geometry-reproduction/.venv/lib/python3.14/site-packages/transformers/safetensors_conversion.py", line 77, in get_conversion_pr_reference
+    raise OSError(
+    ...<2 lines>...
+    )
+OSError: Could not create safetensors conversion PR. The repo does not appear to have a file named pytorch_model.bin or model.safetensors.If you are loading with variant, use `use_safetensors=False` to load the original model.
+
+
+Fetching 3 files:  33%|███▎      | 1/3 [00:29<00:59, 29.86s/it][A[A
+
+Fetching 3 files:  67%|██████▋   | 2/3 [00:30<00:12, 12.61s/it][A[AFetching 3 files: 100%|██████████| 3/3 [00:30<00:00, 10.13s/it]
+
+Fetching 9 files:  33%|███▎      | 3/9 [00:32<01:12, 12.16s/it][AFetching 9 files: 100%|██████████| 9/9 [00:32<00:00,  3.66s/it]
+
+Loading weights:   0%|          | 0/436 [00:00<?, ?it/s][A
+Loading weights:   0%|          | 1/436 [00:00<00:00, 11814.94it/s, Materializing param=embed_out.weight][A
+Loading weights:   0%|          | 1/436 [00:00<00:00, 6423.13it/s, Materializing param=embed_out.weight] [A
+Loading weights:   0%|          | 2/436 [00:00<00:00, 5526.09it/s, Materializing param=gpt_neox.embed_in.weight][A
+Loading weights:   0%|          | 2/436 [00:00<00:00, 4718.00it/s, Materializing param=gpt_neox.embed_in.weight][A
+Loading weights:   1%|          | 3/436 [00:00<00:00, 5414.33it/s, Materializing param=gpt_neox.final_layer_norm.bias][A
+Loading weights:   1%|          | 3/436 [00:00<00:00, 4928.68it/s, Materializing param=gpt_neox.final_layer_norm.bias][A
+Loading weights:   1%|          | 4/436 [00:00<00:00, 5710.42it/s, Materializing param=gpt_neox.final_layer_norm.weight][A
+Loading weights:   1%|          | 4/436 [00:00<00:00, 5302.53it/s, Materializing param=gpt_neox.final_layer_norm.weight][A
+Loading weights:   1%|          | 5/436 [00:00<00:00, 5983.32it/s, Materializing param=gpt_neox.layers.0.attention.dense.bias][A
+Loading weights:   1%|          | 5/436 [00:00<00:00, 5664.92it/s, Materializing param=gpt_neox.layers.0.attention.dense.bias][A
+Loading weights:   1%|▏         | 6/436 [00:00<00:00, 6195.43it/s, Materializing param=gpt_neox.layers.0.attention.dense.weight][A
+Loading weights:   1%|▏         | 6/436 [00:00<00:00, 5882.61it/s, Materializing param=gpt_neox.layers.0.attention.dense.weight][A
+Loading weights:   2%|▏         | 7/436 [00:00<00:00, 6348.14it/s, Materializing param=gpt_neox.layers.0.attention.query_key_value.bias][A
+Loading weights:   2%|▏         | 7/436 [00:00<00:00, 1375.63it/s, Materializing param=gpt_neox.layers.0.attention.query_key_value.bias][A
+Loading weights:   2%|▏         | 8/436 [00:00<00:00, 1540.61it/s, Materializing param=gpt_neox.layers.0.attention.query_key_value.weight][A
+Loading weights:   2%|▏         | 8/436 [00:00<00:00, 1524.30it/s, Materializing param=gpt_neox.layers.0.attention.query_key_value.weight][A
+Loading weights:   2%|▏         | 9/436 [00:00<00:00, 1688.15it/s, Materializing param=gpt_neox.layers.0.input_layernorm.bias]            [A
+Loading weights:   2%|▏         | 9/436 [00:00<00:00, 1673.26it/s, Materializing param=gpt_neox.layers.0.input_layernorm.bias][A
+Loading weights:   2%|▏         | 10/436 [00:00<00:00, 1833.09it/s, Materializing param=gpt_neox.layers.0.input_layernorm.weight][A
+Loading weights:   2%|▏         | 10/436 [00:00<00:00, 1818.00it/s, Materializing param=gpt_neox.layers.0.input_layernorm.weight][A
+Loading weights:   3%|▎         | 11/436 [00:00<00:00, 1973.71it/s, Materializing param=gpt_neox.layers.0.mlp.dense_4h_to_h.bias][A
+Loading weights:   3%|▎         | 11/436 [00:00<00:00, 1957.38it/s, Materializing param=gpt_neox.layers.0.mlp.dense_4h_to_h.bias][A
+Loading weights:   3%|▎         | 12/436 [00:00<00:00, 2106.46it/s, Materializing param=gpt_neox.layers.0.mlp.dense_4h_to_h.weight][A
+Loading weights:   3%|▎         | 12/436 [00:00<00:00, 2089.84it/s, Materializing param=gpt_neox.layers.0.mlp.dense_4h_to_h.weight][A
+Loading weights:   3%|▎         | 13/436 [00:00<00:00, 2235.04it/s, Materializing param=gpt_neox.layers.0.mlp.dense_h_to_4h.bias]  [A
+Loading weights:   3%|▎         | 13/436 [00:00<00:00, 2218.49it/s, Materializing param=gpt_neox.layers.0.mlp.dense_h_to_4h.bias][A
+Loading weights:   3%|▎         | 14/436 [00:00<00:00, 2360.23it/s, Materializing param=gpt_neox.layers.0.mlp.dense_h_to_4h.weight][A
+Loading weights:   3%|▎         | 14/436 [00:00<00:00, 2343.00it/s, Materializing param=gpt_neox.layers.0.mlp.dense_h_to_4h.weight][A
+Loading weights:   3%|▎         | 15/436 [00:00<00:00, 2480.08it/s, Materializing param=gpt_neox.layers.0.post_attention_layernorm.bias][A
+Loading weights:   3%|▎         | 15/436 [00:00<00:00, 2462.12it/s, Materializing param=gpt_neox.layers.0.post_attention_layernorm.bias][A
+Loading weights:   4%|▎         | 16/436 [00:00<00:00, 2596.59it/s, Materializing param=gpt_neox.layers.0.post_attention_layernorm.weight][A
+Loading weights:   4%|▎         | 16/436 [00:00<00:00, 2578.53it/s, Materializing param=gpt_neox.layers.0.post_attention_layernorm.weight][A
+Loading weights:   4%|▍         | 17/436 [00:00<00:00, 2707.03it/s, Materializing param=gpt_neox.layers.1.attention.dense.bias]           [A
+Loading weights:   4%|▍         | 17/436 [00:00<00:00, 2687.64it/s, Materializing param=gpt_neox.layers.1.attention.dense.bias][A
+Loading weights:   4%|▍         | 18/436 [00:00<00:00, 2814.02it/s, Materializing param=gpt_neox.layers.1.attention.dense.weight][A
+Loading weights:   4%|▍         | 18/436 [00:00<00:00, 2794.96it/s, Materializing param=gpt_neox.layers.1.attention.dense.weight][A
+Loading weights:   4%|▍         | 19/436 [00:00<00:00, 2917.62it/s, Materializing param=gpt_neox.layers.1.attention.query_key_value.bias][A
+Loading weights:   4%|▍         | 19/436 [00:00<00:00, 2897.57it/s, Materializing param=gpt_neox.layers.1.attention.query_key_value.bias][A
+Loading weights:   5%|▍         | 20/436 [00:00<00:00, 3017.81it/s, Materializing param=gpt_neox.layers.1.attention.query_key_value.weight][A
+Loading weights:   5%|▍         | 20/436 [00:00<00:00, 2997.75it/s, Materializing param=gpt_neox.layers.1.attention.query_key_value.weight][A
+Loading weights:   5%|▍         | 21/436 [00:00<00:00, 3114.58it/s, Materializing param=gpt_neox.layers.1.input_layernorm.bias]            [A
+Loading weights:   5%|▍         | 21/436 [00:00<00:00, 3093.80it/s, Materializing param=gpt_neox.layers.1.input_layernorm.bias][A
+Loading weights:   5%|▌         | 22/436 [00:00<00:00, 3208.22it/s, Materializing param=gpt_neox.layers.1.input_layernorm.weight][A
+Loading weights:   5%|▌         | 22/436 [00:00<00:00, 3187.27it/s, Materializing param=gpt_neox.layers.1.input_layernorm.weight][A
+Loading weights:   5%|▌         | 23/436 [00:00<00:00, 3299.55it/s, Materializing param=gpt_neox.layers.1.mlp.dense_4h_to_h.bias][A
+Loading weights:   5%|▌         | 23/436 [00:00<00:00, 3278.69it/s, Materializing param=gpt_neox.layers.1.mlp.dense_4h_to_h.bias][A
+Loading weights:   6%|▌         | 24/436 [00:00<00:00, 3386.60it/s, Materializing param=gpt_neox.layers.1.mlp.dense_4h_to_h.weight][A
+Loading weights:   6%|▌         | 24/436 [00:00<00:00, 3364.86it/s, Materializing param=gpt_neox.layers.1.mlp.dense_4h_to_h.weight][A
+Loading weights:   6%|▌         | 25/436 [00:00<00:00, 3469.92it/s, Materializing param=gpt_neox.layers.1.mlp.dense_h_to_4h.bias]  [A
+Loading weights:   6%|▌         | 25/436 [00:00<00:00, 3445.41it/s, Materializing param=gpt_neox.layers.1.mlp.dense_h_to_4h.bias][A
+Loading weights:   6%|▌         | 26/436 [00:00<00:00, 3547.79it/s, Materializing param=gpt_neox.layers.1.mlp.dense_h_to_4h.weight][A
+Loading weights:   6%|▌         | 26/436 [00:00<00:00, 3526.45it/s, Materializing param=gpt_neox.layers.1.mlp.dense_h_to_4h.weight][A
+Loading weights:   6%|▌         | 27/436 [00:00<00:00, 3626.90it/s, Materializing param=gpt_neox.layers.1.post_attention_layernorm.bias][A
+Loading weights:   6%|▌         | 27/436 [00:00<00:00, 3604.85it/s, Materializing param=gpt_neox.layers.1.post_attention_layernorm.bias][A
+Loading weights:   6%|▋         | 28/436 [00:00<00:00, 3703.35it/s, Materializing param=gpt_neox.layers.1.post_attention_layernorm.weight][A
+Loading weights:   6%|▋         | 28/436 [00:00<00:00, 3681.64it/s, Materializing param=gpt_neox.layers.1.post_attention_layernorm.weight][A
+Loading weights:   7%|▋         | 29/436 [00:00<00:00, 3778.53it/s, Materializing param=gpt_neox.layers.2.attention.dense.bias]           [A
+Loading weights:   7%|▋         | 29/436 [00:00<00:00, 3757.52it/s, Materializing param=gpt_neox.layers.2.attention.dense.bias][A
+Loading weights:   7%|▋         | 30/436 [00:00<00:00, 3852.11it/s, Materializing param=gpt_neox.layers.2.attention.dense.weight][A
+Loading weights:   7%|▋         | 30/436 [00:00<00:00, 3831.00it/s, Materializing param=gpt_neox.layers.2.attention.dense.weight][A
+Loading weights:   7%|▋         | 31/436 [00:00<00:00, 3923.58it/s, Materializing param=gpt_neox.layers.2.attention.query_key_value.bias][A
+Loading weights:   7%|▋         | 31/436 [00:00<00:00, 3901.91it/s, Materializing param=gpt_neox.layers.2.attention.query_key_value.bias][A
+Loading weights:   7%|▋         | 32/436 [00:00<00:00, 3993.27it/s, Materializing param=gpt_neox.layers.2.attention.query_key_value.weight][A
+Loading weights:   7%|▋         | 32/436 [00:00<00:00, 3971.88it/s, Materializing param=gpt_neox.layers.2.attention.query_key_value.weight][A
+Loading weights:   8%|▊         | 33/436 [00:00<00:00, 4061.62it/s, Materializing param=gpt_neox.layers.2.input_layernorm.bias]            [A
+Loading weights:   8%|▊         | 33/436 [00:00<00:00, 4040.87it/s, Materializing param=gpt_neox.layers.2.input_layernorm.bias][A
+Loading weights:   8%|▊         | 34/436 [00:00<00:00, 4129.09it/s, Materializing param=gpt_neox.layers.2.input_layernorm.weight][A
+Loading weights:   8%|▊         | 34/436 [00:00<00:00, 4104.72it/s, Materializing param=gpt_neox.layers.2.input_layernorm.weight][A
+Loading weights:   8%|▊         | 35/436 [00:00<00:00, 4191.19it/s, Materializing param=gpt_neox.layers.2.mlp.dense_4h_to_h.bias][A
+Loading weights:   8%|▊         | 35/436 [00:00<00:00, 4170.95it/s, Materializing param=gpt_neox.layers.2.mlp.dense_4h_to_h.bias][A
+Loading weights:   8%|▊         | 36/436 [00:00<00:00, 4256.98it/s, Materializing param=gpt_neox.layers.2.mlp.dense_4h_to_h.weight][A
+Loading weights:   8%|▊         | 36/436 [00:00<00:00, 4235.84it/s, Materializing param=gpt_neox.layers.2.mlp.dense_4h_to_h.weight][A
+Loading weights:   8%|▊         | 37/436 [00:00<00:00, 4319.45it/s, Materializing param=gpt_neox.layers.2.mlp.dense_h_to_4h.bias]  [A
+Loading weights:   8%|▊         | 37/436 [00:00<00:00, 4298.28it/s, Materializing param=gpt_neox.layers.2.mlp.dense_h_to_4h.bias][A
+Loading weights:   9%|▊         | 38/436 [00:00<00:00, 4380.35it/s, Materializing param=gpt_neox.layers.2.mlp.dense_h_to_4h.weight][A
+Loading weights:   9%|▊         | 38/436 [00:00<00:00, 4359.63it/s, Materializing param=gpt_neox.layers.2.mlp.dense_h_to_4h.weight][A
+Loading weights:   9%|▉         | 39/436 [00:00<00:00, 4440.10it/s, Materializing param=gpt_neox.layers.2.post_attention_layernorm.bias][A
+Loading weights:   9%|▉         | 39/436 [00:00<00:00, 4418.63it/s, Materializing param=gpt_neox.layers.2.post_attention_layernorm.bias][A
+Loading weights:   9%|▉         | 40/436 [00:00<00:00, 4497.91it/s, Materializing param=gpt_neox.layers.2.post_attention_layernorm.weight][A
+Loading weights:   9%|▉         | 40/436 [00:00<00:00, 4476.43it/s, Materializing param=gpt_neox.layers.2.post_attention_layernorm.weight][A
+Loading weights:   9%|▉         | 41/436 [00:00<00:00, 4554.92it/s, Materializing param=gpt_neox.layers.3.attention.dense.bias]           [A
+Loading weights:   9%|▉         | 41/436 [00:00<00:00, 4533.31it/s, Materializing param=gpt_neox.layers.3.attention.dense.bias][A
+Loading weights:  10%|▉         | 42/436 [00:00<00:00, 4610.09it/s, Materializing param=gpt_neox.layers.3.attention.dense.weight][A
+Loading weights:  10%|▉         | 42/436 [00:00<00:00, 4588.95it/s, Materializing param=gpt_neox.layers.3.attention.dense.weight][A
+Loading weights:  10%|▉         | 43/436 [00:00<00:00, 4664.80it/s, Materializing param=gpt_neox.layers.3.attention.query_key_value.bias][A
+Loading weights:  10%|▉         | 43/436 [00:00<00:00, 4640.31it/s, Materializing param=gpt_neox.layers.3.attention.query_key_value.bias][A
+Loading weights:  10%|█         | 44/436 [00:00<00:00, 4713.42it/s, Materializing param=gpt_neox.layers.3.attention.query_key_value.weight][A
+Loading weights:  10%|█         | 44/436 [00:00<00:00, 4692.21it/s, Materializing param=gpt_neox.layers.3.attention.query_key_value.weight][A
+Loading weights:  10%|█         | 45/436 [00:00<00:00, 4764.81it/s, Materializing param=gpt_neox.layers.3.input_layernorm.bias]            [A
+Loading weights:  10%|█         | 45/436 [00:00<00:00, 4743.61it/s, Materializing param=gpt_neox.layers.3.input_layernorm.bias][A
+Loading weights:  11%|█         | 46/436 [00:00<00:00, 4815.26it/s, Materializing param=gpt_neox.layers.3.input_layernorm.weight][A
+Loading weights:  11%|█         | 46/436 [00:00<00:00, 4794.20it/s, Materializing param=gpt_neox.layers.3.input_layernorm.weight][A
+Loading weights:  11%|█         | 47/436 [00:00<00:00, 4865.54it/s, Materializing param=gpt_neox.layers.3.mlp.dense_4h_to_h.bias][A
+Loading weights:  11%|█         | 47/436 [00:00<00:00, 4844.97it/s, Materializing param=gpt_neox.layers.3.mlp.dense_4h_to_h.bias][A
+Loading weights:  11%|█         | 48/436 [00:00<00:00, 4914.84it/s, Materializing param=gpt_neox.layers.3.mlp.dense_4h_to_h.weight][A
+Loading weights:  11%|█         | 48/436 [00:00<00:00, 4893.58it/s, Materializing param=gpt_neox.layers.3.mlp.dense_4h_to_h.weight][A
+Loading weights:  11%|█         | 49/436 [00:00<00:00, 4961.76it/s, Materializing param=gpt_neox.layers.3.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  11%|█         | 49/436 [00:00<00:00, 4940.52it/s, Materializing param=gpt_neox.layers.3.mlp.dense_h_to_4h.bias][A
+Loading weights:  11%|█▏        | 50/436 [00:00<00:00, 5008.24it/s, Materializing param=gpt_neox.layers.3.mlp.dense_h_to_4h.weight][A
+Loading weights:  11%|█▏        | 50/436 [00:00<00:00, 4987.16it/s, Materializing param=gpt_neox.layers.3.mlp.dense_h_to_4h.weight][A
+Loading weights:  12%|█▏        | 51/436 [00:00<00:00, 5053.02it/s, Materializing param=gpt_neox.layers.3.post_attention_layernorm.bias][A
+Loading weights:  12%|█▏        | 51/436 [00:00<00:00, 5031.74it/s, Materializing param=gpt_neox.layers.3.post_attention_layernorm.bias][A
+Loading weights:  12%|█▏        | 52/436 [00:00<00:00, 5097.19it/s, Materializing param=gpt_neox.layers.3.post_attention_layernorm.weight][A
+Loading weights:  12%|█▏        | 52/436 [00:00<00:00, 5074.07it/s, Materializing param=gpt_neox.layers.3.post_attention_layernorm.weight][A
+Loading weights:  12%|█▏        | 53/436 [00:00<00:00, 5137.70it/s, Materializing param=gpt_neox.layers.4.attention.dense.bias]           [A
+Loading weights:  12%|█▏        | 53/436 [00:00<00:00, 5116.77it/s, Materializing param=gpt_neox.layers.4.attention.dense.bias][A
+Loading weights:  12%|█▏        | 54/436 [00:00<00:00, 5178.98it/s, Materializing param=gpt_neox.layers.4.attention.dense.weight][A
+Loading weights:  12%|█▏        | 54/436 [00:00<00:00, 5157.99it/s, Materializing param=gpt_neox.layers.4.attention.dense.weight][A
+Loading weights:  13%|█▎        | 55/436 [00:00<00:00, 5220.46it/s, Materializing param=gpt_neox.layers.4.attention.query_key_value.bias][A
+Loading weights:  13%|█▎        | 55/436 [00:00<00:00, 5199.16it/s, Materializing param=gpt_neox.layers.4.attention.query_key_value.bias][A
+Loading weights:  13%|█▎        | 56/436 [00:00<00:00, 5260.73it/s, Materializing param=gpt_neox.layers.4.attention.query_key_value.weight][A
+Loading weights:  13%|█▎        | 56/436 [00:00<00:00, 5238.32it/s, Materializing param=gpt_neox.layers.4.attention.query_key_value.weight][A
+Loading weights:  13%|█▎        | 57/436 [00:00<00:00, 5295.60it/s, Materializing param=gpt_neox.layers.4.input_layernorm.bias]            [A
+Loading weights:  13%|█▎        | 57/436 [00:00<00:00, 5273.18it/s, Materializing param=gpt_neox.layers.4.input_layernorm.bias][A
+Loading weights:  13%|█▎        | 58/436 [00:00<00:00, 5332.17it/s, Materializing param=gpt_neox.layers.4.input_layernorm.weight][A
+Loading weights:  13%|█▎        | 58/436 [00:00<00:00, 5310.75it/s, Materializing param=gpt_neox.layers.4.input_layernorm.weight][A
+Loading weights:  14%|█▎        | 59/436 [00:00<00:00, 5368.68it/s, Materializing param=gpt_neox.layers.4.mlp.dense_4h_to_h.bias][A
+Loading weights:  14%|█▎        | 59/436 [00:00<00:00, 5347.22it/s, Materializing param=gpt_neox.layers.4.mlp.dense_4h_to_h.bias][A
+Loading weights:  14%|█▍        | 60/436 [00:00<00:00, 5403.52it/s, Materializing param=gpt_neox.layers.4.mlp.dense_4h_to_h.weight][A
+Loading weights:  14%|█▍        | 60/436 [00:00<00:00, 5382.60it/s, Materializing param=gpt_neox.layers.4.mlp.dense_4h_to_h.weight][A
+Loading weights:  14%|█▍        | 61/436 [00:00<00:00, 5439.27it/s, Materializing param=gpt_neox.layers.4.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  14%|█▍        | 61/436 [00:00<00:00, 5416.36it/s, Materializing param=gpt_neox.layers.4.mlp.dense_h_to_4h.bias][A
+Loading weights:  14%|█▍        | 62/436 [00:00<00:00, 5470.41it/s, Materializing param=gpt_neox.layers.4.mlp.dense_h_to_4h.weight][A
+Loading weights:  14%|█▍        | 62/436 [00:00<00:00, 5449.66it/s, Materializing param=gpt_neox.layers.4.mlp.dense_h_to_4h.weight][A
+Loading weights:  14%|█▍        | 63/436 [00:00<00:00, 5505.14it/s, Materializing param=gpt_neox.layers.4.post_attention_layernorm.bias][A
+Loading weights:  14%|█▍        | 63/436 [00:00<00:00, 5484.34it/s, Materializing param=gpt_neox.layers.4.post_attention_layernorm.bias][A
+Loading weights:  15%|█▍        | 64/436 [00:00<00:00, 5539.55it/s, Materializing param=gpt_neox.layers.4.post_attention_layernorm.weight][A
+Loading weights:  15%|█▍        | 64/436 [00:00<00:00, 5519.16it/s, Materializing param=gpt_neox.layers.4.post_attention_layernorm.weight][A
+Loading weights:  15%|█▍        | 65/436 [00:00<00:00, 5574.34it/s, Materializing param=gpt_neox.layers.5.attention.dense.bias]           [A
+Loading weights:  15%|█▍        | 65/436 [00:00<00:00, 5554.69it/s, Materializing param=gpt_neox.layers.5.attention.dense.bias][A
+Loading weights:  15%|█▌        | 66/436 [00:00<00:00, 5607.93it/s, Materializing param=gpt_neox.layers.5.attention.dense.weight][A
+Loading weights:  15%|█▌        | 66/436 [00:00<00:00, 5587.33it/s, Materializing param=gpt_neox.layers.5.attention.dense.weight][A
+Loading weights:  15%|█▌        | 67/436 [00:00<00:00, 5640.33it/s, Materializing param=gpt_neox.layers.5.attention.query_key_value.bias][A
+Loading weights:  15%|█▌        | 67/436 [00:00<00:00, 5620.14it/s, Materializing param=gpt_neox.layers.5.attention.query_key_value.bias][A
+Loading weights:  16%|█▌        | 68/436 [00:00<00:00, 5671.59it/s, Materializing param=gpt_neox.layers.5.attention.query_key_value.weight][A
+Loading weights:  16%|█▌        | 68/436 [00:00<00:00, 5651.13it/s, Materializing param=gpt_neox.layers.5.attention.query_key_value.weight][A
+Loading weights:  16%|█▌        | 69/436 [00:00<00:00, 5703.61it/s, Materializing param=gpt_neox.layers.5.input_layernorm.bias]            [A
+Loading weights:  16%|█▌        | 69/436 [00:00<00:00, 5684.12it/s, Materializing param=gpt_neox.layers.5.input_layernorm.bias][A
+Loading weights:  16%|█▌        | 70/436 [00:00<00:00, 5737.20it/s, Materializing param=gpt_neox.layers.5.input_layernorm.weight][A
+Loading weights:  16%|█▌        | 70/436 [00:00<00:00, 5715.76it/s, Materializing param=gpt_neox.layers.5.input_layernorm.weight][A
+Loading weights:  16%|█▋        | 71/436 [00:00<00:00, 5766.32it/s, Materializing param=gpt_neox.layers.5.mlp.dense_4h_to_h.bias][A
+Loading weights:  16%|█▋        | 71/436 [00:00<00:00, 5746.73it/s, Materializing param=gpt_neox.layers.5.mlp.dense_4h_to_h.bias][A
+Loading weights:  17%|█▋        | 72/436 [00:00<00:00, 5796.02it/s, Materializing param=gpt_neox.layers.5.mlp.dense_4h_to_h.weight][A
+Loading weights:  17%|█▋        | 72/436 [00:00<00:00, 5776.06it/s, Materializing param=gpt_neox.layers.5.mlp.dense_4h_to_h.weight][A
+Loading weights:  17%|█▋        | 73/436 [00:00<00:00, 5825.31it/s, Materializing param=gpt_neox.layers.5.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  17%|█▋        | 73/436 [00:00<00:00, 5806.20it/s, Materializing param=gpt_neox.layers.5.mlp.dense_h_to_4h.bias][A
+Loading weights:  17%|█▋        | 74/436 [00:00<00:00, 5855.09it/s, Materializing param=gpt_neox.layers.5.mlp.dense_h_to_4h.weight][A
+Loading weights:  17%|█▋        | 74/436 [00:00<00:00, 5835.61it/s, Materializing param=gpt_neox.layers.5.mlp.dense_h_to_4h.weight][A
+Loading weights:  17%|█▋        | 75/436 [00:00<00:00, 5883.71it/s, Materializing param=gpt_neox.layers.5.post_attention_layernorm.bias][A
+Loading weights:  17%|█▋        | 75/436 [00:00<00:00, 5864.30it/s, Materializing param=gpt_neox.layers.5.post_attention_layernorm.bias][A
+Loading weights:  17%|█▋        | 76/436 [00:00<00:00, 5912.18it/s, Materializing param=gpt_neox.layers.5.post_attention_layernorm.weight][A
+Loading weights:  17%|█▋        | 76/436 [00:00<00:00, 5892.62it/s, Materializing param=gpt_neox.layers.5.post_attention_layernorm.weight][A
+Loading weights:  18%|█▊        | 77/436 [00:00<00:00, 5939.30it/s, Materializing param=gpt_neox.layers.6.attention.dense.bias]           [A
+Loading weights:  18%|█▊        | 77/436 [00:00<00:00, 5920.57it/s, Materializing param=gpt_neox.layers.6.attention.dense.bias][A
+Loading weights:  18%|█▊        | 78/436 [00:00<00:00, 5966.62it/s, Materializing param=gpt_neox.layers.6.attention.dense.weight][A
+Loading weights:  18%|█▊        | 78/436 [00:00<00:00, 5947.53it/s, Materializing param=gpt_neox.layers.6.attention.dense.weight][A
+Loading weights:  18%|█▊        | 79/436 [00:00<00:00, 5994.25it/s, Materializing param=gpt_neox.layers.6.attention.query_key_value.bias][A
+Loading weights:  18%|█▊        | 79/436 [00:00<00:00, 5975.33it/s, Materializing param=gpt_neox.layers.6.attention.query_key_value.bias][A
+Loading weights:  18%|█▊        | 80/436 [00:00<00:00, 6017.22it/s, Materializing param=gpt_neox.layers.6.attention.query_key_value.weight][A
+Loading weights:  18%|█▊        | 80/436 [00:00<00:00, 5997.11it/s, Materializing param=gpt_neox.layers.6.attention.query_key_value.weight][A
+Loading weights:  19%|█▊        | 81/436 [00:00<00:00, 6041.30it/s, Materializing param=gpt_neox.layers.6.input_layernorm.bias]            [A
+Loading weights:  19%|█▊        | 81/436 [00:00<00:00, 6022.99it/s, Materializing param=gpt_neox.layers.6.input_layernorm.bias][A
+Loading weights:  19%|█▉        | 82/436 [00:00<00:00, 6067.87it/s, Materializing param=gpt_neox.layers.6.input_layernorm.weight][A
+Loading weights:  19%|█▉        | 82/436 [00:00<00:00, 6049.41it/s, Materializing param=gpt_neox.layers.6.input_layernorm.weight][A
+Loading weights:  19%|█▉        | 83/436 [00:00<00:00, 6094.56it/s, Materializing param=gpt_neox.layers.6.mlp.dense_4h_to_h.bias][A
+Loading weights:  19%|█▉        | 83/436 [00:00<00:00, 6076.26it/s, Materializing param=gpt_neox.layers.6.mlp.dense_4h_to_h.bias][A
+Loading weights:  19%|█▉        | 84/436 [00:00<00:00, 6120.31it/s, Materializing param=gpt_neox.layers.6.mlp.dense_4h_to_h.weight][A
+Loading weights:  19%|█▉        | 84/436 [00:00<00:00, 6101.65it/s, Materializing param=gpt_neox.layers.6.mlp.dense_4h_to_h.weight][A
+Loading weights:  19%|█▉        | 85/436 [00:00<00:00, 6144.92it/s, Materializing param=gpt_neox.layers.6.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  19%|█▉        | 85/436 [00:00<00:00, 6126.54it/s, Materializing param=gpt_neox.layers.6.mlp.dense_h_to_4h.bias][A
+Loading weights:  20%|█▉        | 86/436 [00:00<00:00, 6169.57it/s, Materializing param=gpt_neox.layers.6.mlp.dense_h_to_4h.weight][A
+Loading weights:  20%|█▉        | 86/436 [00:00<00:00, 6151.47it/s, Materializing param=gpt_neox.layers.6.mlp.dense_h_to_4h.weight][A
+Loading weights:  20%|█▉        | 87/436 [00:00<00:00, 6194.27it/s, Materializing param=gpt_neox.layers.6.post_attention_layernorm.bias][A
+Loading weights:  20%|█▉        | 87/436 [00:00<00:00, 6175.82it/s, Materializing param=gpt_neox.layers.6.post_attention_layernorm.bias][A
+Loading weights:  20%|██        | 88/436 [00:00<00:00, 6218.18it/s, Materializing param=gpt_neox.layers.6.post_attention_layernorm.weight][A
+Loading weights:  20%|██        | 88/436 [00:00<00:00, 6199.49it/s, Materializing param=gpt_neox.layers.6.post_attention_layernorm.weight][A
+Loading weights:  20%|██        | 89/436 [00:00<00:00, 6238.71it/s, Materializing param=gpt_neox.layers.7.attention.dense.bias]           [A
+Loading weights:  20%|██        | 89/436 [00:00<00:00, 6219.06it/s, Materializing param=gpt_neox.layers.7.attention.dense.bias][A
+Loading weights:  21%|██        | 90/436 [00:00<00:00, 6258.18it/s, Materializing param=gpt_neox.layers.7.attention.dense.weight][A
+Loading weights:  21%|██        | 90/436 [00:00<00:00, 6239.77it/s, Materializing param=gpt_neox.layers.7.attention.dense.weight][A
+Loading weights:  21%|██        | 91/436 [00:00<00:00, 6280.65it/s, Materializing param=gpt_neox.layers.7.attention.query_key_value.bias][A
+Loading weights:  21%|██        | 91/436 [00:00<00:00, 6262.52it/s, Materializing param=gpt_neox.layers.7.attention.query_key_value.bias][A
+Loading weights:  21%|██        | 92/436 [00:00<00:00, 6302.90it/s, Materializing param=gpt_neox.layers.7.attention.query_key_value.weight][A
+Loading weights:  21%|██        | 92/436 [00:00<00:00, 6284.52it/s, Materializing param=gpt_neox.layers.7.attention.query_key_value.weight][A
+Loading weights:  21%|██▏       | 93/436 [00:00<00:00, 6324.61it/s, Materializing param=gpt_neox.layers.7.input_layernorm.bias]            [A
+Loading weights:  21%|██▏       | 93/436 [00:00<00:00, 6306.61it/s, Materializing param=gpt_neox.layers.7.input_layernorm.bias][A
+Loading weights:  22%|██▏       | 94/436 [00:00<00:00, 6346.92it/s, Materializing param=gpt_neox.layers.7.input_layernorm.weight][A
+Loading weights:  22%|██▏       | 94/436 [00:00<00:00, 6329.60it/s, Materializing param=gpt_neox.layers.7.input_layernorm.weight][A
+Loading weights:  22%|██▏       | 95/436 [00:00<00:00, 6370.14it/s, Materializing param=gpt_neox.layers.7.mlp.dense_4h_to_h.bias][A
+Loading weights:  22%|██▏       | 95/436 [00:00<00:00, 6352.88it/s, Materializing param=gpt_neox.layers.7.mlp.dense_4h_to_h.bias][A
+Loading weights:  22%|██▏       | 96/436 [00:00<00:00, 6392.84it/s, Materializing param=gpt_neox.layers.7.mlp.dense_4h_to_h.weight][A
+Loading weights:  22%|██▏       | 96/436 [00:00<00:00, 6375.13it/s, Materializing param=gpt_neox.layers.7.mlp.dense_4h_to_h.weight][A
+Loading weights:  22%|██▏       | 97/436 [00:00<00:00, 6413.41it/s, Materializing param=gpt_neox.layers.7.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  22%|██▏       | 97/436 [00:00<00:00, 6396.17it/s, Materializing param=gpt_neox.layers.7.mlp.dense_h_to_4h.bias][A
+Loading weights:  22%|██▏       | 98/436 [00:00<00:00, 6434.79it/s, Materializing param=gpt_neox.layers.7.mlp.dense_h_to_4h.weight][A
+Loading weights:  22%|██▏       | 98/436 [00:00<00:00, 6415.11it/s, Materializing param=gpt_neox.layers.7.mlp.dense_h_to_4h.weight][A
+Loading weights:  23%|██▎       | 99/436 [00:00<00:00, 6452.47it/s, Materializing param=gpt_neox.layers.7.post_attention_layernorm.bias][A
+Loading weights:  23%|██▎       | 99/436 [00:00<00:00, 6434.98it/s, Materializing param=gpt_neox.layers.7.post_attention_layernorm.bias][A
+Loading weights:  23%|██▎       | 100/436 [00:00<00:00, 6473.79it/s, Materializing param=gpt_neox.layers.7.post_attention_layernorm.weight][A
+Loading weights:  23%|██▎       | 100/436 [00:00<00:00, 6456.25it/s, Materializing param=gpt_neox.layers.7.post_attention_layernorm.weight][A
+Loading weights:  23%|██▎       | 101/436 [00:00<00:00, 6492.63it/s, Materializing param=gpt_neox.layers.8.attention.dense.bias]           [A
+Loading weights:  23%|██▎       | 101/436 [00:00<00:00, 6474.97it/s, Materializing param=gpt_neox.layers.8.attention.dense.bias][A
+Loading weights:  23%|██▎       | 102/436 [00:00<00:00, 6511.21it/s, Materializing param=gpt_neox.layers.8.attention.dense.weight][A
+Loading weights:  23%|██▎       | 102/436 [00:00<00:00, 6493.62it/s, Materializing param=gpt_neox.layers.8.attention.dense.weight][A
+Loading weights:  24%|██▎       | 103/436 [00:00<00:00, 6530.32it/s, Materializing param=gpt_neox.layers.8.attention.query_key_value.bias][A
+Loading weights:  24%|██▎       | 103/436 [00:00<00:00, 6512.80it/s, Materializing param=gpt_neox.layers.8.attention.query_key_value.bias][A
+Loading weights:  24%|██▍       | 104/436 [00:00<00:00, 6548.39it/s, Materializing param=gpt_neox.layers.8.attention.query_key_value.weight][A
+Loading weights:  24%|██▍       | 104/436 [00:00<00:00, 6530.74it/s, Materializing param=gpt_neox.layers.8.attention.query_key_value.weight][A
+Loading weights:  24%|██▍       | 105/436 [00:00<00:00, 6566.60it/s, Materializing param=gpt_neox.layers.8.input_layernorm.bias]            [A
+Loading weights:  24%|██▍       | 105/436 [00:00<00:00, 6549.80it/s, Materializing param=gpt_neox.layers.8.input_layernorm.bias][A
+Loading weights:  24%|██▍       | 106/436 [00:00<00:00, 6586.03it/s, Materializing param=gpt_neox.layers.8.input_layernorm.weight][A
+Loading weights:  24%|██▍       | 106/436 [00:00<00:00, 6569.29it/s, Materializing param=gpt_neox.layers.8.input_layernorm.weight][A
+Loading weights:  25%|██▍       | 107/436 [00:00<00:00, 6605.30it/s, Materializing param=gpt_neox.layers.8.mlp.dense_4h_to_h.bias][A
+Loading weights:  25%|██▍       | 107/436 [00:00<00:00, 6588.81it/s, Materializing param=gpt_neox.layers.8.mlp.dense_4h_to_h.bias][A
+Loading weights:  25%|██▍       | 108/436 [00:00<00:00, 6621.13it/s, Materializing param=gpt_neox.layers.8.mlp.dense_4h_to_h.weight][A
+Loading weights:  25%|██▍       | 108/436 [00:00<00:00, 6604.34it/s, Materializing param=gpt_neox.layers.8.mlp.dense_4h_to_h.weight][A
+Loading weights:  25%|██▌       | 109/436 [00:00<00:00, 6639.16it/s, Materializing param=gpt_neox.layers.8.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  25%|██▌       | 109/436 [00:00<00:00, 6622.04it/s, Materializing param=gpt_neox.layers.8.mlp.dense_h_to_4h.bias][A
+Loading weights:  25%|██▌       | 110/436 [00:00<00:00, 6657.34it/s, Materializing param=gpt_neox.layers.8.mlp.dense_h_to_4h.weight][A
+Loading weights:  25%|██▌       | 110/436 [00:00<00:00, 6640.76it/s, Materializing param=gpt_neox.layers.8.mlp.dense_h_to_4h.weight][A
+Loading weights:  25%|██▌       | 111/436 [00:00<00:00, 6675.19it/s, Materializing param=gpt_neox.layers.8.post_attention_layernorm.bias][A
+Loading weights:  25%|██▌       | 111/436 [00:00<00:00, 6658.20it/s, Materializing param=gpt_neox.layers.8.post_attention_layernorm.bias][A
+Loading weights:  26%|██▌       | 112/436 [00:00<00:00, 6692.34it/s, Materializing param=gpt_neox.layers.8.post_attention_layernorm.weight][A
+Loading weights:  26%|██▌       | 112/436 [00:00<00:00, 6675.03it/s, Materializing param=gpt_neox.layers.8.post_attention_layernorm.weight][A
+Loading weights:  26%|██▌       | 113/436 [00:00<00:00, 6709.18it/s, Materializing param=gpt_neox.layers.9.attention.dense.bias]           [A
+Loading weights:  26%|██▌       | 113/436 [00:00<00:00, 6693.07it/s, Materializing param=gpt_neox.layers.9.attention.dense.bias][A
+Loading weights:  26%|██▌       | 114/436 [00:00<00:00, 6726.75it/s, Materializing param=gpt_neox.layers.9.attention.dense.weight][A
+Loading weights:  26%|██▌       | 114/436 [00:00<00:00, 6710.79it/s, Materializing param=gpt_neox.layers.9.attention.dense.weight][A
+Loading weights:  26%|██▋       | 115/436 [00:00<00:00, 6744.86it/s, Materializing param=gpt_neox.layers.9.attention.query_key_value.bias][A
+Loading weights:  26%|██▋       | 115/436 [00:00<00:00, 6728.30it/s, Materializing param=gpt_neox.layers.9.attention.query_key_value.bias][A
+Loading weights:  27%|██▋       | 116/436 [00:00<00:00, 6761.43it/s, Materializing param=gpt_neox.layers.9.attention.query_key_value.weight][A
+Loading weights:  27%|██▋       | 116/436 [00:00<00:00, 6745.22it/s, Materializing param=gpt_neox.layers.9.attention.query_key_value.weight][A
+Loading weights:  27%|██▋       | 117/436 [00:00<00:00, 6775.94it/s, Materializing param=gpt_neox.layers.9.input_layernorm.bias]            [A
+Loading weights:  27%|██▋       | 117/436 [00:00<00:00, 6759.51it/s, Materializing param=gpt_neox.layers.9.input_layernorm.bias][A
+Loading weights:  27%|██▋       | 118/436 [00:00<00:00, 6792.21it/s, Materializing param=gpt_neox.layers.9.input_layernorm.weight][A
+Loading weights:  27%|██▋       | 118/436 [00:00<00:00, 6775.94it/s, Materializing param=gpt_neox.layers.9.input_layernorm.weight][A
+Loading weights:  27%|██▋       | 119/436 [00:00<00:00, 6808.94it/s, Materializing param=gpt_neox.layers.9.mlp.dense_4h_to_h.bias][A
+Loading weights:  27%|██▋       | 119/436 [00:00<00:00, 6792.81it/s, Materializing param=gpt_neox.layers.9.mlp.dense_4h_to_h.bias][A
+Loading weights:  28%|██▊       | 120/436 [00:00<00:00, 6823.43it/s, Materializing param=gpt_neox.layers.9.mlp.dense_4h_to_h.weight][A
+Loading weights:  28%|██▊       | 120/436 [00:00<00:00, 6807.37it/s, Materializing param=gpt_neox.layers.9.mlp.dense_4h_to_h.weight][A
+Loading weights:  28%|██▊       | 121/436 [00:00<00:00, 6838.66it/s, Materializing param=gpt_neox.layers.9.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  28%|██▊       | 121/436 [00:00<00:00, 6822.67it/s, Materializing param=gpt_neox.layers.9.mlp.dense_h_to_4h.bias][A
+Loading weights:  28%|██▊       | 122/436 [00:00<00:00, 6853.71it/s, Materializing param=gpt_neox.layers.9.mlp.dense_h_to_4h.weight][A
+Loading weights:  28%|██▊       | 122/436 [00:00<00:00, 6837.87it/s, Materializing param=gpt_neox.layers.9.mlp.dense_h_to_4h.weight][A
+Loading weights:  28%|██▊       | 123/436 [00:00<00:00, 6869.32it/s, Materializing param=gpt_neox.layers.9.post_attention_layernorm.bias][A
+Loading weights:  28%|██▊       | 123/436 [00:00<00:00, 6853.44it/s, Materializing param=gpt_neox.layers.9.post_attention_layernorm.bias][A
+Loading weights:  28%|██▊       | 124/436 [00:00<00:00, 6884.37it/s, Materializing param=gpt_neox.layers.9.post_attention_layernorm.weight][A
+Loading weights:  28%|██▊       | 124/436 [00:00<00:00, 6868.55it/s, Materializing param=gpt_neox.layers.9.post_attention_layernorm.weight][A
+Loading weights:  29%|██▊       | 125/436 [00:00<00:00, 6899.62it/s, Materializing param=gpt_neox.layers.10.attention.dense.bias]          [A
+Loading weights:  29%|██▊       | 125/436 [00:00<00:00, 6883.94it/s, Materializing param=gpt_neox.layers.10.attention.dense.bias][A
+Loading weights:  29%|██▉       | 126/436 [00:00<00:00, 6913.78it/s, Materializing param=gpt_neox.layers.10.attention.dense.weight][A
+Loading weights:  29%|██▉       | 126/436 [00:00<00:00, 6896.01it/s, Materializing param=gpt_neox.layers.10.attention.dense.weight][A
+Loading weights:  29%|██▉       | 127/436 [00:00<00:00, 6924.89it/s, Materializing param=gpt_neox.layers.10.attention.query_key_value.bias][A
+Loading weights:  29%|██▉       | 127/436 [00:00<00:00, 6908.55it/s, Materializing param=gpt_neox.layers.10.attention.query_key_value.bias][A
+Loading weights:  29%|██▉       | 128/436 [00:00<00:00, 6937.75it/s, Materializing param=gpt_neox.layers.10.attention.query_key_value.weight][A
+Loading weights:  29%|██▉       | 128/436 [00:00<00:00, 6921.47it/s, Materializing param=gpt_neox.layers.10.attention.query_key_value.weight][A
+Loading weights:  30%|██▉       | 129/436 [00:00<00:00, 6950.37it/s, Materializing param=gpt_neox.layers.10.input_layernorm.bias]            [A
+Loading weights:  30%|██▉       | 129/436 [00:00<00:00, 6934.69it/s, Materializing param=gpt_neox.layers.10.input_layernorm.bias][A
+Loading weights:  30%|██▉       | 130/436 [00:00<00:00, 6963.99it/s, Materializing param=gpt_neox.layers.10.input_layernorm.weight][A
+Loading weights:  30%|██▉       | 130/436 [00:00<00:00, 6948.46it/s, Materializing param=gpt_neox.layers.10.input_layernorm.weight][A
+Loading weights:  30%|███       | 131/436 [00:00<00:00, 6977.72it/s, Materializing param=gpt_neox.layers.10.mlp.dense_4h_to_h.bias][A
+Loading weights:  30%|███       | 131/436 [00:00<00:00, 6961.81it/s, Materializing param=gpt_neox.layers.10.mlp.dense_4h_to_h.bias][A
+Loading weights:  30%|███       | 132/436 [00:00<00:00, 6990.24it/s, Materializing param=gpt_neox.layers.10.mlp.dense_4h_to_h.weight][A
+Loading weights:  30%|███       | 132/436 [00:00<00:00, 6975.18it/s, Materializing param=gpt_neox.layers.10.mlp.dense_4h_to_h.weight][A
+Loading weights:  31%|███       | 133/436 [00:00<00:00, 7004.02it/s, Materializing param=gpt_neox.layers.10.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  31%|███       | 133/436 [00:00<00:00, 6989.11it/s, Materializing param=gpt_neox.layers.10.mlp.dense_h_to_4h.bias][A
+Loading weights:  31%|███       | 134/436 [00:00<00:00, 7018.00it/s, Materializing param=gpt_neox.layers.10.mlp.dense_h_to_4h.weight][A
+Loading weights:  31%|███       | 134/436 [00:00<00:00, 7002.26it/s, Materializing param=gpt_neox.layers.10.mlp.dense_h_to_4h.weight][A
+Loading weights:  31%|███       | 135/436 [00:00<00:00, 7030.61it/s, Materializing param=gpt_neox.layers.10.post_attention_layernorm.bias][A
+Loading weights:  31%|███       | 135/436 [00:00<00:00, 7013.97it/s, Materializing param=gpt_neox.layers.10.post_attention_layernorm.bias][A
+Loading weights:  31%|███       | 136/436 [00:00<00:00, 7041.51it/s, Materializing param=gpt_neox.layers.10.post_attention_layernorm.weight][A
+Loading weights:  31%|███       | 136/436 [00:00<00:00, 7026.15it/s, Materializing param=gpt_neox.layers.10.post_attention_layernorm.weight][A
+Loading weights:  31%|███▏      | 137/436 [00:00<00:00, 7054.18it/s, Materializing param=gpt_neox.layers.11.attention.dense.bias]           [A
+Loading weights:  31%|███▏      | 137/436 [00:00<00:00, 7039.32it/s, Materializing param=gpt_neox.layers.11.attention.dense.bias][A
+Loading weights:  32%|███▏      | 138/436 [00:00<00:00, 7066.29it/s, Materializing param=gpt_neox.layers.11.attention.dense.weight][A
+Loading weights:  32%|███▏      | 138/436 [00:00<00:00, 7051.14it/s, Materializing param=gpt_neox.layers.11.attention.dense.weight][A
+Loading weights:  32%|███▏      | 139/436 [00:00<00:00, 7078.44it/s, Materializing param=gpt_neox.layers.11.attention.query_key_value.bias][A
+Loading weights:  32%|███▏      | 139/436 [00:00<00:00, 7063.34it/s, Materializing param=gpt_neox.layers.11.attention.query_key_value.bias][A
+Loading weights:  32%|███▏      | 140/436 [00:00<00:00, 7089.34it/s, Materializing param=gpt_neox.layers.11.attention.query_key_value.weight][A
+Loading weights:  32%|███▏      | 140/436 [00:00<00:00, 7073.03it/s, Materializing param=gpt_neox.layers.11.attention.query_key_value.weight][A
+Loading weights:  32%|███▏      | 141/436 [00:00<00:00, 7098.75it/s, Materializing param=gpt_neox.layers.11.input_layernorm.bias]            [A
+Loading weights:  32%|███▏      | 141/436 [00:00<00:00, 7084.29it/s, Materializing param=gpt_neox.layers.11.input_layernorm.bias][A
+Loading weights:  33%|███▎      | 142/436 [00:00<00:00, 7111.71it/s, Materializing param=gpt_neox.layers.11.input_layernorm.weight][A
+Loading weights:  33%|███▎      | 142/436 [00:00<00:00, 7097.05it/s, Materializing param=gpt_neox.layers.11.input_layernorm.weight][A
+Loading weights:  33%|███▎      | 143/436 [00:00<00:00, 7124.53it/s, Materializing param=gpt_neox.layers.11.mlp.dense_4h_to_h.bias][A
+Loading weights:  33%|███▎      | 143/436 [00:00<00:00, 7109.83it/s, Materializing param=gpt_neox.layers.11.mlp.dense_4h_to_h.bias][A
+Loading weights:  33%|███▎      | 144/436 [00:00<00:00, 7136.20it/s, Materializing param=gpt_neox.layers.11.mlp.dense_4h_to_h.weight][A
+Loading weights:  33%|███▎      | 144/436 [00:00<00:00, 7121.65it/s, Materializing param=gpt_neox.layers.11.mlp.dense_4h_to_h.weight][A
+Loading weights:  33%|███▎      | 145/436 [00:00<00:00, 7145.15it/s, Materializing param=gpt_neox.layers.11.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  33%|███▎      | 145/436 [00:00<00:00, 7130.33it/s, Materializing param=gpt_neox.layers.11.mlp.dense_h_to_4h.bias][A
+Loading weights:  33%|███▎      | 146/436 [00:00<00:00, 7156.85it/s, Materializing param=gpt_neox.layers.11.mlp.dense_h_to_4h.weight][A
+Loading weights:  33%|███▎      | 146/436 [00:00<00:00, 7142.49it/s, Materializing param=gpt_neox.layers.11.mlp.dense_h_to_4h.weight][A
+Loading weights:  34%|███▎      | 147/436 [00:00<00:00, 7169.25it/s, Materializing param=gpt_neox.layers.11.post_attention_layernorm.bias][A
+Loading weights:  34%|███▎      | 147/436 [00:00<00:00, 7154.86it/s, Materializing param=gpt_neox.layers.11.post_attention_layernorm.bias][A
+Loading weights:  34%|███▍      | 148/436 [00:00<00:00, 7181.20it/s, Materializing param=gpt_neox.layers.11.post_attention_layernorm.weight][A
+Loading weights:  34%|███▍      | 148/436 [00:00<00:00, 7165.03it/s, Materializing param=gpt_neox.layers.11.post_attention_layernorm.weight][A
+Loading weights:  34%|███▍      | 149/436 [00:00<00:00, 7189.13it/s, Materializing param=gpt_neox.layers.12.attention.dense.bias]           [A
+Loading weights:  34%|███▍      | 149/436 [00:00<00:00, 7175.10it/s, Materializing param=gpt_neox.layers.12.attention.dense.bias][A
+Loading weights:  34%|███▍      | 150/436 [00:00<00:00, 7200.36it/s, Materializing param=gpt_neox.layers.12.attention.dense.weight][A
+Loading weights:  34%|███▍      | 150/436 [00:00<00:00, 7186.46it/s, Materializing param=gpt_neox.layers.12.attention.dense.weight][A
+Loading weights:  35%|███▍      | 151/436 [00:00<00:00, 7212.53it/s, Materializing param=gpt_neox.layers.12.attention.query_key_value.bias][A
+Loading weights:  35%|███▍      | 151/436 [00:00<00:00, 7198.27it/s, Materializing param=gpt_neox.layers.12.attention.query_key_value.bias][A
+Loading weights:  35%|███▍      | 152/436 [00:00<00:00, 7223.20it/s, Materializing param=gpt_neox.layers.12.attention.query_key_value.weight][A
+Loading weights:  35%|███▍      | 152/436 [00:00<00:00, 7207.93it/s, Materializing param=gpt_neox.layers.12.attention.query_key_value.weight][A
+Loading weights:  35%|███▌      | 153/436 [00:00<00:00, 7232.29it/s, Materializing param=gpt_neox.layers.12.input_layernorm.bias]            [A
+Loading weights:  35%|███▌      | 153/436 [00:00<00:00, 7217.89it/s, Materializing param=gpt_neox.layers.12.input_layernorm.bias][A
+Loading weights:  35%|███▌      | 154/436 [00:00<00:00, 7241.29it/s, Materializing param=gpt_neox.layers.12.input_layernorm.weight][A
+Loading weights:  35%|███▌      | 154/436 [00:00<00:00, 7226.62it/s, Materializing param=gpt_neox.layers.12.input_layernorm.weight][A
+Loading weights:  36%|███▌      | 155/436 [00:00<00:00, 7251.97it/s, Materializing param=gpt_neox.layers.12.mlp.dense_4h_to_h.bias][A
+Loading weights:  36%|███▌      | 155/436 [00:00<00:00, 7238.16it/s, Materializing param=gpt_neox.layers.12.mlp.dense_4h_to_h.bias][A
+Loading weights:  36%|███▌      | 156/436 [00:00<00:00, 7262.38it/s, Materializing param=gpt_neox.layers.12.mlp.dense_4h_to_h.weight][A
+Loading weights:  36%|███▌      | 156/436 [00:00<00:00, 7248.22it/s, Materializing param=gpt_neox.layers.12.mlp.dense_4h_to_h.weight][A
+Loading weights:  36%|███▌      | 157/436 [00:00<00:00, 7273.01it/s, Materializing param=gpt_neox.layers.12.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  36%|███▌      | 157/436 [00:00<00:00, 7259.30it/s, Materializing param=gpt_neox.layers.12.mlp.dense_h_to_4h.bias][A
+Loading weights:  36%|███▌      | 158/436 [00:00<00:00, 7283.38it/s, Materializing param=gpt_neox.layers.12.mlp.dense_h_to_4h.weight][A
+Loading weights:  36%|███▌      | 158/436 [00:00<00:00, 7269.64it/s, Materializing param=gpt_neox.layers.12.mlp.dense_h_to_4h.weight][A
+Loading weights:  36%|███▋      | 159/436 [00:00<00:00, 7293.48it/s, Materializing param=gpt_neox.layers.12.post_attention_layernorm.bias][A
+Loading weights:  36%|███▋      | 159/436 [00:00<00:00, 7279.79it/s, Materializing param=gpt_neox.layers.12.post_attention_layernorm.bias][A
+Loading weights:  37%|███▋      | 160/436 [00:00<00:00, 7304.29it/s, Materializing param=gpt_neox.layers.12.post_attention_layernorm.weight][A
+Loading weights:  37%|███▋      | 160/436 [00:00<00:00, 7290.48it/s, Materializing param=gpt_neox.layers.12.post_attention_layernorm.weight][A
+Loading weights:  37%|███▋      | 161/436 [00:00<00:00, 7314.67it/s, Materializing param=gpt_neox.layers.13.attention.dense.bias]           [A
+Loading weights:  37%|███▋      | 161/436 [00:00<00:00, 7300.75it/s, Materializing param=gpt_neox.layers.13.attention.dense.bias][A
+Loading weights:  37%|███▋      | 162/436 [00:00<00:00, 7323.61it/s, Materializing param=gpt_neox.layers.13.attention.dense.weight][A
+Loading weights:  37%|███▋      | 162/436 [00:00<00:00, 7309.98it/s, Materializing param=gpt_neox.layers.13.attention.dense.weight][A
+Loading weights:  37%|███▋      | 163/436 [00:00<00:00, 7333.41it/s, Materializing param=gpt_neox.layers.13.attention.query_key_value.bias][A
+Loading weights:  37%|███▋      | 163/436 [00:00<00:00, 7317.71it/s, Materializing param=gpt_neox.layers.13.attention.query_key_value.bias][A
+Loading weights:  38%|███▊      | 164/436 [00:00<00:00, 7339.90it/s, Materializing param=gpt_neox.layers.13.attention.query_key_value.weight][A
+Loading weights:  38%|███▊      | 164/436 [00:00<00:00, 7325.98it/s, Materializing param=gpt_neox.layers.13.attention.query_key_value.weight][A
+Loading weights:  38%|███▊      | 165/436 [00:00<00:00, 7349.21it/s, Materializing param=gpt_neox.layers.13.input_layernorm.bias]            [A
+Loading weights:  38%|███▊      | 165/436 [00:00<00:00, 7335.65it/s, Materializing param=gpt_neox.layers.13.input_layernorm.bias][A
+Loading weights:  38%|███▊      | 166/436 [00:00<00:00, 7358.82it/s, Materializing param=gpt_neox.layers.13.input_layernorm.weight][A
+Loading weights:  38%|███▊      | 166/436 [00:00<00:00, 7345.46it/s, Materializing param=gpt_neox.layers.13.input_layernorm.weight][A
+Loading weights:  38%|███▊      | 167/436 [00:00<00:00, 7369.27it/s, Materializing param=gpt_neox.layers.13.mlp.dense_4h_to_h.bias][A
+Loading weights:  38%|███▊      | 167/436 [00:00<00:00, 7355.88it/s, Materializing param=gpt_neox.layers.13.mlp.dense_4h_to_h.bias][A
+Loading weights:  39%|███▊      | 168/436 [00:00<00:00, 7378.46it/s, Materializing param=gpt_neox.layers.13.mlp.dense_4h_to_h.weight][A
+Loading weights:  39%|███▊      | 168/436 [00:00<00:00, 7365.12it/s, Materializing param=gpt_neox.layers.13.mlp.dense_4h_to_h.weight][A
+Loading weights:  39%|███▉      | 169/436 [00:00<00:00, 7388.03it/s, Materializing param=gpt_neox.layers.13.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  39%|███▉      | 169/436 [00:00<00:00, 7374.35it/s, Materializing param=gpt_neox.layers.13.mlp.dense_h_to_4h.bias][A
+Loading weights:  39%|███▉      | 170/436 [00:00<00:00, 7397.67it/s, Materializing param=gpt_neox.layers.13.mlp.dense_h_to_4h.weight][A
+Loading weights:  39%|███▉      | 170/436 [00:00<00:00, 7383.88it/s, Materializing param=gpt_neox.layers.13.mlp.dense_h_to_4h.weight][A
+Loading weights:  39%|███▉      | 171/436 [00:00<00:00, 7406.45it/s, Materializing param=gpt_neox.layers.13.post_attention_layernorm.bias][A
+Loading weights:  39%|███▉      | 171/436 [00:00<00:00, 7392.86it/s, Materializing param=gpt_neox.layers.13.post_attention_layernorm.bias][A
+Loading weights:  39%|███▉      | 172/436 [00:00<00:00, 7415.31it/s, Materializing param=gpt_neox.layers.13.post_attention_layernorm.weight][A
+Loading weights:  39%|███▉      | 172/436 [00:00<00:00, 7401.84it/s, Materializing param=gpt_neox.layers.13.post_attention_layernorm.weight][A
+Loading weights:  40%|███▉      | 173/436 [00:00<00:00, 7421.50it/s, Materializing param=gpt_neox.layers.14.attention.dense.bias]           [A
+Loading weights:  40%|███▉      | 173/436 [00:00<00:00, 7408.24it/s, Materializing param=gpt_neox.layers.14.attention.dense.bias][A
+Loading weights:  40%|███▉      | 174/436 [00:00<00:00, 7428.91it/s, Materializing param=gpt_neox.layers.14.attention.dense.weight][A
+Loading weights:  40%|███▉      | 174/436 [00:00<00:00, 7415.55it/s, Materializing param=gpt_neox.layers.14.attention.dense.weight][A
+Loading weights:  40%|████      | 175/436 [00:00<00:00, 7437.84it/s, Materializing param=gpt_neox.layers.14.attention.query_key_value.bias][A
+Loading weights:  40%|████      | 175/436 [00:00<00:00, 7424.45it/s, Materializing param=gpt_neox.layers.14.attention.query_key_value.bias][A
+Loading weights:  40%|████      | 176/436 [00:00<00:00, 7446.46it/s, Materializing param=gpt_neox.layers.14.attention.query_key_value.weight][A
+Loading weights:  40%|████      | 176/436 [00:00<00:00, 7433.19it/s, Materializing param=gpt_neox.layers.14.attention.query_key_value.weight][A
+Loading weights:  41%|████      | 177/436 [00:00<00:00, 7454.86it/s, Materializing param=gpt_neox.layers.14.input_layernorm.bias]            [A
+Loading weights:  41%|████      | 177/436 [00:00<00:00, 7441.55it/s, Materializing param=gpt_neox.layers.14.input_layernorm.bias][A
+Loading weights:  41%|████      | 178/436 [00:00<00:00, 7463.55it/s, Materializing param=gpt_neox.layers.14.input_layernorm.weight][A
+Loading weights:  41%|████      | 178/436 [00:00<00:00, 7450.74it/s, Materializing param=gpt_neox.layers.14.input_layernorm.weight][A
+Loading weights:  41%|████      | 179/436 [00:00<00:00, 7472.39it/s, Materializing param=gpt_neox.layers.14.mlp.dense_4h_to_h.bias][A
+Loading weights:  41%|████      | 179/436 [00:00<00:00, 7459.76it/s, Materializing param=gpt_neox.layers.14.mlp.dense_4h_to_h.bias][A
+Loading weights:  41%|████▏     | 180/436 [00:00<00:00, 7480.63it/s, Materializing param=gpt_neox.layers.14.mlp.dense_4h_to_h.weight][A
+Loading weights:  41%|████▏     | 180/436 [00:00<00:00, 7467.09it/s, Materializing param=gpt_neox.layers.14.mlp.dense_4h_to_h.weight][A
+Loading weights:  42%|████▏     | 181/436 [00:00<00:00, 7486.43it/s, Materializing param=gpt_neox.layers.14.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  42%|████▏     | 181/436 [00:00<00:00, 7472.58it/s, Materializing param=gpt_neox.layers.14.mlp.dense_h_to_4h.bias][A
+Loading weights:  42%|████▏     | 182/436 [00:00<00:00, 7489.68it/s, Materializing param=gpt_neox.layers.14.mlp.dense_h_to_4h.weight][A
+Loading weights:  42%|████▏     | 182/436 [00:00<00:00, 7476.55it/s, Materializing param=gpt_neox.layers.14.mlp.dense_h_to_4h.weight][A
+Loading weights:  42%|████▏     | 183/436 [00:00<00:00, 7497.07it/s, Materializing param=gpt_neox.layers.14.post_attention_layernorm.bias][A
+Loading weights:  42%|████▏     | 183/436 [00:00<00:00, 7484.28it/s, Materializing param=gpt_neox.layers.14.post_attention_layernorm.bias][A
+Loading weights:  42%|████▏     | 184/436 [00:00<00:00, 7504.98it/s, Materializing param=gpt_neox.layers.14.post_attention_layernorm.weight][A
+Loading weights:  42%|████▏     | 184/436 [00:00<00:00, 7491.86it/s, Materializing param=gpt_neox.layers.14.post_attention_layernorm.weight][A
+Loading weights:  42%|████▏     | 185/436 [00:00<00:00, 7512.82it/s, Materializing param=gpt_neox.layers.15.attention.dense.bias]           [A
+Loading weights:  42%|████▏     | 185/436 [00:00<00:00, 7500.33it/s, Materializing param=gpt_neox.layers.15.attention.dense.bias][A
+Loading weights:  43%|████▎     | 186/436 [00:00<00:00, 7520.80it/s, Materializing param=gpt_neox.layers.15.attention.dense.weight][A
+Loading weights:  43%|████▎     | 186/436 [00:00<00:00, 7507.70it/s, Materializing param=gpt_neox.layers.15.attention.dense.weight][A
+Loading weights:  43%|████▎     | 187/436 [00:00<00:00, 7528.15it/s, Materializing param=gpt_neox.layers.15.attention.query_key_value.bias][A
+Loading weights:  43%|████▎     | 187/436 [00:00<00:00, 7515.38it/s, Materializing param=gpt_neox.layers.15.attention.query_key_value.bias][A
+Loading weights:  43%|████▎     | 188/436 [00:00<00:00, 7535.06it/s, Materializing param=gpt_neox.layers.15.attention.query_key_value.weight][A
+Loading weights:  43%|████▎     | 188/436 [00:00<00:00, 7522.20it/s, Materializing param=gpt_neox.layers.15.attention.query_key_value.weight][A
+Loading weights:  43%|████▎     | 189/436 [00:00<00:00, 7542.56it/s, Materializing param=gpt_neox.layers.15.input_layernorm.bias]            [A
+Loading weights:  43%|████▎     | 189/436 [00:00<00:00, 7530.31it/s, Materializing param=gpt_neox.layers.15.input_layernorm.bias][A
+Loading weights:  44%|████▎     | 190/436 [00:00<00:00, 7551.22it/s, Materializing param=gpt_neox.layers.15.input_layernorm.weight][A
+Loading weights:  44%|████▎     | 190/436 [00:00<00:00, 7538.43it/s, Materializing param=gpt_neox.layers.15.input_layernorm.weight][A
+Loading weights:  44%|████▍     | 191/436 [00:00<00:00, 7557.52it/s, Materializing param=gpt_neox.layers.15.mlp.dense_4h_to_h.bias][A
+Loading weights:  44%|████▍     | 191/436 [00:00<00:00, 7544.99it/s, Materializing param=gpt_neox.layers.15.mlp.dense_4h_to_h.bias][A
+Loading weights:  44%|████▍     | 192/436 [00:00<00:00, 7564.62it/s, Materializing param=gpt_neox.layers.15.mlp.dense_4h_to_h.weight][A
+Loading weights:  44%|████▍     | 192/436 [00:00<00:00, 7552.41it/s, Materializing param=gpt_neox.layers.15.mlp.dense_4h_to_h.weight][A
+Loading weights:  44%|████▍     | 193/436 [00:00<00:00, 7572.15it/s, Materializing param=gpt_neox.layers.15.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  44%|████▍     | 193/436 [00:00<00:00, 7560.06it/s, Materializing param=gpt_neox.layers.15.mlp.dense_h_to_4h.bias][A
+Loading weights:  44%|████▍     | 194/436 [00:00<00:00, 7580.11it/s, Materializing param=gpt_neox.layers.15.mlp.dense_h_to_4h.weight][A
+Loading weights:  44%|████▍     | 194/436 [00:00<00:00, 7567.78it/s, Materializing param=gpt_neox.layers.15.mlp.dense_h_to_4h.weight][A
+Loading weights:  45%|████▍     | 195/436 [00:00<00:00, 7587.59it/s, Materializing param=gpt_neox.layers.15.post_attention_layernorm.bias][A
+Loading weights:  45%|████▍     | 195/436 [00:00<00:00, 7575.36it/s, Materializing param=gpt_neox.layers.15.post_attention_layernorm.bias][A
+Loading weights:  45%|████▍     | 196/436 [00:00<00:00, 7594.38it/s, Materializing param=gpt_neox.layers.15.post_attention_layernorm.weight][A
+Loading weights:  45%|████▍     | 196/436 [00:00<00:00, 7581.84it/s, Materializing param=gpt_neox.layers.15.post_attention_layernorm.weight][A
+Loading weights:  45%|████▌     | 197/436 [00:00<00:00, 7601.31it/s, Materializing param=gpt_neox.layers.16.attention.dense.bias]           [A
+Loading weights:  45%|████▌     | 197/436 [00:00<00:00, 7589.23it/s, Materializing param=gpt_neox.layers.16.attention.dense.bias][A
+Loading weights:  45%|████▌     | 198/436 [00:00<00:00, 7608.12it/s, Materializing param=gpt_neox.layers.16.attention.dense.weight][A
+Loading weights:  45%|████▌     | 198/436 [00:00<00:00, 7596.08it/s, Materializing param=gpt_neox.layers.16.attention.dense.weight][A
+Loading weights:  46%|████▌     | 199/436 [00:00<00:00, 7615.15it/s, Materializing param=gpt_neox.layers.16.attention.query_key_value.bias][A
+Loading weights:  46%|████▌     | 199/436 [00:00<00:00, 7602.81it/s, Materializing param=gpt_neox.layers.16.attention.query_key_value.bias][A
+Loading weights:  46%|████▌     | 200/436 [00:00<00:00, 7622.13it/s, Materializing param=gpt_neox.layers.16.attention.query_key_value.weight][A
+Loading weights:  46%|████▌     | 200/436 [00:00<00:00, 7608.51it/s, Materializing param=gpt_neox.layers.16.attention.query_key_value.weight][A
+Loading weights:  46%|████▌     | 201/436 [00:00<00:00, 7626.97it/s, Materializing param=gpt_neox.layers.16.input_layernorm.bias]            [A
+Loading weights:  46%|████▌     | 201/436 [00:00<00:00, 7615.05it/s, Materializing param=gpt_neox.layers.16.input_layernorm.bias][A
+Loading weights:  46%|████▋     | 202/436 [00:00<00:00, 7634.53it/s, Materializing param=gpt_neox.layers.16.input_layernorm.weight][A
+Loading weights:  46%|████▋     | 202/436 [00:00<00:00, 7622.44it/s, Materializing param=gpt_neox.layers.16.input_layernorm.weight][A
+Loading weights:  47%|████▋     | 203/436 [00:00<00:00, 7642.23it/s, Materializing param=gpt_neox.layers.16.mlp.dense_4h_to_h.bias][A
+Loading weights:  47%|████▋     | 203/436 [00:00<00:00, 7630.31it/s, Materializing param=gpt_neox.layers.16.mlp.dense_4h_to_h.bias][A
+Loading weights:  47%|████▋     | 204/436 [00:00<00:00, 7649.19it/s, Materializing param=gpt_neox.layers.16.mlp.dense_4h_to_h.weight][A
+Loading weights:  47%|████▋     | 204/436 [00:00<00:00, 7637.31it/s, Materializing param=gpt_neox.layers.16.mlp.dense_4h_to_h.weight][A
+Loading weights:  47%|████▋     | 205/436 [00:00<00:00, 7656.70it/s, Materializing param=gpt_neox.layers.16.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  47%|████▋     | 205/436 [00:00<00:00, 7644.86it/s, Materializing param=gpt_neox.layers.16.mlp.dense_h_to_4h.bias][A
+Loading weights:  47%|████▋     | 206/436 [00:00<00:00, 7663.89it/s, Materializing param=gpt_neox.layers.16.mlp.dense_h_to_4h.weight][A
+Loading weights:  47%|████▋     | 206/436 [00:00<00:00, 7651.53it/s, Materializing param=gpt_neox.layers.16.mlp.dense_h_to_4h.weight][A
+Loading weights:  47%|████▋     | 207/436 [00:00<00:00, 7670.27it/s, Materializing param=gpt_neox.layers.16.post_attention_layernorm.bias][A
+Loading weights:  47%|████▋     | 207/436 [00:00<00:00, 7658.50it/s, Materializing param=gpt_neox.layers.16.post_attention_layernorm.bias][A
+Loading weights:  48%|████▊     | 208/436 [00:00<00:00, 7677.35it/s, Materializing param=gpt_neox.layers.16.post_attention_layernorm.weight][A
+Loading weights:  48%|████▊     | 208/436 [00:00<00:00, 7665.54it/s, Materializing param=gpt_neox.layers.16.post_attention_layernorm.weight][A
+Loading weights:  48%|████▊     | 209/436 [00:00<00:00, 7684.30it/s, Materializing param=gpt_neox.layers.17.attention.dense.bias]           [A
+Loading weights:  48%|████▊     | 209/436 [00:00<00:00, 7672.53it/s, Materializing param=gpt_neox.layers.17.attention.dense.bias][A
+Loading weights:  48%|████▊     | 210/436 [00:00<00:00, 7687.91it/s, Materializing param=gpt_neox.layers.17.attention.dense.weight][A
+Loading weights:  48%|████▊     | 210/436 [00:00<00:00, 7676.18it/s, Materializing param=gpt_neox.layers.17.attention.dense.weight][A
+Loading weights:  48%|████▊     | 211/436 [00:00<00:00, 7694.36it/s, Materializing param=gpt_neox.layers.17.attention.query_key_value.bias][A
+Loading weights:  48%|████▊     | 211/436 [00:00<00:00, 7682.54it/s, Materializing param=gpt_neox.layers.17.attention.query_key_value.bias][A
+Loading weights:  49%|████▊     | 212/436 [00:00<00:00, 7700.30it/s, Materializing param=gpt_neox.layers.17.attention.query_key_value.weight][A
+Loading weights:  49%|████▊     | 212/436 [00:00<00:00, 7688.52it/s, Materializing param=gpt_neox.layers.17.attention.query_key_value.weight][A
+Loading weights:  49%|████▉     | 213/436 [00:00<00:00, 7706.26it/s, Materializing param=gpt_neox.layers.17.input_layernorm.bias]            [A
+Loading weights:  49%|████▉     | 213/436 [00:00<00:00, 7694.64it/s, Materializing param=gpt_neox.layers.17.input_layernorm.bias][A
+Loading weights:  49%|████▉     | 214/436 [00:00<00:00, 7712.57it/s, Materializing param=gpt_neox.layers.17.input_layernorm.weight][A
+Loading weights:  49%|████▉     | 214/436 [00:00<00:00, 7700.86it/s, Materializing param=gpt_neox.layers.17.input_layernorm.weight][A
+Loading weights:  49%|████▉     | 215/436 [00:00<00:00, 7718.96it/s, Materializing param=gpt_neox.layers.17.mlp.dense_4h_to_h.bias][A
+Loading weights:  49%|████▉     | 215/436 [00:00<00:00, 7707.55it/s, Materializing param=gpt_neox.layers.17.mlp.dense_4h_to_h.bias][A
+Loading weights:  50%|████▉     | 216/436 [00:00<00:00, 7725.63it/s, Materializing param=gpt_neox.layers.17.mlp.dense_4h_to_h.weight][A
+Loading weights:  50%|████▉     | 216/436 [00:00<00:00, 7714.19it/s, Materializing param=gpt_neox.layers.17.mlp.dense_4h_to_h.weight][A
+Loading weights:  50%|████▉     | 217/436 [00:00<00:00, 7732.26it/s, Materializing param=gpt_neox.layers.17.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  50%|████▉     | 217/436 [00:00<00:00, 7721.11it/s, Materializing param=gpt_neox.layers.17.mlp.dense_h_to_4h.bias][A
+Loading weights:  50%|█████     | 218/436 [00:00<00:00, 7738.70it/s, Materializing param=gpt_neox.layers.17.mlp.dense_h_to_4h.weight][A
+Loading weights:  50%|█████     | 218/436 [00:00<00:00, 7727.52it/s, Materializing param=gpt_neox.layers.17.mlp.dense_h_to_4h.weight][A
+Loading weights:  50%|█████     | 219/436 [00:00<00:00, 7743.79it/s, Materializing param=gpt_neox.layers.17.post_attention_layernorm.bias][A
+Loading weights:  50%|█████     | 219/436 [00:00<00:00, 7731.86it/s, Materializing param=gpt_neox.layers.17.post_attention_layernorm.bias][A
+Loading weights:  50%|█████     | 220/436 [00:00<00:00, 7749.16it/s, Materializing param=gpt_neox.layers.17.post_attention_layernorm.weight][A
+Loading weights:  50%|█████     | 220/436 [00:00<00:00, 7737.79it/s, Materializing param=gpt_neox.layers.17.post_attention_layernorm.weight][A
+Loading weights:  51%|█████     | 221/436 [00:00<00:00, 7755.66it/s, Materializing param=gpt_neox.layers.18.attention.dense.bias]           [A
+Loading weights:  51%|█████     | 221/436 [00:00<00:00, 7744.65it/s, Materializing param=gpt_neox.layers.18.attention.dense.bias][A
+Loading weights:  51%|█████     | 222/436 [00:00<00:00, 7761.79it/s, Materializing param=gpt_neox.layers.18.attention.dense.weight][A
+Loading weights:  51%|█████     | 222/436 [00:00<00:00, 7750.68it/s, Materializing param=gpt_neox.layers.18.attention.dense.weight][A
+Loading weights:  51%|█████     | 223/436 [00:00<00:00, 7768.13it/s, Materializing param=gpt_neox.layers.18.attention.query_key_value.bias][A
+Loading weights:  51%|█████     | 223/436 [00:00<00:00, 7756.47it/s, Materializing param=gpt_neox.layers.18.attention.query_key_value.bias][A
+Loading weights:  51%|█████▏    | 224/436 [00:00<00:00, 7773.21it/s, Materializing param=gpt_neox.layers.18.attention.query_key_value.weight][A
+Loading weights:  51%|█████▏    | 224/436 [00:00<00:00, 7761.90it/s, Materializing param=gpt_neox.layers.18.attention.query_key_value.weight][A
+Loading weights:  52%|█████▏    | 225/436 [00:00<00:00, 7778.88it/s, Materializing param=gpt_neox.layers.18.input_layernorm.bias]            [A
+Loading weights:  52%|█████▏    | 225/436 [00:00<00:00, 7767.93it/s, Materializing param=gpt_neox.layers.18.input_layernorm.bias][A
+Loading weights:  52%|█████▏    | 226/436 [00:00<00:00, 7785.22it/s, Materializing param=gpt_neox.layers.18.input_layernorm.weight][A
+Loading weights:  52%|█████▏    | 226/436 [00:00<00:00, 7774.24it/s, Materializing param=gpt_neox.layers.18.input_layernorm.weight][A
+Loading weights:  52%|█████▏    | 227/436 [00:00<00:00, 7791.89it/s, Materializing param=gpt_neox.layers.18.mlp.dense_4h_to_h.bias][A
+Loading weights:  52%|█████▏    | 227/436 [00:00<00:00, 7781.00it/s, Materializing param=gpt_neox.layers.18.mlp.dense_4h_to_h.bias][A
+Loading weights:  52%|█████▏    | 228/436 [00:00<00:00, 7798.01it/s, Materializing param=gpt_neox.layers.18.mlp.dense_4h_to_h.weight][A
+Loading weights:  52%|█████▏    | 228/436 [00:00<00:00, 7785.57it/s, Materializing param=gpt_neox.layers.18.mlp.dense_4h_to_h.weight][A
+Loading weights:  53%|█████▎    | 229/436 [00:00<00:00, 7801.80it/s, Materializing param=gpt_neox.layers.18.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  53%|█████▎    | 229/436 [00:00<00:00, 7790.79it/s, Materializing param=gpt_neox.layers.18.mlp.dense_h_to_4h.bias][A
+Loading weights:  53%|█████▎    | 230/436 [00:00<00:00, 7807.52it/s, Materializing param=gpt_neox.layers.18.mlp.dense_h_to_4h.weight][A
+Loading weights:  53%|█████▎    | 230/436 [00:00<00:00, 7796.67it/s, Materializing param=gpt_neox.layers.18.mlp.dense_h_to_4h.weight][A
+Loading weights:  53%|█████▎    | 231/436 [00:00<00:00, 7813.33it/s, Materializing param=gpt_neox.layers.18.post_attention_layernorm.bias][A
+Loading weights:  53%|█████▎    | 231/436 [00:00<00:00, 7802.26it/s, Materializing param=gpt_neox.layers.18.post_attention_layernorm.bias][A
+Loading weights:  53%|█████▎    | 232/436 [00:00<00:00, 7818.59it/s, Materializing param=gpt_neox.layers.18.post_attention_layernorm.weight][A
+Loading weights:  53%|█████▎    | 232/436 [00:00<00:00, 7807.55it/s, Materializing param=gpt_neox.layers.18.post_attention_layernorm.weight][A
+Loading weights:  53%|█████▎    | 233/436 [00:00<00:00, 7824.38it/s, Materializing param=gpt_neox.layers.19.attention.dense.bias]           [A
+Loading weights:  53%|█████▎    | 233/436 [00:00<00:00, 7813.37it/s, Materializing param=gpt_neox.layers.19.attention.dense.bias][A
+Loading weights:  54%|█████▎    | 234/436 [00:00<00:00, 7829.44it/s, Materializing param=gpt_neox.layers.19.attention.dense.weight][A
+Loading weights:  54%|█████▎    | 234/436 [00:00<00:00, 7818.65it/s, Materializing param=gpt_neox.layers.19.attention.dense.weight][A
+Loading weights:  54%|█████▍    | 235/436 [00:00<00:00, 7835.21it/s, Materializing param=gpt_neox.layers.19.attention.query_key_value.bias][A
+Loading weights:  54%|█████▍    | 235/436 [00:00<00:00, 7824.20it/s, Materializing param=gpt_neox.layers.19.attention.query_key_value.bias][A
+Loading weights:  54%|█████▍    | 236/436 [00:00<00:00, 7840.26it/s, Materializing param=gpt_neox.layers.19.attention.query_key_value.weight][A
+Loading weights:  54%|█████▍    | 236/436 [00:00<00:00, 7829.40it/s, Materializing param=gpt_neox.layers.19.attention.query_key_value.weight][A
+Loading weights:  54%|█████▍    | 237/436 [00:00<00:00, 7845.08it/s, Materializing param=gpt_neox.layers.19.input_layernorm.bias]            [A
+Loading weights:  54%|█████▍    | 237/436 [00:00<00:00, 7832.78it/s, Materializing param=gpt_neox.layers.19.input_layernorm.bias][A
+Loading weights:  55%|█████▍    | 238/436 [00:00<00:00, 7848.76it/s, Materializing param=gpt_neox.layers.19.input_layernorm.weight][A
+Loading weights:  55%|█████▍    | 238/436 [00:00<00:00, 7838.04it/s, Materializing param=gpt_neox.layers.19.input_layernorm.weight][A
+Loading weights:  55%|█████▍    | 239/436 [00:00<00:00, 7854.69it/s, Materializing param=gpt_neox.layers.19.mlp.dense_4h_to_h.bias][A
+Loading weights:  55%|█████▍    | 239/436 [00:00<00:00, 7844.05it/s, Materializing param=gpt_neox.layers.19.mlp.dense_4h_to_h.bias][A
+Loading weights:  55%|█████▌    | 240/436 [00:00<00:00, 7860.14it/s, Materializing param=gpt_neox.layers.19.mlp.dense_4h_to_h.weight][A
+Loading weights:  55%|█████▌    | 240/436 [00:00<00:00, 7849.48it/s, Materializing param=gpt_neox.layers.19.mlp.dense_4h_to_h.weight][A
+Loading weights:  55%|█████▌    | 241/436 [00:00<00:00, 7865.32it/s, Materializing param=gpt_neox.layers.19.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  55%|█████▌    | 241/436 [00:00<00:00, 7854.87it/s, Materializing param=gpt_neox.layers.19.mlp.dense_h_to_4h.bias][A
+Loading weights:  56%|█████▌    | 242/436 [00:00<00:00, 7871.37it/s, Materializing param=gpt_neox.layers.19.mlp.dense_h_to_4h.weight][A
+Loading weights:  56%|█████▌    | 242/436 [00:00<00:00, 7861.07it/s, Materializing param=gpt_neox.layers.19.mlp.dense_h_to_4h.weight][A
+Loading weights:  56%|█████▌    | 243/436 [00:00<00:00, 7877.39it/s, Materializing param=gpt_neox.layers.19.post_attention_layernorm.bias][A
+Loading weights:  56%|█████▌    | 243/436 [00:00<00:00, 7866.75it/s, Materializing param=gpt_neox.layers.19.post_attention_layernorm.bias][A
+Loading weights:  56%|█████▌    | 244/436 [00:00<00:00, 7882.75it/s, Materializing param=gpt_neox.layers.19.post_attention_layernorm.weight][A
+Loading weights:  56%|█████▌    | 244/436 [00:00<00:00, 7872.45it/s, Materializing param=gpt_neox.layers.19.post_attention_layernorm.weight][A
+Loading weights:  56%|█████▌    | 245/436 [00:00<00:00, 7888.87it/s, Materializing param=gpt_neox.layers.20.attention.dense.bias]           [A
+Loading weights:  56%|█████▌    | 245/436 [00:00<00:00, 7877.74it/s, Materializing param=gpt_neox.layers.20.attention.dense.bias][A
+Loading weights:  56%|█████▋    | 246/436 [00:00<00:00, 7892.53it/s, Materializing param=gpt_neox.layers.20.attention.dense.weight][A
+Loading weights:  56%|█████▋    | 246/436 [00:00<00:00, 7881.92it/s, Materializing param=gpt_neox.layers.20.attention.dense.weight][A
+Loading weights:  57%|█████▋    | 247/436 [00:00<00:00, 7895.81it/s, Materializing param=gpt_neox.layers.20.attention.query_key_value.bias][A
+Loading weights:  57%|█████▋    | 247/436 [00:00<00:00, 7884.27it/s, Materializing param=gpt_neox.layers.20.attention.query_key_value.bias][A
+Loading weights:  57%|█████▋    | 248/436 [00:00<00:00, 7897.98it/s, Materializing param=gpt_neox.layers.20.attention.query_key_value.weight][A
+Loading weights:  57%|█████▋    | 248/436 [00:00<00:00, 7887.14it/s, Materializing param=gpt_neox.layers.20.attention.query_key_value.weight][A
+Loading weights:  57%|█████▋    | 249/436 [00:00<00:00, 7901.69it/s, Materializing param=gpt_neox.layers.20.input_layernorm.bias]            [A
+Loading weights:  57%|█████▋    | 249/436 [00:00<00:00, 7891.18it/s, Materializing param=gpt_neox.layers.20.input_layernorm.bias][A
+Loading weights:  57%|█████▋    | 250/436 [00:00<00:00, 7905.96it/s, Materializing param=gpt_neox.layers.20.input_layernorm.weight][A
+Loading weights:  57%|█████▋    | 250/436 [00:00<00:00, 7895.67it/s, Materializing param=gpt_neox.layers.20.input_layernorm.weight][A
+Loading weights:  58%|█████▊    | 251/436 [00:00<00:00, 7911.34it/s, Materializing param=gpt_neox.layers.20.mlp.dense_4h_to_h.bias][A
+Loading weights:  58%|█████▊    | 251/436 [00:00<00:00, 7901.25it/s, Materializing param=gpt_neox.layers.20.mlp.dense_4h_to_h.bias][A
+Loading weights:  58%|█████▊    | 252/436 [00:00<00:00, 7916.39it/s, Materializing param=gpt_neox.layers.20.mlp.dense_4h_to_h.weight][A
+Loading weights:  58%|█████▊    | 252/436 [00:00<00:00, 7906.26it/s, Materializing param=gpt_neox.layers.20.mlp.dense_4h_to_h.weight][A
+Loading weights:  58%|█████▊    | 253/436 [00:00<00:00, 7921.76it/s, Materializing param=gpt_neox.layers.20.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  58%|█████▊    | 253/436 [00:00<00:00, 7911.83it/s, Materializing param=gpt_neox.layers.20.mlp.dense_h_to_4h.bias][A
+Loading weights:  58%|█████▊    | 254/436 [00:00<00:00, 7927.38it/s, Materializing param=gpt_neox.layers.20.mlp.dense_h_to_4h.weight][A
+Loading weights:  58%|█████▊    | 254/436 [00:00<00:00, 7917.31it/s, Materializing param=gpt_neox.layers.20.mlp.dense_h_to_4h.weight][A
+Loading weights:  58%|█████▊    | 255/436 [00:00<00:00, 7932.68it/s, Materializing param=gpt_neox.layers.20.post_attention_layernorm.bias][A
+Loading weights:  58%|█████▊    | 255/436 [00:00<00:00, 7922.40it/s, Materializing param=gpt_neox.layers.20.post_attention_layernorm.bias][A
+Loading weights:  59%|█████▊    | 256/436 [00:00<00:00, 7936.59it/s, Materializing param=gpt_neox.layers.20.post_attention_layernorm.weight][A
+Loading weights:  59%|█████▊    | 256/436 [00:00<00:00, 7925.81it/s, Materializing param=gpt_neox.layers.20.post_attention_layernorm.weight][A
+Loading weights:  59%|█████▉    | 257/436 [00:00<00:00, 7940.71it/s, Materializing param=gpt_neox.layers.21.attention.dense.bias]           [A
+Loading weights:  59%|█████▉    | 257/436 [00:00<00:00, 7930.08it/s, Materializing param=gpt_neox.layers.21.attention.dense.bias][A
+Loading weights:  59%|█████▉    | 258/436 [00:00<00:00, 7944.34it/s, Materializing param=gpt_neox.layers.21.attention.dense.weight][A
+Loading weights:  59%|█████▉    | 258/436 [00:00<00:00, 7934.15it/s, Materializing param=gpt_neox.layers.21.attention.dense.weight][A
+Loading weights:  59%|█████▉    | 259/436 [00:00<00:00, 7948.70it/s, Materializing param=gpt_neox.layers.21.attention.query_key_value.bias][A
+Loading weights:  59%|█████▉    | 259/436 [00:00<00:00, 7938.13it/s, Materializing param=gpt_neox.layers.21.attention.query_key_value.bias][A
+Loading weights:  60%|█████▉    | 260/436 [00:00<00:00, 7952.56it/s, Materializing param=gpt_neox.layers.21.attention.query_key_value.weight][A
+Loading weights:  60%|█████▉    | 260/436 [00:00<00:00, 7942.37it/s, Materializing param=gpt_neox.layers.21.attention.query_key_value.weight][A
+Loading weights:  60%|█████▉    | 261/436 [00:00<00:00, 7956.86it/s, Materializing param=gpt_neox.layers.21.input_layernorm.bias]            [A
+Loading weights:  60%|█████▉    | 261/436 [00:00<00:00, 7946.35it/s, Materializing param=gpt_neox.layers.21.input_layernorm.bias][A
+Loading weights:  60%|██████    | 262/436 [00:00<00:00, 7961.25it/s, Materializing param=gpt_neox.layers.21.input_layernorm.weight][A
+Loading weights:  60%|██████    | 262/436 [00:00<00:00, 7951.17it/s, Materializing param=gpt_neox.layers.21.input_layernorm.weight][A
+Loading weights:  60%|██████    | 263/436 [00:00<00:00, 7965.56it/s, Materializing param=gpt_neox.layers.21.mlp.dense_4h_to_h.bias][A
+Loading weights:  60%|██████    | 263/436 [00:00<00:00, 7955.67it/s, Materializing param=gpt_neox.layers.21.mlp.dense_4h_to_h.bias][A
+Loading weights:  61%|██████    | 264/436 [00:00<00:00, 7970.06it/s, Materializing param=gpt_neox.layers.21.mlp.dense_4h_to_h.weight][A
+Loading weights:  61%|██████    | 264/436 [00:00<00:00, 7960.15it/s, Materializing param=gpt_neox.layers.21.mlp.dense_4h_to_h.weight][A
+Loading weights:  61%|██████    | 265/436 [00:00<00:00, 7974.82it/s, Materializing param=gpt_neox.layers.21.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  61%|██████    | 265/436 [00:00<00:00, 7963.56it/s, Materializing param=gpt_neox.layers.21.mlp.dense_h_to_4h.bias][A
+Loading weights:  61%|██████    | 266/436 [00:00<00:00, 7977.33it/s, Materializing param=gpt_neox.layers.21.mlp.dense_h_to_4h.weight][A
+Loading weights:  61%|██████    | 266/436 [00:00<00:00, 7967.41it/s, Materializing param=gpt_neox.layers.21.mlp.dense_h_to_4h.weight][A
+Loading weights:  61%|██████    | 267/436 [00:00<00:00, 7981.58it/s, Materializing param=gpt_neox.layers.21.post_attention_layernorm.bias][A
+Loading weights:  61%|██████    | 267/436 [00:00<00:00, 7971.35it/s, Materializing param=gpt_neox.layers.21.post_attention_layernorm.bias][A
+Loading weights:  61%|██████▏   | 268/436 [00:00<00:00, 7985.46it/s, Materializing param=gpt_neox.layers.21.post_attention_layernorm.weight][A
+Loading weights:  61%|██████▏   | 268/436 [00:00<00:00, 7975.55it/s, Materializing param=gpt_neox.layers.21.post_attention_layernorm.weight][A
+Loading weights:  62%|██████▏   | 269/436 [00:00<00:00, 7990.28it/s, Materializing param=gpt_neox.layers.22.attention.dense.bias]           [A
+Loading weights:  62%|██████▏   | 269/436 [00:00<00:00, 7980.22it/s, Materializing param=gpt_neox.layers.22.attention.dense.bias][A
+Loading weights:  62%|██████▏   | 270/436 [00:00<00:00, 7994.11it/s, Materializing param=gpt_neox.layers.22.attention.dense.weight][A
+Loading weights:  62%|██████▏   | 270/436 [00:00<00:00, 7984.14it/s, Materializing param=gpt_neox.layers.22.attention.dense.weight][A
+Loading weights:  62%|██████▏   | 271/436 [00:00<00:00, 7997.64it/s, Materializing param=gpt_neox.layers.22.attention.query_key_value.bias][A
+Loading weights:  62%|██████▏   | 271/436 [00:00<00:00, 7987.75it/s, Materializing param=gpt_neox.layers.22.attention.query_key_value.bias][A
+Loading weights:  62%|██████▏   | 272/436 [00:00<00:00, 8001.65it/s, Materializing param=gpt_neox.layers.22.attention.query_key_value.weight][A
+Loading weights:  62%|██████▏   | 272/436 [00:00<00:00, 7991.61it/s, Materializing param=gpt_neox.layers.22.attention.query_key_value.weight][A
+Loading weights:  63%|██████▎   | 273/436 [00:00<00:00, 8005.07it/s, Materializing param=gpt_neox.layers.22.input_layernorm.bias]            [A
+Loading weights:  63%|██████▎   | 273/436 [00:00<00:00, 7995.40it/s, Materializing param=gpt_neox.layers.22.input_layernorm.bias][A
+Loading weights:  63%|██████▎   | 274/436 [00:00<00:00, 8009.64it/s, Materializing param=gpt_neox.layers.22.input_layernorm.weight][A
+Loading weights:  63%|██████▎   | 274/436 [00:00<00:00, 7999.10it/s, Materializing param=gpt_neox.layers.22.input_layernorm.weight][A
+Loading weights:  63%|██████▎   | 275/436 [00:00<00:00, 8012.74it/s, Materializing param=gpt_neox.layers.22.mlp.dense_4h_to_h.bias][A
+Loading weights:  63%|██████▎   | 275/436 [00:00<00:00, 8003.18it/s, Materializing param=gpt_neox.layers.22.mlp.dense_4h_to_h.bias][A
+Loading weights:  63%|██████▎   | 276/436 [00:00<00:00, 8016.54it/s, Materializing param=gpt_neox.layers.22.mlp.dense_4h_to_h.weight][A
+Loading weights:  63%|██████▎   | 276/436 [00:00<00:00, 8006.72it/s, Materializing param=gpt_neox.layers.22.mlp.dense_4h_to_h.weight][A
+Loading weights:  64%|██████▎   | 277/436 [00:00<00:00, 8020.42it/s, Materializing param=gpt_neox.layers.22.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  64%|██████▎   | 277/436 [00:00<00:00, 8010.58it/s, Materializing param=gpt_neox.layers.22.mlp.dense_h_to_4h.bias][A
+Loading weights:  64%|██████▍   | 278/436 [00:00<00:00, 8023.29it/s, Materializing param=gpt_neox.layers.22.mlp.dense_h_to_4h.weight][A
+Loading weights:  64%|██████▍   | 278/436 [00:00<00:00, 8012.76it/s, Materializing param=gpt_neox.layers.22.mlp.dense_h_to_4h.weight][A
+Loading weights:  64%|██████▍   | 279/436 [00:00<00:00, 8026.47it/s, Materializing param=gpt_neox.layers.22.post_attention_layernorm.bias][A
+Loading weights:  64%|██████▍   | 279/436 [00:00<00:00, 8016.79it/s, Materializing param=gpt_neox.layers.22.post_attention_layernorm.bias][A
+Loading weights:  64%|██████▍   | 280/436 [00:00<00:00, 8030.67it/s, Materializing param=gpt_neox.layers.22.post_attention_layernorm.weight][A
+Loading weights:  64%|██████▍   | 280/436 [00:00<00:00, 8020.96it/s, Materializing param=gpt_neox.layers.22.post_attention_layernorm.weight][A
+Loading weights:  64%|██████▍   | 281/436 [00:00<00:00, 8035.17it/s, Materializing param=gpt_neox.layers.23.attention.dense.bias]           [A
+Loading weights:  64%|██████▍   | 281/436 [00:00<00:00, 8025.65it/s, Materializing param=gpt_neox.layers.23.attention.dense.bias][A
+Loading weights:  65%|██████▍   | 282/436 [00:00<00:00, 8039.00it/s, Materializing param=gpt_neox.layers.23.attention.dense.weight][A
+Loading weights:  65%|██████▍   | 282/436 [00:00<00:00, 8029.23it/s, Materializing param=gpt_neox.layers.23.attention.dense.weight][A
+Loading weights:  65%|██████▍   | 283/436 [00:00<00:00, 8042.52it/s, Materializing param=gpt_neox.layers.23.attention.query_key_value.bias][A
+Loading weights:  65%|██████▍   | 283/436 [00:00<00:00, 8031.91it/s, Materializing param=gpt_neox.layers.23.attention.query_key_value.bias][A
+Loading weights:  65%|██████▌   | 284/436 [00:00<00:00, 8043.26it/s, Materializing param=gpt_neox.layers.23.attention.query_key_value.weight][A
+Loading weights:  65%|██████▌   | 284/436 [00:00<00:00, 8033.49it/s, Materializing param=gpt_neox.layers.23.attention.query_key_value.weight][A
+Loading weights:  65%|██████▌   | 285/436 [00:00<00:00, 8046.53it/s, Materializing param=gpt_neox.layers.23.input_layernorm.bias]            [A
+Loading weights:  65%|██████▌   | 285/436 [00:00<00:00, 8036.90it/s, Materializing param=gpt_neox.layers.23.input_layernorm.bias][A
+Loading weights:  66%|██████▌   | 286/436 [00:00<00:00, 8050.00it/s, Materializing param=gpt_neox.layers.23.input_layernorm.weight][A
+Loading weights:  66%|██████▌   | 286/436 [00:00<00:00, 8040.45it/s, Materializing param=gpt_neox.layers.23.input_layernorm.weight][A
+Loading weights:  66%|██████▌   | 287/436 [00:00<00:00, 8054.15it/s, Materializing param=gpt_neox.layers.23.mlp.dense_4h_to_h.bias][A
+Loading weights:  66%|██████▌   | 287/436 [00:00<00:00, 8044.89it/s, Materializing param=gpt_neox.layers.23.mlp.dense_4h_to_h.bias][A
+Loading weights:  66%|██████▌   | 288/436 [00:00<00:00, 8058.22it/s, Materializing param=gpt_neox.layers.23.mlp.dense_4h_to_h.weight][A
+Loading weights:  66%|██████▌   | 288/436 [00:00<00:00, 8048.45it/s, Materializing param=gpt_neox.layers.23.mlp.dense_4h_to_h.weight][A
+Loading weights:  66%|██████▋   | 289/436 [00:00<00:00, 8062.00it/s, Materializing param=gpt_neox.layers.23.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  66%|██████▋   | 289/436 [00:00<00:00, 8052.89it/s, Materializing param=gpt_neox.layers.23.mlp.dense_h_to_4h.bias][A
+Loading weights:  67%|██████▋   | 290/436 [00:00<00:00, 8066.24it/s, Materializing param=gpt_neox.layers.23.mlp.dense_h_to_4h.weight][A
+Loading weights:  67%|██████▋   | 290/436 [00:00<00:00, 8057.15it/s, Materializing param=gpt_neox.layers.23.mlp.dense_h_to_4h.weight][A
+Loading weights:  67%|██████▋   | 291/436 [00:00<00:00, 8070.72it/s, Materializing param=gpt_neox.layers.23.post_attention_layernorm.bias][A
+Loading weights:  67%|██████▋   | 291/436 [00:00<00:00, 8061.17it/s, Materializing param=gpt_neox.layers.23.post_attention_layernorm.bias][A
+Loading weights:  67%|██████▋   | 292/436 [00:00<00:00, 8074.58it/s, Materializing param=gpt_neox.layers.23.post_attention_layernorm.weight][A
+Loading weights:  67%|██████▋   | 292/436 [00:00<00:00, 8065.38it/s, Materializing param=gpt_neox.layers.23.post_attention_layernorm.weight][A
+Loading weights:  67%|██████▋   | 293/436 [00:00<00:00, 8075.83it/s, Materializing param=gpt_neox.layers.24.attention.dense.bias]           [A
+Loading weights:  67%|██████▋   | 293/436 [00:00<00:00, 8066.39it/s, Materializing param=gpt_neox.layers.24.attention.dense.bias][A
+Loading weights:  67%|██████▋   | 294/436 [00:00<00:00, 8078.97it/s, Materializing param=gpt_neox.layers.24.attention.dense.weight][A
+Loading weights:  67%|██████▋   | 294/436 [00:00<00:00, 8070.14it/s, Materializing param=gpt_neox.layers.24.attention.dense.weight][A
+Loading weights:  68%|██████▊   | 295/436 [00:00<00:00, 8082.94it/s, Materializing param=gpt_neox.layers.24.attention.query_key_value.bias][A
+Loading weights:  68%|██████▊   | 295/436 [00:00<00:00, 8073.55it/s, Materializing param=gpt_neox.layers.24.attention.query_key_value.bias][A
+Loading weights:  68%|██████▊   | 296/436 [00:00<00:00, 8085.35it/s, Materializing param=gpt_neox.layers.24.attention.query_key_value.weight][A
+Loading weights:  68%|██████▊   | 296/436 [00:00<00:00, 8076.04it/s, Materializing param=gpt_neox.layers.24.attention.query_key_value.weight][A
+Loading weights:  68%|██████▊   | 297/436 [00:00<00:00, 8088.70it/s, Materializing param=gpt_neox.layers.24.input_layernorm.bias]            [A
+Loading weights:  68%|██████▊   | 297/436 [00:00<00:00, 8079.52it/s, Materializing param=gpt_neox.layers.24.input_layernorm.bias][A
+Loading weights:  68%|██████▊   | 298/436 [00:00<00:00, 8092.08it/s, Materializing param=gpt_neox.layers.24.input_layernorm.weight][A
+Loading weights:  68%|██████▊   | 298/436 [00:00<00:00, 8083.08it/s, Materializing param=gpt_neox.layers.24.input_layernorm.weight][A
+Loading weights:  69%|██████▊   | 299/436 [00:00<00:00, 8096.07it/s, Materializing param=gpt_neox.layers.24.mlp.dense_4h_to_h.bias][A
+Loading weights:  69%|██████▊   | 299/436 [00:00<00:00, 8087.03it/s, Materializing param=gpt_neox.layers.24.mlp.dense_4h_to_h.bias][A
+Loading weights:  69%|██████▉   | 300/436 [00:00<00:00, 8099.09it/s, Materializing param=gpt_neox.layers.24.mlp.dense_4h_to_h.weight][A
+Loading weights:  69%|██████▉   | 300/436 [00:00<00:00, 8090.14it/s, Materializing param=gpt_neox.layers.24.mlp.dense_4h_to_h.weight][A
+Loading weights:  69%|██████▉   | 301/436 [00:00<00:00, 8102.67it/s, Materializing param=gpt_neox.layers.24.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  69%|██████▉   | 301/436 [00:00<00:00, 8093.63it/s, Materializing param=gpt_neox.layers.24.mlp.dense_h_to_4h.bias][A
+Loading weights:  69%|██████▉   | 302/436 [00:00<00:00, 8104.11it/s, Materializing param=gpt_neox.layers.24.mlp.dense_h_to_4h.weight][A
+Loading weights:  69%|██████▉   | 302/436 [00:00<00:00, 8094.58it/s, Materializing param=gpt_neox.layers.24.mlp.dense_h_to_4h.weight][A
+Loading weights:  69%|██████▉   | 303/436 [00:00<00:00, 8106.93it/s, Materializing param=gpt_neox.layers.24.post_attention_layernorm.bias][A
+Loading weights:  69%|██████▉   | 303/436 [00:00<00:00, 8097.68it/s, Materializing param=gpt_neox.layers.24.post_attention_layernorm.bias][A
+Loading weights:  70%|██████▉   | 304/436 [00:00<00:00, 8109.88it/s, Materializing param=gpt_neox.layers.24.post_attention_layernorm.weight][A
+Loading weights:  70%|██████▉   | 304/436 [00:00<00:00, 8100.66it/s, Materializing param=gpt_neox.layers.24.post_attention_layernorm.weight][A
+Loading weights:  70%|██████▉   | 305/436 [00:00<00:00, 8113.19it/s, Materializing param=gpt_neox.layers.25.attention.dense.bias]           [A
+Loading weights:  70%|██████▉   | 305/436 [00:00<00:00, 8104.14it/s, Materializing param=gpt_neox.layers.25.attention.dense.bias][A
+Loading weights:  70%|███████   | 306/436 [00:00<00:00, 8115.85it/s, Materializing param=gpt_neox.layers.25.attention.dense.weight][A
+Loading weights:  70%|███████   | 306/436 [00:00<00:00, 8107.09it/s, Materializing param=gpt_neox.layers.25.attention.dense.weight][A
+Loading weights:  70%|███████   | 307/436 [00:00<00:00, 8119.48it/s, Materializing param=gpt_neox.layers.25.attention.query_key_value.bias][A
+Loading weights:  70%|███████   | 307/436 [00:00<00:00, 8110.42it/s, Materializing param=gpt_neox.layers.25.attention.query_key_value.bias][A
+Loading weights:  71%|███████   | 308/436 [00:00<00:00, 8121.75it/s, Materializing param=gpt_neox.layers.25.attention.query_key_value.weight][A
+Loading weights:  71%|███████   | 308/436 [00:00<00:00, 8112.52it/s, Materializing param=gpt_neox.layers.25.attention.query_key_value.weight][A
+Loading weights:  71%|███████   | 309/436 [00:00<00:00, 8124.83it/s, Materializing param=gpt_neox.layers.25.input_layernorm.bias]            [A
+Loading weights:  71%|███████   | 309/436 [00:00<00:00, 8116.13it/s, Materializing param=gpt_neox.layers.25.input_layernorm.bias][A
+Loading weights:  71%|███████   | 310/436 [00:00<00:00, 8128.14it/s, Materializing param=gpt_neox.layers.25.input_layernorm.weight][A
+Loading weights:  71%|███████   | 310/436 [00:00<00:00, 8119.26it/s, Materializing param=gpt_neox.layers.25.input_layernorm.weight][A
+Loading weights:  71%|███████▏  | 311/436 [00:00<00:00, 8130.32it/s, Materializing param=gpt_neox.layers.25.mlp.dense_4h_to_h.bias][A
+Loading weights:  71%|███████▏  | 311/436 [00:00<00:00, 8121.36it/s, Materializing param=gpt_neox.layers.25.mlp.dense_4h_to_h.bias][A
+Loading weights:  72%|███████▏  | 312/436 [00:00<00:00, 8132.54it/s, Materializing param=gpt_neox.layers.25.mlp.dense_4h_to_h.weight][A
+Loading weights:  72%|███████▏  | 312/436 [00:00<00:00, 8123.60it/s, Materializing param=gpt_neox.layers.25.mlp.dense_4h_to_h.weight][A
+Loading weights:  72%|███████▏  | 313/436 [00:00<00:00, 8135.60it/s, Materializing param=gpt_neox.layers.25.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  72%|███████▏  | 313/436 [00:00<00:00, 8126.79it/s, Materializing param=gpt_neox.layers.25.mlp.dense_h_to_4h.bias][A
+Loading weights:  72%|███████▏  | 314/436 [00:00<00:00, 8138.44it/s, Materializing param=gpt_neox.layers.25.mlp.dense_h_to_4h.weight][A
+Loading weights:  72%|███████▏  | 314/436 [00:00<00:00, 8129.75it/s, Materializing param=gpt_neox.layers.25.mlp.dense_h_to_4h.weight][A
+Loading weights:  72%|███████▏  | 315/436 [00:00<00:00, 8141.97it/s, Materializing param=gpt_neox.layers.25.post_attention_layernorm.bias][A
+Loading weights:  72%|███████▏  | 315/436 [00:00<00:00, 8133.15it/s, Materializing param=gpt_neox.layers.25.post_attention_layernorm.bias][A
+Loading weights:  72%|███████▏  | 316/436 [00:00<00:00, 8144.43it/s, Materializing param=gpt_neox.layers.25.post_attention_layernorm.weight][A
+Loading weights:  72%|███████▏  | 316/436 [00:00<00:00, 8135.53it/s, Materializing param=gpt_neox.layers.25.post_attention_layernorm.weight][A
+Loading weights:  73%|███████▎  | 317/436 [00:00<00:00, 8147.62it/s, Materializing param=gpt_neox.layers.26.attention.dense.bias]           [A
+Loading weights:  73%|███████▎  | 317/436 [00:00<00:00, 8139.04it/s, Materializing param=gpt_neox.layers.26.attention.dense.bias][A
+Loading weights:  73%|███████▎  | 318/436 [00:00<00:00, 8150.20it/s, Materializing param=gpt_neox.layers.26.attention.dense.weight][A
+Loading weights:  73%|███████▎  | 318/436 [00:00<00:00, 8141.50it/s, Materializing param=gpt_neox.layers.26.attention.dense.weight][A
+Loading weights:  73%|███████▎  | 319/436 [00:00<00:00, 8153.51it/s, Materializing param=gpt_neox.layers.26.attention.query_key_value.bias][A
+Loading weights:  73%|███████▎  | 319/436 [00:00<00:00, 8144.68it/s, Materializing param=gpt_neox.layers.26.attention.query_key_value.bias][A
+Loading weights:  73%|███████▎  | 320/436 [00:00<00:00, 8156.31it/s, Materializing param=gpt_neox.layers.26.attention.query_key_value.weight][A
+Loading weights:  73%|███████▎  | 320/436 [00:00<00:00, 8146.16it/s, Materializing param=gpt_neox.layers.26.attention.query_key_value.weight][A
+Loading weights:  74%|███████▎  | 321/436 [00:00<00:00, 8156.37it/s, Materializing param=gpt_neox.layers.26.input_layernorm.bias]            [A
+Loading weights:  74%|███████▎  | 321/436 [00:00<00:00, 8147.93it/s, Materializing param=gpt_neox.layers.26.input_layernorm.bias][A
+Loading weights:  74%|███████▍  | 322/436 [00:00<00:00, 8160.08it/s, Materializing param=gpt_neox.layers.26.input_layernorm.weight][A
+Loading weights:  74%|███████▍  | 322/436 [00:00<00:00, 8151.31it/s, Materializing param=gpt_neox.layers.26.input_layernorm.weight][A
+Loading weights:  74%|███████▍  | 323/436 [00:00<00:00, 8163.52it/s, Materializing param=gpt_neox.layers.26.mlp.dense_4h_to_h.bias][A
+Loading weights:  74%|███████▍  | 323/436 [00:00<00:00, 8153.99it/s, Materializing param=gpt_neox.layers.26.mlp.dense_4h_to_h.bias][A
+Loading weights:  74%|███████▍  | 324/436 [00:00<00:00, 8165.08it/s, Materializing param=gpt_neox.layers.26.mlp.dense_4h_to_h.weight][A
+Loading weights:  74%|███████▍  | 324/436 [00:00<00:00, 8156.60it/s, Materializing param=gpt_neox.layers.26.mlp.dense_4h_to_h.weight][A
+Loading weights:  75%|███████▍  | 325/436 [00:00<00:00, 8168.24it/s, Materializing param=gpt_neox.layers.26.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  75%|███████▍  | 325/436 [00:00<00:00, 8159.29it/s, Materializing param=gpt_neox.layers.26.mlp.dense_h_to_4h.bias][A
+Loading weights:  75%|███████▍  | 326/436 [00:00<00:00, 8171.19it/s, Materializing param=gpt_neox.layers.26.mlp.dense_h_to_4h.weight][A
+Loading weights:  75%|███████▍  | 326/436 [00:00<00:00, 8162.71it/s, Materializing param=gpt_neox.layers.26.mlp.dense_h_to_4h.weight][A
+Loading weights:  75%|███████▌  | 327/436 [00:00<00:00, 8173.59it/s, Materializing param=gpt_neox.layers.26.post_attention_layernorm.bias][A
+Loading weights:  75%|███████▌  | 327/436 [00:00<00:00, 8164.89it/s, Materializing param=gpt_neox.layers.26.post_attention_layernorm.bias][A
+Loading weights:  75%|███████▌  | 328/436 [00:00<00:00, 8176.71it/s, Materializing param=gpt_neox.layers.26.post_attention_layernorm.weight][A
+Loading weights:  75%|███████▌  | 328/436 [00:00<00:00, 8168.07it/s, Materializing param=gpt_neox.layers.26.post_attention_layernorm.weight][A
+Loading weights:  75%|███████▌  | 329/436 [00:00<00:00, 8180.01it/s, Materializing param=gpt_neox.layers.27.attention.dense.bias]           [A
+Loading weights:  75%|███████▌  | 329/436 [00:00<00:00, 8170.32it/s, Materializing param=gpt_neox.layers.27.attention.dense.bias][A
+Loading weights:  76%|███████▌  | 330/436 [00:00<00:00, 8181.30it/s, Materializing param=gpt_neox.layers.27.attention.dense.weight][A
+Loading weights:  76%|███████▌  | 330/436 [00:00<00:00, 8172.84it/s, Materializing param=gpt_neox.layers.27.attention.dense.weight][A
+Loading weights:  76%|███████▌  | 331/436 [00:00<00:00, 8184.37it/s, Materializing param=gpt_neox.layers.27.attention.query_key_value.bias][A
+Loading weights:  76%|███████▌  | 331/436 [00:00<00:00, 8175.65it/s, Materializing param=gpt_neox.layers.27.attention.query_key_value.bias][A
+Loading weights:  76%|███████▌  | 332/436 [00:00<00:00, 8186.94it/s, Materializing param=gpt_neox.layers.27.attention.query_key_value.weight][A
+Loading weights:  76%|███████▌  | 332/436 [00:00<00:00, 8178.58it/s, Materializing param=gpt_neox.layers.27.attention.query_key_value.weight][A
+Loading weights:  76%|███████▋  | 333/436 [00:00<00:00, 8190.22it/s, Materializing param=gpt_neox.layers.27.input_layernorm.bias]            [A
+Loading weights:  76%|███████▋  | 333/436 [00:00<00:00, 8181.83it/s, Materializing param=gpt_neox.layers.27.input_layernorm.bias][A
+Loading weights:  77%|███████▋  | 334/436 [00:00<00:00, 8193.29it/s, Materializing param=gpt_neox.layers.27.input_layernorm.weight][A
+Loading weights:  77%|███████▋  | 334/436 [00:00<00:00, 8184.68it/s, Materializing param=gpt_neox.layers.27.input_layernorm.weight][A
+Loading weights:  77%|███████▋  | 335/436 [00:00<00:00, 8196.59it/s, Materializing param=gpt_neox.layers.27.mlp.dense_4h_to_h.bias][A
+Loading weights:  77%|███████▋  | 335/436 [00:00<00:00, 8187.94it/s, Materializing param=gpt_neox.layers.27.mlp.dense_4h_to_h.bias][A
+Loading weights:  77%|███████▋  | 336/436 [00:00<00:00, 8199.29it/s, Materializing param=gpt_neox.layers.27.mlp.dense_4h_to_h.weight][A
+Loading weights:  77%|███████▋  | 336/436 [00:00<00:00, 8190.76it/s, Materializing param=gpt_neox.layers.27.mlp.dense_4h_to_h.weight][A
+Loading weights:  77%|███████▋  | 337/436 [00:00<00:00, 8202.08it/s, Materializing param=gpt_neox.layers.27.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  77%|███████▋  | 337/436 [00:00<00:00, 8193.76it/s, Materializing param=gpt_neox.layers.27.mlp.dense_h_to_4h.bias][A
+Loading weights:  78%|███████▊  | 338/436 [00:00<00:00, 8205.23it/s, Materializing param=gpt_neox.layers.27.mlp.dense_h_to_4h.weight][A
+Loading weights:  78%|███████▊  | 338/436 [00:00<00:00, 8196.78it/s, Materializing param=gpt_neox.layers.27.mlp.dense_h_to_4h.weight][A
+Loading weights:  78%|███████▊  | 339/436 [00:00<00:00, 8206.33it/s, Materializing param=gpt_neox.layers.27.post_attention_layernorm.bias][A
+Loading weights:  78%|███████▊  | 339/436 [00:00<00:00, 8198.00it/s, Materializing param=gpt_neox.layers.27.post_attention_layernorm.bias][A
+Loading weights:  78%|███████▊  | 340/436 [00:00<00:00, 8209.54it/s, Materializing param=gpt_neox.layers.27.post_attention_layernorm.weight][A
+Loading weights:  78%|███████▊  | 340/436 [00:00<00:00, 8201.23it/s, Materializing param=gpt_neox.layers.27.post_attention_layernorm.weight][A
+Loading weights:  78%|███████▊  | 341/436 [00:00<00:00, 8212.65it/s, Materializing param=gpt_neox.layers.28.attention.dense.bias]           [A
+Loading weights:  78%|███████▊  | 341/436 [00:00<00:00, 8204.59it/s, Materializing param=gpt_neox.layers.28.attention.dense.bias][A
+Loading weights:  78%|███████▊  | 342/436 [00:00<00:00, 8215.79it/s, Materializing param=gpt_neox.layers.28.attention.dense.weight][A
+Loading weights:  78%|███████▊  | 342/436 [00:00<00:00, 8207.80it/s, Materializing param=gpt_neox.layers.28.attention.dense.weight][A
+Loading weights:  79%|███████▊  | 343/436 [00:00<00:00, 8218.96it/s, Materializing param=gpt_neox.layers.28.attention.query_key_value.bias][A
+Loading weights:  79%|███████▊  | 343/436 [00:00<00:00, 8210.70it/s, Materializing param=gpt_neox.layers.28.attention.query_key_value.bias][A
+Loading weights:  79%|███████▉  | 344/436 [00:00<00:00, 8221.92it/s, Materializing param=gpt_neox.layers.28.attention.query_key_value.weight][A
+Loading weights:  79%|███████▉  | 344/436 [00:00<00:00, 8213.78it/s, Materializing param=gpt_neox.layers.28.attention.query_key_value.weight][A
+Loading weights:  79%|███████▉  | 345/436 [00:00<00:00, 8224.87it/s, Materializing param=gpt_neox.layers.28.input_layernorm.bias]            [A
+Loading weights:  79%|███████▉  | 345/436 [00:00<00:00, 8216.84it/s, Materializing param=gpt_neox.layers.28.input_layernorm.bias][A
+Loading weights:  79%|███████▉  | 346/436 [00:00<00:00, 8228.23it/s, Materializing param=gpt_neox.layers.28.input_layernorm.weight][A
+Loading weights:  79%|███████▉  | 346/436 [00:00<00:00, 8220.03it/s, Materializing param=gpt_neox.layers.28.input_layernorm.weight][A
+Loading weights:  80%|███████▉  | 347/436 [00:00<00:00, 8231.57it/s, Materializing param=gpt_neox.layers.28.mlp.dense_4h_to_h.bias][A
+Loading weights:  80%|███████▉  | 347/436 [00:00<00:00, 8223.57it/s, Materializing param=gpt_neox.layers.28.mlp.dense_4h_to_h.bias][A
+Loading weights:  80%|███████▉  | 348/436 [00:00<00:00, 8233.59it/s, Materializing param=gpt_neox.layers.28.mlp.dense_4h_to_h.weight][A
+Loading weights:  80%|███████▉  | 348/436 [00:00<00:00, 8225.28it/s, Materializing param=gpt_neox.layers.28.mlp.dense_4h_to_h.weight][A
+Loading weights:  80%|████████  | 349/436 [00:00<00:00, 8235.69it/s, Materializing param=gpt_neox.layers.28.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  80%|████████  | 349/436 [00:00<00:00, 8227.41it/s, Materializing param=gpt_neox.layers.28.mlp.dense_h_to_4h.bias][A
+Loading weights:  80%|████████  | 350/436 [00:00<00:00, 8238.20it/s, Materializing param=gpt_neox.layers.28.mlp.dense_h_to_4h.weight][A
+Loading weights:  80%|████████  | 350/436 [00:00<00:00, 8230.12it/s, Materializing param=gpt_neox.layers.28.mlp.dense_h_to_4h.weight][A
+Loading weights:  81%|████████  | 351/436 [00:00<00:00, 8241.16it/s, Materializing param=gpt_neox.layers.28.post_attention_layernorm.bias][A
+Loading weights:  81%|████████  | 351/436 [00:00<00:00, 8233.00it/s, Materializing param=gpt_neox.layers.28.post_attention_layernorm.bias][A
+Loading weights:  81%|████████  | 352/436 [00:00<00:00, 8243.96it/s, Materializing param=gpt_neox.layers.28.post_attention_layernorm.weight][A
+Loading weights:  81%|████████  | 352/436 [00:00<00:00, 8235.73it/s, Materializing param=gpt_neox.layers.28.post_attention_layernorm.weight][A
+Loading weights:  81%|████████  | 353/436 [00:00<00:00, 8246.66it/s, Materializing param=gpt_neox.layers.29.attention.dense.bias]           [A
+Loading weights:  81%|████████  | 353/436 [00:00<00:00, 8238.86it/s, Materializing param=gpt_neox.layers.29.attention.dense.bias][A
+Loading weights:  81%|████████  | 354/436 [00:00<00:00, 8249.49it/s, Materializing param=gpt_neox.layers.29.attention.dense.weight][A
+Loading weights:  81%|████████  | 354/436 [00:00<00:00, 8241.47it/s, Materializing param=gpt_neox.layers.29.attention.dense.weight][A
+Loading weights:  81%|████████▏ | 355/436 [00:00<00:00, 8252.34it/s, Materializing param=gpt_neox.layers.29.attention.query_key_value.bias][A
+Loading weights:  81%|████████▏ | 355/436 [00:00<00:00, 8244.34it/s, Materializing param=gpt_neox.layers.29.attention.query_key_value.bias][A
+Loading weights:  82%|████████▏ | 356/436 [00:00<00:00, 8254.27it/s, Materializing param=gpt_neox.layers.29.attention.query_key_value.weight][A
+Loading weights:  82%|████████▏ | 356/436 [00:00<00:00, 8246.02it/s, Materializing param=gpt_neox.layers.29.attention.query_key_value.weight][A
+Loading weights:  82%|████████▏ | 357/436 [00:00<00:00, 8256.59it/s, Materializing param=gpt_neox.layers.29.input_layernorm.bias]            [A
+Loading weights:  82%|████████▏ | 357/436 [00:00<00:00, 8247.50it/s, Materializing param=gpt_neox.layers.29.input_layernorm.bias][A
+Loading weights:  82%|████████▏ | 358/436 [00:00<00:00, 8258.05it/s, Materializing param=gpt_neox.layers.29.input_layernorm.weight][A
+Loading weights:  82%|████████▏ | 358/436 [00:00<00:00, 8250.02it/s, Materializing param=gpt_neox.layers.29.input_layernorm.weight][A
+Loading weights:  82%|████████▏ | 359/436 [00:00<00:00, 8261.03it/s, Materializing param=gpt_neox.layers.29.mlp.dense_4h_to_h.bias][A
+Loading weights:  82%|████████▏ | 359/436 [00:00<00:00, 8253.25it/s, Materializing param=gpt_neox.layers.29.mlp.dense_4h_to_h.bias][A
+Loading weights:  83%|████████▎ | 360/436 [00:00<00:00, 8263.96it/s, Materializing param=gpt_neox.layers.29.mlp.dense_4h_to_h.weight][A
+Loading weights:  83%|████████▎ | 360/436 [00:00<00:00, 8256.14it/s, Materializing param=gpt_neox.layers.29.mlp.dense_4h_to_h.weight][A
+Loading weights:  83%|████████▎ | 361/436 [00:00<00:00, 8266.96it/s, Materializing param=gpt_neox.layers.29.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  83%|████████▎ | 361/436 [00:00<00:00, 8259.16it/s, Materializing param=gpt_neox.layers.29.mlp.dense_h_to_4h.bias][A
+Loading weights:  83%|████████▎ | 362/436 [00:00<00:00, 8269.72it/s, Materializing param=gpt_neox.layers.29.mlp.dense_h_to_4h.weight][A
+Loading weights:  83%|████████▎ | 362/436 [00:00<00:00, 8261.72it/s, Materializing param=gpt_neox.layers.29.mlp.dense_h_to_4h.weight][A
+Loading weights:  83%|████████▎ | 363/436 [00:00<00:00, 8272.52it/s, Materializing param=gpt_neox.layers.29.post_attention_layernorm.bias][A
+Loading weights:  83%|████████▎ | 363/436 [00:00<00:00, 8264.75it/s, Materializing param=gpt_neox.layers.29.post_attention_layernorm.bias][A
+Loading weights:  83%|████████▎ | 364/436 [00:00<00:00, 8275.08it/s, Materializing param=gpt_neox.layers.29.post_attention_layernorm.weight][A
+Loading weights:  83%|████████▎ | 364/436 [00:00<00:00, 8267.14it/s, Materializing param=gpt_neox.layers.29.post_attention_layernorm.weight][A
+Loading weights:  84%|████████▎ | 365/436 [00:00<00:00, 8277.04it/s, Materializing param=gpt_neox.layers.30.attention.dense.bias]           [A
+Loading weights:  84%|████████▎ | 365/436 [00:00<00:00, 8269.21it/s, Materializing param=gpt_neox.layers.30.attention.dense.bias][A
+Loading weights:  84%|████████▍ | 366/436 [00:00<00:00, 8279.26it/s, Materializing param=gpt_neox.layers.30.attention.dense.weight][A
+Loading weights:  84%|████████▍ | 366/436 [00:00<00:00, 8270.34it/s, Materializing param=gpt_neox.layers.30.attention.dense.weight][A
+Loading weights:  84%|████████▍ | 367/436 [00:00<00:00, 8280.00it/s, Materializing param=gpt_neox.layers.30.attention.query_key_value.bias][A
+Loading weights:  84%|████████▍ | 367/436 [00:00<00:00, 8272.26it/s, Materializing param=gpt_neox.layers.30.attention.query_key_value.bias][A
+Loading weights:  84%|████████▍ | 368/436 [00:00<00:00, 8282.47it/s, Materializing param=gpt_neox.layers.30.attention.query_key_value.weight][A
+Loading weights:  84%|████████▍ | 368/436 [00:00<00:00, 8274.61it/s, Materializing param=gpt_neox.layers.30.attention.query_key_value.weight][A
+Loading weights:  85%|████████▍ | 369/436 [00:00<00:00, 8285.01it/s, Materializing param=gpt_neox.layers.30.input_layernorm.bias]            [A
+Loading weights:  85%|████████▍ | 369/436 [00:00<00:00, 8277.39it/s, Materializing param=gpt_neox.layers.30.input_layernorm.bias][A
+Loading weights:  85%|████████▍ | 370/436 [00:00<00:00, 8288.12it/s, Materializing param=gpt_neox.layers.30.input_layernorm.weight][A
+Loading weights:  85%|████████▍ | 370/436 [00:00<00:00, 8280.56it/s, Materializing param=gpt_neox.layers.30.input_layernorm.weight][A
+Loading weights:  85%|████████▌ | 371/436 [00:00<00:00, 8291.35it/s, Materializing param=gpt_neox.layers.30.mlp.dense_4h_to_h.bias][A
+Loading weights:  85%|████████▌ | 371/436 [00:00<00:00, 8283.84it/s, Materializing param=gpt_neox.layers.30.mlp.dense_4h_to_h.bias][A
+Loading weights:  85%|████████▌ | 372/436 [00:00<00:00, 8294.07it/s, Materializing param=gpt_neox.layers.30.mlp.dense_4h_to_h.weight][A
+Loading weights:  85%|████████▌ | 372/436 [00:00<00:00, 8286.50it/s, Materializing param=gpt_neox.layers.30.mlp.dense_4h_to_h.weight][A
+Loading weights:  86%|████████▌ | 373/436 [00:00<00:00, 8296.74it/s, Materializing param=gpt_neox.layers.30.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  86%|████████▌ | 373/436 [00:00<00:00, 8289.05it/s, Materializing param=gpt_neox.layers.30.mlp.dense_h_to_4h.bias][A
+Loading weights:  86%|████████▌ | 374/436 [00:00<00:00, 8299.22it/s, Materializing param=gpt_neox.layers.30.mlp.dense_h_to_4h.weight][A
+Loading weights:  86%|████████▌ | 374/436 [00:00<00:00, 8291.29it/s, Materializing param=gpt_neox.layers.30.mlp.dense_h_to_4h.weight][A
+Loading weights:  86%|████████▌ | 375/436 [00:00<00:00, 8300.99it/s, Materializing param=gpt_neox.layers.30.post_attention_layernorm.bias][A
+Loading weights:  86%|████████▌ | 375/436 [00:00<00:00, 8293.42it/s, Materializing param=gpt_neox.layers.30.post_attention_layernorm.bias][A
+Loading weights:  86%|████████▌ | 376/436 [00:00<00:00, 8302.54it/s, Materializing param=gpt_neox.layers.30.post_attention_layernorm.weight][A
+Loading weights:  86%|████████▌ | 376/436 [00:00<00:00, 8294.59it/s, Materializing param=gpt_neox.layers.30.post_attention_layernorm.weight][A
+Loading weights:  86%|████████▋ | 377/436 [00:00<00:00, 8304.59it/s, Materializing param=gpt_neox.layers.31.attention.dense.bias]           [A
+Loading weights:  86%|████████▋ | 377/436 [00:00<00:00, 8297.27it/s, Materializing param=gpt_neox.layers.31.attention.dense.bias][A
+Loading weights:  87%|████████▋ | 378/436 [00:00<00:00, 8307.38it/s, Materializing param=gpt_neox.layers.31.attention.dense.weight][A
+Loading weights:  87%|████████▋ | 378/436 [00:00<00:00, 8299.99it/s, Materializing param=gpt_neox.layers.31.attention.dense.weight][A
+Loading weights:  87%|████████▋ | 379/436 [00:00<00:00, 8310.07it/s, Materializing param=gpt_neox.layers.31.attention.query_key_value.bias][A
+Loading weights:  87%|████████▋ | 379/436 [00:00<00:00, 8302.26it/s, Materializing param=gpt_neox.layers.31.attention.query_key_value.bias][A
+Loading weights:  87%|████████▋ | 380/436 [00:00<00:00, 8312.22it/s, Materializing param=gpt_neox.layers.31.attention.query_key_value.weight][A
+Loading weights:  87%|████████▋ | 380/436 [00:00<00:00, 8304.64it/s, Materializing param=gpt_neox.layers.31.attention.query_key_value.weight][A
+Loading weights:  87%|████████▋ | 381/436 [00:00<00:00, 8314.76it/s, Materializing param=gpt_neox.layers.31.input_layernorm.bias]            [A
+Loading weights:  87%|████████▋ | 381/436 [00:00<00:00, 8307.28it/s, Materializing param=gpt_neox.layers.31.input_layernorm.bias][A
+Loading weights:  88%|████████▊ | 382/436 [00:00<00:00, 8317.58it/s, Materializing param=gpt_neox.layers.31.input_layernorm.weight][A
+Loading weights:  88%|████████▊ | 382/436 [00:00<00:00, 8310.16it/s, Materializing param=gpt_neox.layers.31.input_layernorm.weight][A
+Loading weights:  88%|████████▊ | 383/436 [00:00<00:00, 8320.44it/s, Materializing param=gpt_neox.layers.31.mlp.dense_4h_to_h.bias][A
+Loading weights:  88%|████████▊ | 383/436 [00:00<00:00, 8313.03it/s, Materializing param=gpt_neox.layers.31.mlp.dense_4h_to_h.bias][A
+Loading weights:  88%|████████▊ | 384/436 [00:00<00:00, 8323.11it/s, Materializing param=gpt_neox.layers.31.mlp.dense_4h_to_h.weight][A
+Loading weights:  88%|████████▊ | 384/436 [00:00<00:00, 8315.63it/s, Materializing param=gpt_neox.layers.31.mlp.dense_4h_to_h.weight][A
+Loading weights:  88%|████████▊ | 385/436 [00:00<00:00, 8324.69it/s, Materializing param=gpt_neox.layers.31.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  88%|████████▊ | 385/436 [00:00<00:00, 8317.15it/s, Materializing param=gpt_neox.layers.31.mlp.dense_h_to_4h.bias][A
+Loading weights:  89%|████████▊ | 386/436 [00:00<00:00, 8326.65it/s, Materializing param=gpt_neox.layers.31.mlp.dense_h_to_4h.weight][A
+Loading weights:  89%|████████▊ | 386/436 [00:00<00:00, 8319.12it/s, Materializing param=gpt_neox.layers.31.mlp.dense_h_to_4h.weight][A
+Loading weights:  89%|████████▉ | 387/436 [00:00<00:00, 8329.12it/s, Materializing param=gpt_neox.layers.31.post_attention_layernorm.bias][A
+Loading weights:  89%|████████▉ | 387/436 [00:00<00:00, 8321.69it/s, Materializing param=gpt_neox.layers.31.post_attention_layernorm.bias][A
+Loading weights:  89%|████████▉ | 388/436 [00:00<00:00, 8331.66it/s, Materializing param=gpt_neox.layers.31.post_attention_layernorm.weight][A
+Loading weights:  89%|████████▉ | 388/436 [00:00<00:00, 8324.03it/s, Materializing param=gpt_neox.layers.31.post_attention_layernorm.weight][A
+Loading weights:  89%|████████▉ | 389/436 [00:00<00:00, 8333.30it/s, Materializing param=gpt_neox.layers.32.attention.dense.bias]           [A
+Loading weights:  89%|████████▉ | 389/436 [00:00<00:00, 8325.94it/s, Materializing param=gpt_neox.layers.32.attention.dense.bias][A
+Loading weights:  89%|████████▉ | 390/436 [00:00<00:00, 8335.05it/s, Materializing param=gpt_neox.layers.32.attention.dense.weight][A
+Loading weights:  89%|████████▉ | 390/436 [00:00<00:00, 8327.62it/s, Materializing param=gpt_neox.layers.32.attention.dense.weight][A
+Loading weights:  90%|████████▉ | 391/436 [00:00<00:00, 8337.05it/s, Materializing param=gpt_neox.layers.32.attention.query_key_value.bias][A
+Loading weights:  90%|████████▉ | 391/436 [00:00<00:00, 8329.43it/s, Materializing param=gpt_neox.layers.32.attention.query_key_value.bias][A
+Loading weights:  90%|████████▉ | 392/436 [00:00<00:00, 8338.62it/s, Materializing param=gpt_neox.layers.32.attention.query_key_value.weight][A
+Loading weights:  90%|████████▉ | 392/436 [00:00<00:00, 8331.06it/s, Materializing param=gpt_neox.layers.32.attention.query_key_value.weight][A
+Loading weights:  90%|█████████ | 393/436 [00:00<00:00, 8340.48it/s, Materializing param=gpt_neox.layers.32.input_layernorm.bias]            [A
+Loading weights:  90%|█████████ | 393/436 [00:00<00:00, 8332.97it/s, Materializing param=gpt_neox.layers.32.input_layernorm.bias][A
+Loading weights:  90%|█████████ | 394/436 [00:00<00:00, 8342.58it/s, Materializing param=gpt_neox.layers.32.input_layernorm.weight][A
+Loading weights:  90%|█████████ | 394/436 [00:00<00:00, 8334.46it/s, Materializing param=gpt_neox.layers.32.input_layernorm.weight][A
+Loading weights:  91%|█████████ | 395/436 [00:00<00:00, 8343.32it/s, Materializing param=gpt_neox.layers.32.mlp.dense_4h_to_h.bias][A
+Loading weights:  91%|█████████ | 395/436 [00:00<00:00, 8336.02it/s, Materializing param=gpt_neox.layers.32.mlp.dense_4h_to_h.bias][A
+Loading weights:  91%|█████████ | 396/436 [00:00<00:00, 8345.36it/s, Materializing param=gpt_neox.layers.32.mlp.dense_4h_to_h.weight][A
+Loading weights:  91%|█████████ | 396/436 [00:00<00:00, 8338.03it/s, Materializing param=gpt_neox.layers.32.mlp.dense_4h_to_h.weight][A
+Loading weights:  91%|█████████ | 397/436 [00:00<00:00, 8347.06it/s, Materializing param=gpt_neox.layers.32.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  91%|█████████ | 397/436 [00:00<00:00, 8339.95it/s, Materializing param=gpt_neox.layers.32.mlp.dense_h_to_4h.bias][A
+Loading weights:  91%|█████████▏| 398/436 [00:00<00:00, 8349.63it/s, Materializing param=gpt_neox.layers.32.mlp.dense_h_to_4h.weight][A
+Loading weights:  91%|█████████▏| 398/436 [00:00<00:00, 8342.29it/s, Materializing param=gpt_neox.layers.32.mlp.dense_h_to_4h.weight][A
+Loading weights:  92%|█████████▏| 399/436 [00:00<00:00, 8351.77it/s, Materializing param=gpt_neox.layers.32.post_attention_layernorm.bias][A
+Loading weights:  92%|█████████▏| 399/436 [00:00<00:00, 8344.40it/s, Materializing param=gpt_neox.layers.32.post_attention_layernorm.bias][A
+Loading weights:  92%|█████████▏| 400/436 [00:00<00:00, 8353.98it/s, Materializing param=gpt_neox.layers.32.post_attention_layernorm.weight][A
+Loading weights:  92%|█████████▏| 400/436 [00:00<00:00, 8346.38it/s, Materializing param=gpt_neox.layers.32.post_attention_layernorm.weight][A
+Loading weights:  92%|█████████▏| 401/436 [00:00<00:00, 8355.52it/s, Materializing param=gpt_neox.layers.33.attention.dense.bias]           [A
+Loading weights:  92%|█████████▏| 401/436 [00:00<00:00, 8348.22it/s, Materializing param=gpt_neox.layers.33.attention.dense.bias][A
+Loading weights:  92%|█████████▏| 402/436 [00:00<00:00, 8357.55it/s, Materializing param=gpt_neox.layers.33.attention.dense.weight][A
+Loading weights:  92%|█████████▏| 402/436 [00:00<00:00, 8350.30it/s, Materializing param=gpt_neox.layers.33.attention.dense.weight][A
+Loading weights:  92%|█████████▏| 403/436 [00:00<00:00, 8359.69it/s, Materializing param=gpt_neox.layers.33.attention.query_key_value.bias][A
+Loading weights:  92%|█████████▏| 403/436 [00:00<00:00, 8351.35it/s, Materializing param=gpt_neox.layers.33.attention.query_key_value.bias][A
+Loading weights:  93%|█████████▎| 404/436 [00:00<00:00, 8360.01it/s, Materializing param=gpt_neox.layers.33.attention.query_key_value.weight][A
+Loading weights:  93%|█████████▎| 404/436 [00:00<00:00, 8352.55it/s, Materializing param=gpt_neox.layers.33.attention.query_key_value.weight][A
+Loading weights:  93%|█████████▎| 405/436 [00:00<00:00, 8361.52it/s, Materializing param=gpt_neox.layers.33.input_layernorm.bias]            [A
+Loading weights:  93%|█████████▎| 405/436 [00:00<00:00, 8354.32it/s, Materializing param=gpt_neox.layers.33.input_layernorm.bias][A
+Loading weights:  93%|█████████▎| 406/436 [00:00<00:00, 8363.76it/s, Materializing param=gpt_neox.layers.33.input_layernorm.weight][A
+Loading weights:  93%|█████████▎| 406/436 [00:00<00:00, 8356.70it/s, Materializing param=gpt_neox.layers.33.input_layernorm.weight][A
+Loading weights:  93%|█████████▎| 407/436 [00:00<00:00, 8366.12it/s, Materializing param=gpt_neox.layers.33.mlp.dense_4h_to_h.bias][A
+Loading weights:  93%|█████████▎| 407/436 [00:00<00:00, 8359.11it/s, Materializing param=gpt_neox.layers.33.mlp.dense_4h_to_h.bias][A
+Loading weights:  94%|█████████▎| 408/436 [00:00<00:00, 8368.18it/s, Materializing param=gpt_neox.layers.33.mlp.dense_4h_to_h.weight][A
+Loading weights:  94%|█████████▎| 408/436 [00:00<00:00, 8361.15it/s, Materializing param=gpt_neox.layers.33.mlp.dense_4h_to_h.weight][A
+Loading weights:  94%|█████████▍| 409/436 [00:00<00:00, 8370.56it/s, Materializing param=gpt_neox.layers.33.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  94%|█████████▍| 409/436 [00:00<00:00, 8363.50it/s, Materializing param=gpt_neox.layers.33.mlp.dense_h_to_4h.bias][A
+Loading weights:  94%|█████████▍| 410/436 [00:00<00:00, 8372.80it/s, Materializing param=gpt_neox.layers.33.mlp.dense_h_to_4h.weight][A
+Loading weights:  94%|█████████▍| 410/436 [00:00<00:00, 8365.88it/s, Materializing param=gpt_neox.layers.33.mlp.dense_h_to_4h.weight][A
+Loading weights:  94%|█████████▍| 411/436 [00:00<00:00, 8374.96it/s, Materializing param=gpt_neox.layers.33.post_attention_layernorm.bias][A
+Loading weights:  94%|█████████▍| 411/436 [00:00<00:00, 8367.80it/s, Materializing param=gpt_neox.layers.33.post_attention_layernorm.bias][A
+Loading weights:  94%|█████████▍| 412/436 [00:00<00:00, 8377.18it/s, Materializing param=gpt_neox.layers.33.post_attention_layernorm.weight][A
+Loading weights:  94%|█████████▍| 412/436 [00:00<00:00, 8370.00it/s, Materializing param=gpt_neox.layers.33.post_attention_layernorm.weight][A
+Loading weights:  95%|█████████▍| 413/436 [00:00<00:00, 8377.61it/s, Materializing param=gpt_neox.layers.34.attention.dense.bias]           [A
+Loading weights:  95%|█████████▍| 413/436 [00:00<00:00, 8370.49it/s, Materializing param=gpt_neox.layers.34.attention.dense.bias][A
+Loading weights:  95%|█████████▍| 414/436 [00:00<00:00, 8378.89it/s, Materializing param=gpt_neox.layers.34.attention.dense.weight][A
+Loading weights:  95%|█████████▍| 414/436 [00:00<00:00, 8371.66it/s, Materializing param=gpt_neox.layers.34.attention.dense.weight][A
+Loading weights:  95%|█████████▌| 415/436 [00:00<00:00, 8380.69it/s, Materializing param=gpt_neox.layers.34.attention.query_key_value.bias][A
+Loading weights:  95%|█████████▌| 415/436 [00:00<00:00, 8373.48it/s, Materializing param=gpt_neox.layers.34.attention.query_key_value.bias][A
+Loading weights:  95%|█████████▌| 416/436 [00:00<00:00, 8382.60it/s, Materializing param=gpt_neox.layers.34.attention.query_key_value.weight][A
+Loading weights:  95%|█████████▌| 416/436 [00:00<00:00, 8375.52it/s, Materializing param=gpt_neox.layers.34.attention.query_key_value.weight][A
+Loading weights:  96%|█████████▌| 417/436 [00:00<00:00, 8384.55it/s, Materializing param=gpt_neox.layers.34.input_layernorm.bias]            [A
+Loading weights:  96%|█████████▌| 417/436 [00:00<00:00, 8377.48it/s, Materializing param=gpt_neox.layers.34.input_layernorm.bias][A
+Loading weights:  96%|█████████▌| 418/436 [00:00<00:00, 8386.68it/s, Materializing param=gpt_neox.layers.34.input_layernorm.weight][A
+Loading weights:  96%|█████████▌| 418/436 [00:00<00:00, 8379.71it/s, Materializing param=gpt_neox.layers.34.input_layernorm.weight][A
+Loading weights:  96%|█████████▌| 419/436 [00:00<00:00, 8388.89it/s, Materializing param=gpt_neox.layers.34.mlp.dense_4h_to_h.bias][A
+Loading weights:  96%|█████████▌| 419/436 [00:00<00:00, 8381.85it/s, Materializing param=gpt_neox.layers.34.mlp.dense_4h_to_h.bias][A
+Loading weights:  96%|█████████▋| 420/436 [00:00<00:00, 8390.85it/s, Materializing param=gpt_neox.layers.34.mlp.dense_4h_to_h.weight][A
+Loading weights:  96%|█████████▋| 420/436 [00:00<00:00, 8383.78it/s, Materializing param=gpt_neox.layers.34.mlp.dense_4h_to_h.weight][A
+Loading weights:  97%|█████████▋| 421/436 [00:00<00:00, 8392.83it/s, Materializing param=gpt_neox.layers.34.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  97%|█████████▋| 421/436 [00:00<00:00, 8385.98it/s, Materializing param=gpt_neox.layers.34.mlp.dense_h_to_4h.bias][A
+Loading weights:  97%|█████████▋| 422/436 [00:00<00:00, 8393.90it/s, Materializing param=gpt_neox.layers.34.mlp.dense_h_to_4h.weight][A
+Loading weights:  97%|█████████▋| 422/436 [00:00<00:00, 8386.82it/s, Materializing param=gpt_neox.layers.34.mlp.dense_h_to_4h.weight][A
+Loading weights:  97%|█████████▋| 423/436 [00:00<00:00, 8395.71it/s, Materializing param=gpt_neox.layers.34.post_attention_layernorm.bias][A
+Loading weights:  97%|█████████▋| 423/436 [00:00<00:00, 8388.81it/s, Materializing param=gpt_neox.layers.34.post_attention_layernorm.bias][A
+Loading weights:  97%|█████████▋| 424/436 [00:00<00:00, 8397.76it/s, Materializing param=gpt_neox.layers.34.post_attention_layernorm.weight][A
+Loading weights:  97%|█████████▋| 424/436 [00:00<00:00, 8390.63it/s, Materializing param=gpt_neox.layers.34.post_attention_layernorm.weight][A
+Loading weights:  97%|█████████▋| 425/436 [00:00<00:00, 8399.68it/s, Materializing param=gpt_neox.layers.35.attention.dense.bias]           [A
+Loading weights:  97%|█████████▋| 425/436 [00:00<00:00, 8392.87it/s, Materializing param=gpt_neox.layers.35.attention.dense.bias][A
+Loading weights:  98%|█████████▊| 426/436 [00:00<00:00, 8401.78it/s, Materializing param=gpt_neox.layers.35.attention.dense.weight][A
+Loading weights:  98%|█████████▊| 426/436 [00:00<00:00, 8394.87it/s, Materializing param=gpt_neox.layers.35.attention.dense.weight][A
+Loading weights:  98%|█████████▊| 427/436 [00:00<00:00, 8403.96it/s, Materializing param=gpt_neox.layers.35.attention.query_key_value.bias][A
+Loading weights:  98%|█████████▊| 427/436 [00:00<00:00, 8397.06it/s, Materializing param=gpt_neox.layers.35.attention.query_key_value.bias][A
+Loading weights:  98%|█████████▊| 428/436 [00:00<00:00, 8405.85it/s, Materializing param=gpt_neox.layers.35.attention.query_key_value.weight][A
+Loading weights:  98%|█████████▊| 428/436 [00:00<00:00, 8398.89it/s, Materializing param=gpt_neox.layers.35.attention.query_key_value.weight][A
+Loading weights:  98%|█████████▊| 429/436 [00:00<00:00, 8407.66it/s, Materializing param=gpt_neox.layers.35.input_layernorm.bias]            [A
+Loading weights:  98%|█████████▊| 429/436 [00:00<00:00, 8400.83it/s, Materializing param=gpt_neox.layers.35.input_layernorm.bias][A
+Loading weights:  99%|█████████▊| 430/436 [00:00<00:00, 8409.18it/s, Materializing param=gpt_neox.layers.35.input_layernorm.weight][A
+Loading weights:  99%|█████████▊| 430/436 [00:00<00:00, 8402.21it/s, Materializing param=gpt_neox.layers.35.input_layernorm.weight][A
+Loading weights:  99%|█████████▉| 431/436 [00:00<00:00, 8409.95it/s, Materializing param=gpt_neox.layers.35.mlp.dense_4h_to_h.bias][A
+Loading weights:  99%|█████████▉| 431/436 [00:00<00:00, 8402.92it/s, Materializing param=gpt_neox.layers.35.mlp.dense_4h_to_h.bias][A
+Loading weights:  99%|█████████▉| 432/436 [00:00<00:00, 8411.23it/s, Materializing param=gpt_neox.layers.35.mlp.dense_4h_to_h.weight][A
+Loading weights:  99%|█████████▉| 432/436 [00:00<00:00, 8404.48it/s, Materializing param=gpt_neox.layers.35.mlp.dense_4h_to_h.weight][A
+Loading weights:  99%|█████████▉| 433/436 [00:00<00:00, 8412.93it/s, Materializing param=gpt_neox.layers.35.mlp.dense_h_to_4h.bias]  [A
+Loading weights:  99%|█████████▉| 433/436 [00:00<00:00, 8406.27it/s, Materializing param=gpt_neox.layers.35.mlp.dense_h_to_4h.bias][A
+Loading weights: 100%|█████████▉| 434/436 [00:00<00:00, 8415.06it/s, Materializing param=gpt_neox.layers.35.mlp.dense_h_to_4h.weight][A
+Loading weights: 100%|█████████▉| 434/436 [00:00<00:00, 8408.29it/s, Materializing param=gpt_neox.layers.35.mlp.dense_h_to_4h.weight][A
+Loading weights: 100%|█████████▉| 435/436 [00:00<00:00, 8417.13it/s, Materializing param=gpt_neox.layers.35.post_attention_layernorm.bias][A
+Loading weights: 100%|█████████▉| 435/436 [00:00<00:00, 8410.30it/s, Materializing param=gpt_neox.layers.35.post_attention_layernorm.bias][A
+Loading weights: 100%|██████████| 436/436 [00:00<00:00, 8419.16it/s, Materializing param=gpt_neox.layers.35.post_attention_layernorm.weight][A
+Loading weights: 100%|██████████| 436/436 [00:00<00:00, 8412.42it/s, Materializing param=gpt_neox.layers.35.post_attention_layernorm.weight][ALoading weights: 100%|██████████| 436/436 [00:00<00:00, 8398.97it/s, Materializing param=gpt_neox.layers.35.post_attention_layernorm.weight]
+[2026-02-14T00:57:57.045] error: *** JOB 19481764 ON gcn154 CANCELLED AT 2026-02-14T00:57:57 DUE to SIGNAL Terminated ***

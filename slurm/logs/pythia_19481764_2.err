@@ -1,0 +1,6 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Checkpoints: 0it [00:00, ?it/s]Checkpoints: 0it [00:00, ?it/s]
+
+real	0m20.452s
+user	0m9.325s
+sys	0m1.709s

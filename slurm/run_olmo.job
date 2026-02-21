@@ -19,19 +19,22 @@ REVFILES=(
     "7b_revisions.txt"
 )
 
+BATCH_SIZES=(128 128)
+
 MODEL_NAME="${MODELS[$SLURM_ARRAY_TASK_ID]}"
 REV_FILE="${REVFILES[$SLURM_ARRAY_TASK_ID]}"
-echo "=== Running model: ${MODEL_NAME} with ${REV_FILE} (array task ${SLURM_ARRAY_TASK_ID}) ==="
+BATCH_SIZE="${BATCH_SIZES[$SLURM_ARRAY_TASK_ID]}"
+echo "=== Running model: ${MODEL_NAME} with ${REV_FILE} (array task ${SLURM_ARRAY_TASK_ID}, batch_size ${BATCH_SIZE}) ==="
 
 module purge
 
 export HF_HOME="/projects/prjs1815/hf_cache"
 cd "$HOME/Tracing-representation-geometry-reproduction" || exit 1
 
-uv run rankme_alpha_scripts/compute_alpha_rankme_olmo2.py \
+time uv run rankme_alpha_scripts/compute_alpha_rankme_olmo2.py \
     --model_name "${MODEL_NAME}" \
     --revisions_file "${REV_FILE}" \
     --num_samples 2000 \
-    --batch_size 128
+    --batch_size "${BATCH_SIZE}"
 
 echo "=== Done: ${MODEL_NAME} ==="

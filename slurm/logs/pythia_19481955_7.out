@@ -1,0 +1,40 @@
+=== Running model: EleutherAI/pythia-1.4b (array task 7, batch_size 128) ===
+EleutherAI/pythia-1.4b fineweb
+Subsampled later checkpoints to 50
+Total checkpoints: 58 (8 early + 50 later)
+Loaded 2000 cached sequences from data/cache/filtered_texts_fineweb_2000.json
+Processing 32 remaining checkpoints...
+Step 53000: rankme=353.399, alpha=0.713, r2_100=0.996
+Step 56000: rankme=335.905, alpha=0.718, r2_100=0.996
+Step 58000: rankme=336.981, alpha=0.723, r2_100=0.995
+Step 61000: rankme=319.426, alpha=0.728, r2_100=0.995
+Step 64000: rankme=319.380, alpha=0.731, r2_100=0.994
+Step 67000: rankme=300.165, alpha=0.740, r2_100=0.995
+Step 70000: rankme=290.712, alpha=0.752, r2_100=0.994
+Step 73000: rankme=289.071, alpha=0.753, r2_100=0.994
+Step 76000: rankme=279.275, alpha=0.768, r2_100=0.994
+Step 79000: rankme=269.881, alpha=0.767, r2_100=0.994
+Step 82000: rankme=258.374, alpha=0.777, r2_100=0.994
+Step 85000: rankme=254.683, alpha=0.787, r2_100=0.994
+Step 87000: rankme=251.655, alpha=0.795, r2_100=0.994
+Step 90000: rankme=239.988, alpha=0.804, r2_100=0.994
+Step 93000: rankme=238.740, alpha=0.806, r2_100=0.993
+Step 96000: rankme=237.819, alpha=0.813, r2_100=0.993
+Step 99000: rankme=224.618, alpha=0.825, r2_100=0.993
+Step 102000: rankme=219.166, alpha=0.832, r2_100=0.993
+Step 105000: rankme=216.284, alpha=0.838, r2_100=0.993
+Step 108000: rankme=214.812, alpha=0.847, r2_100=0.993
+Step 111000: rankme=208.987, alpha=0.854, r2_100=0.993
+Step 114000: rankme=209.969, alpha=0.860, r2_100=0.993
+Step 116000: rankme=211.669, alpha=0.861, r2_100=0.993
+Step 119000: rankme=204.721, alpha=0.869, r2_100=0.994
+Step 122000: rankme=204.472, alpha=0.872, r2_100=0.993
+Step 125000: rankme=202.967, alpha=0.875, r2_100=0.993
+Step 128000: rankme=200.490, alpha=0.879, r2_100=0.993
+Step 131000: rankme=197.550, alpha=0.883, r2_100=0.993
+Step 134000: rankme=195.370, alpha=0.887, r2_100=0.994
+Step 137000: rankme=197.046, alpha=0.886, r2_100=0.993
+Step 140000: rankme=195.549, alpha=0.888, r2_100=0.993
+Step 143000: rankme=193.502, alpha=0.890, r2_100=0.993
+Saving results to results/results_pythia-1.4b.npy
+=== Done: EleutherAI/pythia-1.4b ===
