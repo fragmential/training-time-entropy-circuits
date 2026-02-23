@@ -7,7 +7,6 @@ import torch.nn as nn
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from data import fineweb_loader
-from utils import powerlaw
 
 
 def prefetch_checkpoint(model_name, step_num):
@@ -76,9 +75,9 @@ def _force_delete_cached_revision(model_name, revision):
         print(f"Warning: could not clean cache for {revision}: {e}")
 
 
-def get_metrics(model_name: str, step_num: int,
-                filtered_texts: list, tokenizer,
-                max_length: int = 512, batch_size: int = 128) -> dict:
+def extract_activations(model_name: str, step_num: int,
+                        filtered_texts: list, tokenizer,
+                        max_length: int = 512, batch_size: int = 128) -> np.ndarray:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     revision = f"step{step_num}"
 
@@ -110,16 +109,7 @@ def get_metrics(model_name: str, step_num: int,
         torch.cuda.empty_cache()
         delete_cached_revision(model_name, revision)
 
-    all_activations = np.vstack(activations_arr)
-    eigen = powerlaw.get_eigenspectrum(all_activations)
-    rankme = powerlaw.rankme(eigen)
-    alpha, ypred, fit_r2, fit_r2_100 = powerlaw.stringer_get_powerlaw(eigen, np.arange(11,100))
-    return {'eigenspectrum': eigen,
-            'rankme': rankme,
-            'ypred': ypred,
-            'alpha': alpha,
-            'r2': fit_r2,
-            'r2_100': fit_r2_100}
+    return np.vstack(activations_arr)
 
 
 def main(model_name: str = "EleutherAI/pythia-70m-deduped",
@@ -149,26 +139,11 @@ def main(model_name: str = "EleutherAI/pythia-70m-deduped",
     step_nums = early_steps + later_steps
     print(f"Total checkpoints: {len(step_nums)} ({len(early_steps)} early + {len(later_steps)} later)")
 
-    os.makedirs('results', exist_ok=True)
-    tmp_save_fname = os.path.join('results', f'results_{short_name}_temp.npy')
-    final_save_fname = os.path.join('results', f'results_{short_name}.npy')
+    act_dir = os.path.join('activations', short_name)
+    os.makedirs(act_dir, exist_ok=True)
 
-    res_dict = {}
-    if os.path.exists(final_save_fname):
-        try:
-            res_dict = np.load(final_save_fname, allow_pickle=True).item()
-        except:
-            pass
-
-    if os.path.exists(tmp_save_fname):
-        try:
-            temp = np.load(tmp_save_fname, allow_pickle=True).item()
-            res_dict.update(temp)
-        except:
-            pass
-
-    completed = set(res_dict.keys())
-    to_process = [s for s in step_nums if s not in completed]
+    to_process = [s for s in step_nums
+                  if not os.path.exists(os.path.join(act_dir, f'step{s}.npy'))]
 
     # Load tokenizer once for filtering (all Pythia checkpoints share the same tokenizer)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -204,22 +179,17 @@ def main(model_name: str = "EleutherAI/pythia-70m-deduped",
             executor.submit(prefetch_checkpoint, model_name, to_process[idx + 1])
 
         try:
-            res_dict[step_num] = get_metrics(model_name, step_num, filtered_texts, tokenizer,
-                                             max_length=max_length, batch_size=batch_size)
-            tqdm.write(f"Step {step_num}: rankme={res_dict[step_num]['rankme']:.3f}, "
-                       f"alpha={res_dict[step_num]['alpha']:.3f}, "
-                       f"r2_100={res_dict[step_num]['r2_100']:.3f}")
+            activations = extract_activations(model_name, step_num, filtered_texts, tokenizer,
+                                              max_length=max_length, batch_size=batch_size)
+            save_path = os.path.join(act_dir, f'step{step_num}.npy')
+            np.save(save_path, activations)
+            tqdm.write(f"Step {step_num}: saved {activations.shape} to {save_path}")
         except Exception as e:
             tqdm.write(f"Skipping step {step_num}: {e}")
 
-        np.save(tmp_save_fname, res_dict)
-
     executor.shutdown(wait=True)
 
-    print(f"Saving results to {final_save_fname}")
-    np.save(final_save_fname, res_dict)
-    if os.path.exists(tmp_save_fname):
-        os.remove(tmp_save_fname)
+    print(f"Completed! Activations saved to {act_dir}")
 
 if __name__ == "__main__":
     from jsonargparse import CLI

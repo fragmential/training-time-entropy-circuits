@@ -6,7 +6,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from data import fineweb_loader
-from utils import powerlaw
 
 
 def prefetch_checkpoint(model_name, revision):
@@ -75,15 +74,15 @@ def _force_delete_cached_revision(model_name, revision):
         print(f"Warning: could not clean cache for {revision}: {e}")
 
 
-def compute_metrics_for_checkpoint(model_name, revision, filtered_texts,
-                                   tokenizer, max_length, batch_size):
+def extract_activations_for_checkpoint(model_name, revision, filtered_texts,
+                                       tokenizer, max_length, batch_size):
     print(f"Running model {model_name}/{revision}")
 
     try:
         step_num = int(revision.split('-tokens')[0].split('step')[-1])
     except ValueError as e:
         print(f"Could not parse revision {revision} for model {model_name}\n{e}")
-        return None
+        return None, None
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = None
@@ -118,23 +117,9 @@ def compute_metrics_for_checkpoint(model_name, revision, filtered_texts,
 
     if not activations_arr:
         print("No valid features extracted.")
-        return None
+        return step_num, None
 
-    all_activations = np.vstack(activations_arr)
-    eigen = powerlaw.get_eigenspectrum(all_activations)
-    rankme = powerlaw.rankme(eigen)
-    alpha, ypred, fit_r2, fit_r2_100 = powerlaw.stringer_get_powerlaw(eigen, np.arange(11, 100))
-
-    return {
-        'step': step_num,
-        'checkpoint': revision,
-        'eigenspectrum': eigen,
-        'rankme': rankme,
-        'alpha': alpha,
-        'ypred': ypred,
-        'r2': fit_r2,
-        'r2_100': fit_r2_100
-    }
+    return step_num, np.vstack(activations_arr)
 
 def get_available_checkpoints(filepath: str) -> dict:
     print(f"Opening checkpoint file: {filepath}")
@@ -167,7 +152,8 @@ def run_all_checkpoints(model_name="allenai/OLMo-1B", dataset_name="fineweb",
                         early_training_model: str = None):
     short_name = model_name.split("/")[-1] if "/" in model_name else model_name
 
-    os.makedirs('results', exist_ok=True)
+    act_dir = os.path.join('activations', short_name)
+    os.makedirs(act_dir, exist_ok=True)
 
     checkpoint_map = get_available_checkpoints(revisions_file)
 
@@ -184,25 +170,8 @@ def run_all_checkpoints(model_name="allenai/OLMo-1B", dataset_name="fineweb",
     step_nums = early_steps + later_steps
     print(f"Total checkpoints: {len(step_nums)} ({len(early_steps)} early + {len(later_steps)} later)")
 
-    tmp_save = os.path.join('results', f'results_{short_name}_temp.npy')
-    final_save = os.path.join('results', f'results_{short_name}.npy')
-
-    res_dict = {}
-    if os.path.exists(final_save):
-        try:
-            res_dict = np.load(final_save, allow_pickle=True).item()
-        except:
-            pass
-
-    if os.path.exists(tmp_save):
-        try:
-            temp = np.load(tmp_save, allow_pickle=True).item()
-            res_dict.update(temp)
-        except:
-            pass
-
-    completed = set(res_dict.keys())
-    to_process = [s for s in step_nums if s not in completed]
+    to_process = [s for s in step_nums
+                  if not os.path.exists(os.path.join(act_dir, f'step{s}.npy'))]
 
     # Filter dataset, caching to disk so subsequent runs skip filtering
     import json
@@ -238,7 +207,7 @@ def run_all_checkpoints(model_name="allenai/OLMo-1B", dataset_name="fineweb",
         return model_name
 
     print(f"Processing {len(to_process)} remaining checkpoints...")
-    for idx, step in enumerate(tqdm(to_process, desc="Calculating metrics")):
+    for idx, step in enumerate(tqdm(to_process, desc="Extracting activations")):
         revision = checkpoint_map[step]
         step_model = _model_for_step(step)
 
@@ -249,23 +218,19 @@ def run_all_checkpoints(model_name="allenai/OLMo-1B", dataset_name="fineweb",
             executor.submit(prefetch_checkpoint, _model_for_step(next_step), next_rev)
 
         try:
-            result = compute_metrics_for_checkpoint(step_model, revision, filtered_texts,
-                                                    tokenizer, max_length, batch_size)
-            if result:
-                res_dict[step] = result
-                tqdm.write(f"Step {step}: rankme={result['rankme']:.3f}, alpha={result['alpha']:.3f}, r2_100={result['r2_100']:.3f}")
-                np.save(tmp_save, res_dict)
+            step_num, activations = extract_activations_for_checkpoint(
+                step_model, revision, filtered_texts, tokenizer, max_length, batch_size)
+            if activations is not None:
+                save_path = os.path.join(act_dir, f'step{step_num}.npy')
+                np.save(save_path, activations)
+                tqdm.write(f"Step {step_num}: saved {activations.shape} to {save_path}")
         except Exception as e:
             tqdm.write(f"Error at step {step}: {str(e)}")
             continue
 
     executor.shutdown(wait=True)
 
-    np.save(final_save, res_dict)
-    if os.path.exists(tmp_save):
-        os.remove(tmp_save)
-
-    print(f"Completed! Results saved to {final_save}")
+    print(f"Completed! Activations saved to {act_dir}")
 
 if __name__ == "__main__":
     from jsonargparse import CLI

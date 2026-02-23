@@ -7,7 +7,7 @@
 #SBATCH --time=06:00:00
 #SBATCH --output=slurm/logs/pythia_%A_%a.out
 #SBATCH --error=slurm/logs/pythia_%A_%a.err
-#SBATCH --array=0-12
+#SBATCH --array=0-15
 
 MODELS=(
     "EleutherAI/pythia-14m"
@@ -16,24 +16,29 @@ MODELS=(
     "EleutherAI/pythia-160m"
     "EleutherAI/pythia-160m-deduped"
     "EleutherAI/pythia-410m"
+    "EleutherAI/pythia-410m-deduped"
     "EleutherAI/pythia-1b"
+    "EleutherAI/pythia-1b-deduped"
     "EleutherAI/pythia-1.4b"
     "EleutherAI/pythia-1.4b-deduped"
     "EleutherAI/pythia-2.8b"
     "EleutherAI/pythia-2.8b-deduped"
     "EleutherAI/pythia-6.9b"
+    "EleutherAI/pythia-6.9b-deduped"
     "EleutherAI/pythia-12b"
 )
 
 MODEL_NAME="${MODELS[$SLURM_ARRAY_TASK_ID]}"
 
-# # Use batch_size 64 for models > 6.9B, 128 for smaller
-# if [[ "${MODEL_NAME}" == *"6.9b"* ]] || [[ "${MODEL_NAME}" == *"12b"* ]]; then
-#     BATCH_SIZE=64
-# else
-#     BATCH_SIZE=128
-# fi
-BATCH_SIZE=128 # fuck it we ball
+if [[ "${MODEL_NAME}" == *"12b"* ]]; then
+    BATCH_SIZE=160
+elif [[ "${MODEL_NAME}" == *"6.9b"* ]]; then
+    BATCH_SIZE=256
+elif [[ "${MODEL_NAME}" == *"2.8b"* ]]; then
+    BATCH_SIZE=512
+else
+    BATCH_SIZE=1024
+fi
 
 echo "=== Running model: ${MODEL_NAME} (array task ${SLURM_ARRAY_TASK_ID}, batch_size ${BATCH_SIZE}) ==="
 
@@ -44,7 +49,7 @@ cd "$HOME/Tracing-representation-geometry-reproduction" || exit 1
 
 time uv run rankme_alpha_scripts/compute_alpha_pythia.py \
     --model_name "${MODEL_NAME}" \
-    --num_samples 2000 \
+    --num_samples 5000 \
     --max_length 512 \
     --batch_size "${BATCH_SIZE}"
 

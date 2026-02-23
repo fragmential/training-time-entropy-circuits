@@ -1,0 +1,46 @@
+#!/bin/bash
+#SBATCH --partition=rome
+#SBATCH --job-name=compute-metrics
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --time=01:00:00
+#SBATCH --output=slurm/logs/metrics_%j.out
+#SBATCH --error=slurm/logs/metrics_%j.err
+
+echo "=== Computing metrics from saved activations ==="
+
+module purge
+
+cd "$HOME/Tracing-representation-geometry-reproduction" || exit 1
+
+MODELS=(
+    "pythia-14m"
+    "pythia-31m"
+    "pythia-70m"
+    "pythia-160m"
+    "pythia-160m-deduped"
+    "pythia-410m"
+    "pythia-410m-deduped"
+    "pythia-1b"
+    "pythia-1b-deduped"
+    "pythia-1.4b"
+    "pythia-1.4b-deduped"
+    "pythia-2.8b"
+    "pythia-2.8b-deduped"
+    "pythia-6.9b"
+    "pythia-6.9b-deduped"
+    "pythia-12b"
+    "OLMo-2-0425-1B"
+    "OLMo-2-1124-7B"
+)
+
+for MODEL in "${MODELS[@]}"; do
+    if [ -d "activations/${MODEL}" ]; then
+        echo "--- ${MODEL} ---"
+        time uv run rankme_alpha_scripts/compute_metrics.py \
+            --model_name "${MODEL}" \
+            --num_workers "${SLURM_CPUS_PER_TASK}"
+    fi
+done
+
+echo "=== Done ==="

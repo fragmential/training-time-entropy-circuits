@@ -46,7 +46,7 @@ fi
 time uv run rankme_alpha_scripts/compute_alpha_rankme_olmo2.py \
     --model_name "${MODEL_NAME}" \
     --revisions_file "${REV_FILE}" \
-    --num_samples 2000 \
+    --num_samples 5000 \
     --batch_size "${BATCH_SIZE}" \
     ${EARLY_ARGS}
 
