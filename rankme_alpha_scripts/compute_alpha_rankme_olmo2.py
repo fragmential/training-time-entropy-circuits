@@ -1,4 +1,5 @@
 import gc, os, sys, torch, numpy as np
+import torch.nn as nn
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -90,7 +91,9 @@ def compute_metrics_for_checkpoint(model_name, revision, filtered_texts,
         model = AutoModelForCausalLM.from_pretrained(
             model_name, revision=revision,
             torch_dtype=torch.bfloat16, trust_remote_code=True
-        ).to(device)
+        )
+        model.lm_head = nn.Identity()
+        model.to(device)
 
         activations_arr = []
         for bidx in tqdm(range(0, len(filtered_texts), batch_size), desc="Inference"):
@@ -101,10 +104,10 @@ def compute_metrics_for_checkpoint(model_name, revision, filtered_texts,
             attention_mask = tokenized.attention_mask.to(device)
 
             with torch.no_grad():
-                outputs = model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
+                outputs = model(input_ids=input_ids, attention_mask=attention_mask)
                 last_indices = attention_mask.sum(dim=1) - 1
                 batch_indices = np.arange(attention_mask.shape[0])
-                activations = outputs.hidden_states[-1][batch_indices, last_indices, ...]
+                activations = outputs.logits[batch_indices, last_indices, ...]
                 activations_arr.append(activations.float().cpu().numpy())
                 del outputs, activations, input_ids, attention_mask
     finally:
@@ -160,7 +163,8 @@ def run_all_checkpoints(model_name="allenai/OLMo-1B", dataset_name="fineweb",
                         dataset_content_key="text", min_length=32, max_length=512,
                         batch_size=128, num_samples=2000,
                         max_checkpoints=50,
-                        revisions_file="1b_revisions.txt"):
+                        revisions_file="1b_revisions.txt",
+                        early_training_model: str = None):
     short_name = model_name.split("/")[-1] if "/" in model_name else model_name
 
     os.makedirs('results', exist_ok=True)
@@ -228,17 +232,24 @@ def run_all_checkpoints(model_name="allenai/OLMo-1B", dataset_name="fineweb",
 
     executor = ThreadPoolExecutor(max_workers=1)
 
+    def _model_for_step(step):
+        if early_training_model and step > 0 and step <= 10000:
+            return early_training_model
+        return model_name
+
     print(f"Processing {len(to_process)} remaining checkpoints...")
     for idx, step in enumerate(tqdm(to_process, desc="Calculating metrics")):
         revision = checkpoint_map[step]
+        step_model = _model_for_step(step)
 
         # Prefetch next checkpoint in background
         if idx + 1 < len(to_process):
-            next_rev = checkpoint_map[to_process[idx + 1]]
-            executor.submit(prefetch_checkpoint, model_name, next_rev)
+            next_step = to_process[idx + 1]
+            next_rev = checkpoint_map[next_step]
+            executor.submit(prefetch_checkpoint, _model_for_step(next_step), next_rev)
 
         try:
-            result = compute_metrics_for_checkpoint(model_name, revision, filtered_texts,
+            result = compute_metrics_for_checkpoint(step_model, revision, filtered_texts,
                                                     tokenizer, max_length, batch_size)
             if result:
                 res_dict[step] = result

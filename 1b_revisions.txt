@@ -1,4 +1,13 @@
 stage1-step0-tokens0B
+stage1-step1000-tokens3B
+stage1-step2000-tokens5B
+stage1-step3000-tokens7B
+stage1-step4000-tokens9B
+stage1-step5000-tokens11B
+stage1-step6000-tokens13B
+stage1-step7000-tokens15B
+stage1-step8000-tokens17B
+stage1-step9000-tokens19B
 stage1-step10000-tokens21B
 stage1-step100000-tokens210B
 stage1-step1000000-tokens2098B
