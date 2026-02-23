@@ -1,0 +1,67 @@
+=== Running model: EleutherAI/pythia-2.8b (array task 0, batch_size 128) ===
+EleutherAI/pythia-2.8b fineweb
+Subsampled later checkpoints to 50
+Total checkpoints: 58 (8 early + 50 later)
+Loaded 2000 cached sequences from data/cache/filtered_texts_fineweb_2000.json
+Processing 58 remaining checkpoints...
+Step 0: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 8: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 16: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 32: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 64: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 128: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 256: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 512: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 1000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 3000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 6000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 9000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 12000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 15000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 18000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 21000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 24000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 27000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 29000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 32000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 35000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 38000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 41000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 44000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 47000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 50000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 53000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 56000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 58000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 61000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 64000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 67000: rankme=308.786, alpha=0.747, r2_100=0.995
+Step 70000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 73000: rankme=302.754, alpha=0.758, r2_100=0.994
+Skipping step 76000: Error while deserializing header: invalid JSON in header: EOF while parsing a value at line 1 column 0
+Step 79000: rankme=289.348, alpha=0.766, r2_100=0.994
+Skipping step 82000: Error while deserializing header: invalid JSON in header: EOF while parsing a value at line 1 column 0
+Step 85000: rankme=274.423, alpha=0.776, r2_100=0.995
+Skipping step 87000: Error while deserializing header: invalid JSON in header: EOF while parsing a value at line 1 column 0
+Step 90000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 93000: rankme=266.742, alpha=0.794, r2_100=0.995
+Skipping step 96000: Error while deserializing header: invalid JSON in header: EOF while parsing a value at line 1 column 0
+Step 99000: rankme=261.973, alpha=0.807, r2_100=0.994
+Skipping step 102000: Error while deserializing header: invalid JSON in header: EOF while parsing a value at line 1 column 0
+Step 105000: rankme=255.324, alpha=0.815, r2_100=0.993
+Skipping step 108000: Error while deserializing header: invalid JSON in header: EOF while parsing a value at line 1 column 0
+Step 111000: rankme=247.880, alpha=0.833, r2_100=0.995
+Skipping step 114000: Error while deserializing header: invalid JSON in header: EOF while parsing a value at line 1 column 0
+Step 116000: rankme=246.435, alpha=0.841, r2_100=0.994
+Skipping step 119000: Error while deserializing header: invalid JSON in header: EOF while parsing a value at line 1 column 0
+Step 122000: rankme=241.427, alpha=0.850, r2_100=0.994
+Skipping step 125000: Error while deserializing header: invalid JSON in header: EOF while parsing a value at line 1 column 0
+Step 128000: rankme=240.706, alpha=0.858, r2_100=0.994
+Skipping step 131000: Error while deserializing header: invalid JSON in header: EOF while parsing a value at line 1 column 0
+Step 134000: rankme=236.317, alpha=0.863, r2_100=0.995
+Warning: could not clean cache for step137000: [Errno 39] Directory not empty: '/projects/prjs1815/hf_cache/hub/models--EleutherAI--pythia-2.8b/snapshots/fb7c4e409ed4b3e9b22d09822a89ddad358e5177'
+Skipping step 137000: Error while deserializing header: invalid JSON in header: EOF while parsing a value at line 1 column 0
+Step 140000: rankme=230.464, alpha=0.877, r2_100=0.994
+Step 143000: rankme=230.464, alpha=0.877, r2_100=0.994
+Saving results to results/results_pythia-2.8b.npy
+=== Done: EleutherAI/pythia-2.8b ===
