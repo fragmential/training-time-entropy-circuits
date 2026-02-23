@@ -9,11 +9,11 @@ def compute_metrics_for_file(args):
     step, path = args
     activations = np.load(path)
     eigen = powerlaw.get_eigenspectrum(activations)
-    rankme_val = powerlaw.rankme(eigen)
+    rm = powerlaw.rankme_metrics(eigen)
     alpha, ypred, fit_r2, fit_r2_100 = powerlaw.stringer_get_powerlaw(eigen, np.arange(11, 100))
     return step, {
         'eigenspectrum': eigen,
-        'rankme': rankme_val,
+        **rm,
         'alpha': alpha,
         'ypred': ypred,
         'r2': fit_r2,

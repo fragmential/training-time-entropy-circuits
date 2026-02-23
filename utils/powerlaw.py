@@ -138,3 +138,24 @@ def rankme(eigen):
     scores = eigen / l1 + eps
     entropy = - np.sum(scores * np.log(scores))
     return np.exp(entropy)
+
+
+def rankme_metrics(eigen):
+    """Compute abs and squared rankme variants, returning both entropy and exp(entropy)."""
+    eps = 1e-7
+
+    # Abs normalization (original rankme)
+    abs_scores = np.abs(eigen) / np.sum(np.abs(eigen)) + eps
+    abs_entropy = -np.sum(abs_scores * np.log(abs_scores))
+
+    # Squared normalization (matrix entropy)
+    sq = eigen ** 2
+    sq_scores = sq / np.sum(sq) + eps
+    sq_entropy = -np.sum(sq_scores * np.log(sq_scores))
+
+    return {
+        'lin_matent': abs_entropy,
+        'matent': sq_entropy,
+        'rankme': np.exp(abs_entropy),
+        'sq_rankme': np.exp(sq_entropy),
+    }
