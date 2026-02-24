@@ -1,0 +1,7 @@
+=== Running model: EleutherAI/pythia-2.8b (array task 11, batch_size 512) ===
+EleutherAI/pythia-2.8b fineweb
+Subsampled later checkpoints to 50
+Total checkpoints: 58 (8 early + 50 later)
+Loaded 5000 cached sequences from data/cache/filtered_texts_fineweb_5000.json
+Processing 58 remaining checkpoints...
+Skipping step 0: CUDA out of memory. Tried to allocate 5.00 GiB. GPU 0 has a total capacity of 93.09 GiB of which 2.24 GiB is free. Including non-PyTorch memory, this process has 90.84 GiB memory in use. Of the allocated memory 82.61 GiB is allocated by PyTorch, and 7.56 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)

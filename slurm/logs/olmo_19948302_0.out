@@ -1,0 +1,60 @@
+=== Running model: allenai/OLMo-2-0425-1B with 1b_revisions.txt (array task 0, batch_size 512) ===
+Opening checkpoint file: 1b_revisions.txt
+Found 204 checkpoints
+Subsampled later checkpoints to 50
+Total checkpoints: 62 (12 early + 50 later)
+Filtered and cached 5000 sequences to data/cache/filtered_texts_fineweb_5000.json
+Processing 62 remaining checkpoints...
+Running model allenai/OLMo-2-0425-1B/stage1-step0-tokens0B
+Step 0: saved (5000, 2048) to activations/OLMo-2-0425-1B/step0.npy
+Running model allenai/OLMo-2-0425-1B-early-training/stage1-step300-tokens1B
+Error at step 300: stage1-step300-tokens1B is not a valid git identifier (branch name, tag name or commit id) that exists for this model name. Check the model page at 'https://huggingface.co/allenai/OLMo-2-0425-1B-early-training' for available revisions.
+Running model allenai/OLMo-2-0425-1B-early-training/stage1-step1000-tokens3B
+Step 1000: saved (5000, 2048) to activations/OLMo-2-0425-1B/step1000.npy
+Running model allenai/OLMo-2-0425-1B-early-training/stage1-step2000-tokens5B
+Step 2000: saved (5000, 2048) to activations/OLMo-2-0425-1B/step2000.npy
+Running model allenai/OLMo-2-0425-1B-early-training/stage1-step3000-tokens7B
+Step 3000: saved (5000, 2048) to activations/OLMo-2-0425-1B/step3000.npy
+Running model allenai/OLMo-2-0425-1B-early-training/stage1-step4000-tokens9B
+Step 4000: saved (5000, 2048) to activations/OLMo-2-0425-1B/step4000.npy
+Running model allenai/OLMo-2-0425-1B-early-training/stage1-step5000-tokens11B
+Step 5000: saved (5000, 2048) to activations/OLMo-2-0425-1B/step5000.npy
+Running model allenai/OLMo-2-0425-1B-early-training/stage1-step6000-tokens13B
+Step 6000: saved (5000, 2048) to activations/OLMo-2-0425-1B/step6000.npy
+Running model allenai/OLMo-2-0425-1B-early-training/stage1-step7000-tokens15B
+Step 7000: saved (5000, 2048) to activations/OLMo-2-0425-1B/step7000.npy
+Running model allenai/OLMo-2-0425-1B-early-training/stage1-step8000-tokens17B
+Step 8000: saved (5000, 2048) to activations/OLMo-2-0425-1B/step8000.npy
+Running model allenai/OLMo-2-0425-1B-early-training/stage1-step9000-tokens19B
+Error at step 9000: Error while deserializing header: invalid JSON in header: EOF while parsing a value at line 1 column 0
+Running model allenai/OLMo-2-0425-1B-early-training/stage1-step10000-tokens21B
+Step 10000: saved (5000, 2048) to activations/OLMo-2-0425-1B/step10000.npy
+Running model allenai/OLMo-2-0425-1B/stage1-step20000-tokens42B
+Step 20000: saved (5000, 2048) to activations/OLMo-2-0425-1B/step20000.npy
+Running model allenai/OLMo-2-0425-1B/stage1-step50000-tokens105B
+Step 50000: saved (5000, 2048) to activations/OLMo-2-0425-1B/step50000.npy
+Running model allenai/OLMo-2-0425-1B/stage1-step90000-tokens189B
+Step 90000: saved (5000, 2048) to activations/OLMo-2-0425-1B/step90000.npy
+Running model allenai/OLMo-2-0425-1B/stage1-step130000-tokens273B
+Step 130000: saved (5000, 2048) to activations/OLMo-2-0425-1B/step130000.npy
+Running model allenai/OLMo-2-0425-1B/stage1-step170000-tokens357B
+Step 170000: saved (5000, 2048) to activations/OLMo-2-0425-1B/step170000.npy
+Running model allenai/OLMo-2-0425-1B/stage1-step210000-tokens441B
+Step 210000: saved (5000, 2048) to activations/OLMo-2-0425-1B/step210000.npy
+Running model allenai/OLMo-2-0425-1B/stage1-step250000-tokens525B
+Error at step 250000: Error while deserializing header: invalid JSON in header: EOF while parsing a value at line 1 column 0
+Running model allenai/OLMo-2-0425-1B/stage1-step280000-tokens588B
+Step 280000: saved (5000, 2048) to activations/OLMo-2-0425-1B/step280000.npy
+Running model allenai/OLMo-2-0425-1B/stage1-step320000-tokens672B
+Step 320000: saved (5000, 2048) to activations/OLMo-2-0425-1B/step320000.npy
+Running model allenai/OLMo-2-0425-1B/stage1-step360000-tokens755B
+Error at step 360000: Error while deserializing header: invalid JSON in header: EOF while parsing a value at line 1 column 0
+Running model allenai/OLMo-2-0425-1B/stage1-step400000-tokens839B
+Step 400000: saved (5000, 2048) to activations/OLMo-2-0425-1B/step400000.npy
+Running model allenai/OLMo-2-0425-1B/stage1-step440000-tokens923B
+Step 440000: saved (5000, 2048) to activations/OLMo-2-0425-1B/step440000.npy
+Running model allenai/OLMo-2-0425-1B/stage1-step480000-tokens1007B
+Step 480000: saved (5000, 2048) to activations/OLMo-2-0425-1B/step480000.npy
+Running model allenai/OLMo-2-0425-1B/stage1-step510000-tokens1070B
+Step 510000: saved (5000, 2048) to activations/OLMo-2-0425-1B/step510000.npy
+Running model allenai/OLMo-2-0425-1B/stage1-step550000-tokens1154B

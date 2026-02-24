@@ -1,0 +1,6 @@
+=== Running model: EleutherAI/pythia-12b (array task 15, batch_size 160) ===
+EleutherAI/pythia-12b fineweb
+Subsampled later checkpoints to 50
+Total checkpoints: 58 (8 early + 50 later)
+Loaded 5000 cached sequences from data/cache/filtered_texts_fineweb_5000.json
+Processing 58 remaining checkpoints...

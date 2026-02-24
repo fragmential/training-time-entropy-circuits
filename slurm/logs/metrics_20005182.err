@@ -1,0 +1,21 @@
+
+real	0m9.565s
+user	0m6.790s
+sys	0m1.124s
+
+real	0m3.943s
+user	0m6.807s
+sys	0m0.707s
+
+real	0m3.804s
+user	0m6.787s
+sys	0m0.735s
+
+real	0m3.841s
+user	0m6.816s
+sys	0m0.747s
+
+real	0m3.787s
+user	0m6.777s
+sys	0m0.730s
+[2026-02-24T19:25:20.425] error: *** JOB 20005182 ON gcn11 CANCELLED AT 2026-02-24T19:25:20 DUE to SIGNAL Terminated ***

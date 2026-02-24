@@ -1,0 +1,33 @@
+
+real	0m9.737s
+user	0m3.055s
+sys	0m1.079s
+
+real	0m8.350s
+user	0m3.061s
+sys	0m0.776s
+
+real	0m4.103s
+user	0m3.114s
+sys	0m0.734s
+
+real	0m3.982s
+user	0m3.074s
+sys	0m0.767s
+
+real	0m3.897s
+user	0m3.023s
+sys	0m0.700s
+
+real	0m11.671s
+user	0m3.126s
+sys	0m0.779s
+
+real	0m11.497s
+user	0m3.095s
+sys	0m0.783s
+
+real	0m28.835s
+user	0m3.301s
+sys	0m0.737s
+[2026-02-24T19:51:22.670] error: *** JOB 20005484 ON gcn27 CANCELLED AT 2026-02-24T19:51:22 DUE to SIGNAL Terminated ***

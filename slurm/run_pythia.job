@@ -31,10 +31,14 @@ MODELS=(
 MODEL_NAME="${MODELS[$SLURM_ARRAY_TASK_ID]}"
 
 if [[ "${MODEL_NAME}" == *"12b"* ]]; then
-    BATCH_SIZE=160
+    BATCH_SIZE=80
 elif [[ "${MODEL_NAME}" == *"6.9b"* ]]; then
-    BATCH_SIZE=256
+    BATCH_SIZE=128
 elif [[ "${MODEL_NAME}" == *"2.8b"* ]]; then
+    BATCH_SIZE=256
+elif [[ "${MODEL_NAME}" == *"1.4b"* ]]; then
+    BATCH_SIZE=512
+elif [[ "${MODEL_NAME}" == *"1b"* ]]; then
     BATCH_SIZE=512
 else
     BATCH_SIZE=1024

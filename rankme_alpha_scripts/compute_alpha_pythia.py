@@ -121,7 +121,6 @@ def extract_activations(
         del model
         gc.collect()
         torch.cuda.empty_cache()
-        delete_cached_revision(model_name, revision)
 
     return np.vstack(activations_arr)
 
@@ -203,10 +202,13 @@ def main(
     executor = ThreadPoolExecutor(max_workers=1)
 
     print(f"Processing {len(to_process)} remaining checkpoints...")
+    prefetch_future = None
     for idx, step_num in enumerate(tqdm(to_process, desc="Checkpoints")):
         # Prefetch next checkpoint in background
         if idx + 1 < len(to_process):
-            executor.submit(prefetch_checkpoint, model_name, to_process[idx + 1])
+            prefetch_future = executor.submit(prefetch_checkpoint, model_name, to_process[idx + 1])
+        else:
+            prefetch_future = None
 
         try:
             activations = extract_activations(
@@ -226,6 +228,12 @@ def main(
             tqdm.write(f"Step {step_num}: saved {activations.shape} to {save_path}")
         except Exception as e:
             tqdm.write(f"Skipping step {step_num}: {e}")
+
+        # Wait for prefetch to finish before cleaning cache, so blob
+        # orphan detection sees all symlinks from the prefetched snapshot
+        if prefetch_future is not None:
+            prefetch_future.result()
+        delete_cached_revision(model_name, f"step{step_num}")
 
     executor.shutdown(wait=True)
 

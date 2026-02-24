@@ -1,8 +1,9 @@
 #!/bin/bash
-#SBATCH --partition=rome
+#SBATCH --partition=gpu_a100
+#SBATCH --gpus=1
 #SBATCH --job-name=compute-metrics
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=18
 #SBATCH --time=01:00:00
 #SBATCH --output=slurm/logs/metrics_%j.out
 #SBATCH --error=slurm/logs/metrics_%j.err
@@ -36,13 +37,15 @@ MODELS=(
     "OLMo-2-1124-7B"
 )
 
+export OMP_NUM_THREADS=1
 for MODEL in "${MODELS[@]}"; do
     if [ -d "activations/${DATASET}/${MODEL}" ]; then
         echo "--- ${MODEL} ---"
         time uv run rankme_alpha_scripts/compute_metrics.py \
             --model_name "${MODEL}" \
             --dataset_name "${DATASET}" \
-            --num_workers "${SLURM_CPUS_PER_TASK}"
+            --num_workers "${SLURM_CPUS_PER_TASK}" \
+            "${MODEL}"
     fi
 done
 

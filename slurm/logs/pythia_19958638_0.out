@@ -1,0 +1,26 @@
+=== Running model: EleutherAI/pythia-14m (array task 0, batch_size 1024) ===
+EleutherAI/pythia-14m fineweb
+Subsampled later checkpoints to 50
+Total checkpoints: 58 (8 early + 50 later)
+Loaded 5000 cached sequences from data/cache/filtered_texts_fineweb_5000.json
+Processing 58 remaining checkpoints...
+Step 0: saved (5000, 128) to activations/pythia-14m/step0.npy
+Step 8: saved (5000, 128) to activations/pythia-14m/step8.npy
+Step 16: saved (5000, 128) to activations/pythia-14m/step16.npy
+Step 32: saved (5000, 128) to activations/pythia-14m/step32.npy
+Step 64: saved (5000, 128) to activations/pythia-14m/step64.npy
+Step 128: saved (5000, 128) to activations/pythia-14m/step128.npy
+Step 256: saved (5000, 128) to activations/pythia-14m/step256.npy
+Step 512: saved (5000, 128) to activations/pythia-14m/step512.npy
+Step 1000: saved (5000, 128) to activations/pythia-14m/step1000.npy
+Step 3000: saved (5000, 128) to activations/pythia-14m/step3000.npy
+Step 6000: saved (5000, 128) to activations/pythia-14m/step6000.npy
+Step 9000: saved (5000, 128) to activations/pythia-14m/step9000.npy
+Step 12000: saved (5000, 128) to activations/pythia-14m/step12000.npy
+Step 15000: saved (5000, 128) to activations/pythia-14m/step15000.npy
+Step 18000: saved (5000, 128) to activations/pythia-14m/step18000.npy
+Step 21000: saved (5000, 128) to activations/pythia-14m/step21000.npy
+Step 24000: saved (5000, 128) to activations/pythia-14m/step24000.npy
+Step 27000: saved (5000, 128) to activations/pythia-14m/step27000.npy
+Step 29000: saved (5000, 128) to activations/pythia-14m/step29000.npy
+Step 32000: saved (5000, 128) to activations/pythia-14m/step32000.npy

@@ -130,7 +130,6 @@ def extract_activations_for_checkpoint(
         del model
         gc.collect()
         torch.cuda.empty_cache()
-        delete_cached_revision(model_name, revision)
 
     if not activations_arr:
         print("No valid features extracted.")
@@ -234,11 +233,12 @@ def run_all_checkpoints(model_name="allenai/OLMo-1B", dataset_name="fineweb",
     executor = ThreadPoolExecutor(max_workers=1)
 
     def _model_for_step(step):
-        if early_training_model and step > 0 and step <= 10000:
+        if early_training_model and step >= 1000 and step <= 10000:
             return early_training_model
         return model_name
 
     print(f"Processing {len(to_process)} remaining checkpoints...")
+    prefetch_future = None
     for idx, step in enumerate(tqdm(to_process, desc="Extracting activations")):
         revision = checkpoint_map[step]
         step_model = _model_for_step(step)
@@ -247,7 +247,9 @@ def run_all_checkpoints(model_name="allenai/OLMo-1B", dataset_name="fineweb",
         if idx + 1 < len(to_process):
             next_step = to_process[idx + 1]
             next_rev = checkpoint_map[next_step]
-            executor.submit(prefetch_checkpoint, _model_for_step(next_step), next_rev)
+            prefetch_future = executor.submit(prefetch_checkpoint, _model_for_step(next_step), next_rev)
+        else:
+            prefetch_future = None
 
         try:
             step_num, activations = extract_activations_for_checkpoint(
@@ -268,7 +270,12 @@ def run_all_checkpoints(model_name="allenai/OLMo-1B", dataset_name="fineweb",
                 tqdm.write(f"Step {step_num}: saved {activations.shape} to {save_path}")
         except Exception as e:
             tqdm.write(f"Error at step {step}: {str(e)}")
-            continue
+
+        # Wait for prefetch to finish before cleaning cache, so blob
+        # orphan detection sees all symlinks from the prefetched snapshot
+        if prefetch_future is not None:
+            prefetch_future.result()
+        delete_cached_revision(step_model, revision)
 
     executor.shutdown(wait=True)
 
