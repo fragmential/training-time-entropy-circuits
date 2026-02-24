@@ -25,11 +25,6 @@ def prefetch_checkpoint(model_name, revision):
 
 
 def delete_cached_revision(model_name, revision):
-    """Remove a specific revision from the HF cache to free disk space."""
-    _force_delete_cached_revision(model_name, revision)
-
-
-def _force_delete_cached_revision(model_name, revision):
     """Directly remove snapshot, ref, and orphaned blobs.
     Uses inodes to track references (works with both symlinks and hardlinks)."""
     import shutil
