@@ -42,7 +42,6 @@ for MODEL in "${MODELS[@]}"; do
     if [ -d "activations/${DATASET}/${MODEL}" ]; then
         echo "--- ${MODEL} ---"
         time uv run rankme_alpha_scripts/compute_metrics.py \
-            --model_name "${MODEL}" \
             --dataset_name "${DATASET}" \
             --num_workers "${SLURM_CPUS_PER_TASK}" \
             "${MODEL}"

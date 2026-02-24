@@ -253,14 +253,8 @@ def run_all_checkpoints(model_name="allenai/OLMo-1B", dataset_name="fineweb",
 
         try:
             step_num, activations = extract_activations_for_checkpoint(
-                step_model,
-                revision,
-                filtered_texts,
-                tokenizer,
-                max_length,
-                batch_size,
-                collection_method=collection_method,
-            )
+                step_model, revision, filtered_texts, tokenizer, max_length,
+                batch_size, collection_method=collection_method)
             if activations is not None:
                 if collection_method == "identity":
                     save_path = os.path.join(act_dir, f"step{step_num}.npy")

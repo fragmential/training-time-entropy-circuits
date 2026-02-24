@@ -211,15 +211,9 @@ def main(
             prefetch_future = None
 
         try:
-            activations = extract_activations(
-                model_name,
-                step_num,
-                filtered_texts,
-                tokenizer,
-                collection_method=collection_method,
-                max_length=max_length,
-                batch_size=batch_size,
-            )
+            activations = extract_activations(model_name, step_num, filtered_texts, tokenizer,
+                                              collection_method=collection_method,
+                                              max_length=max_length, batch_size=batch_size)
             if collection_method == "identity":
                 save_path = os.path.join(act_dir, f"step{step_num}.npy")
             else:
