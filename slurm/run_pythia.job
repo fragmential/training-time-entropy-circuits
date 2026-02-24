@@ -49,6 +49,7 @@ cd "$HOME/Tracing-representation-geometry-reproduction" || exit 1
 
 time uv run rankme_alpha_scripts/compute_alpha_pythia.py \
     --model_name "${MODEL_NAME}" \
+    --dataset_name "fineweb" \
     --num_samples 5000 \
     --max_length 512 \
     --batch_size "${BATCH_SIZE}"

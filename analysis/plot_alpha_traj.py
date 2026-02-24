@@ -11,8 +11,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from utils.checkpoint_info import get_token_count
 
 
-def load_results(model_name: str):
-    res = np.load(os.path.join('results', f'results_{model_name}.npy'), allow_pickle=True).item()
+def load_results(model_name: str, dataset_name: str = 'fineweb'):
+    new_path = os.path.join('results', dataset_name, f'results_{model_name}.npy')
+    old_path = os.path.join('results', f'results_{model_name}.npy')
+    path = new_path if os.path.exists(new_path) else old_path
+    res = np.load(path, allow_pickle=True).item()
     step_nums = sorted(res.keys())
     return res, step_nums
 
@@ -53,16 +56,18 @@ YVAR_LABELS = {
 
 
 def plot_model_training(model_name: str, xvar: str = 'steps', yvar: str = 'alpha',
+                        dataset_name: str = 'fineweb',
                         color: str = 'k', ls: str = '-', marker: str = 'o'):
-    res, step_nums = load_results(model_name)
+    res, step_nums = load_results(model_name, dataset_name=dataset_name)
     xs = XVAR_FNS[xvar](model_name, step_nums)
     ys = [res[s][yvar] for s in step_nums]
     plt.plot(xs, ys, marker=marker, color=color, ls=ls, lw=3, label=f'{model_name}')
 
 
 def plot_model_training_isoflops(model_name: str, yvar: str = 'alpha',
+                                 dataset_name: str = 'fineweb',
                                  marker: str = 'o', max_flops: int = 2e15):
-    res, step_nums = load_results(model_name)
+    res, step_nums = load_results(model_name, dataset_name=dataset_name)
     num_params_str = model_name.split('pythia-')[-1].split('-deduped')[0]
     num_params_val = float(num_params_str[:-1])
     num_params_order = 1e6 if num_params_str[-1] == 'm' else 1e9
@@ -127,7 +132,7 @@ filter_model_names = [
     # 'OLMo-2-1124-7B',
 ]
 
-def main(xvar: str = 'steps', yvar: str = 'alpha'):
+def main(xvar: str = 'steps', yvar: str = 'alpha', dataset_name: str = 'fineweb'):
     for midx, model_name in enumerate(tqdm(model_names)):
         if len(filter_model_names) and model_name not in filter_model_names: continue
         color = colors[midx]
@@ -135,9 +140,10 @@ def main(xvar: str = 'steps', yvar: str = 'alpha'):
         marker = '*' if 'deduped' in model_name else 's'
         try:
             if xvar == 'isoflops':
-                plot_model_training_isoflops(model_name, yvar=yvar, marker=marker)
+                plot_model_training_isoflops(model_name, yvar=yvar, dataset_name=dataset_name, marker=marker)
             else:
                 plot_model_training(model_name, xvar=xvar, yvar=yvar,
+                                    dataset_name=dataset_name,
                                     color=color, ls=ls, marker='')
         except:
             continue

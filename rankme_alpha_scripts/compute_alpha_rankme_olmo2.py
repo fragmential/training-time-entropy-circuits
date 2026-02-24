@@ -1,11 +1,18 @@
 import gc, os, sys, torch, numpy as np
-import torch.nn as nn
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from data import fineweb_loader
+from data import fineweb_loader, wikitext_loader, lam_loader, sciq_loader
+from rankme_alpha_scripts.activation_collection import collect_last_token_activations, HOOK_LOCATION_BY_METHOD, replace_output_head_with_identity
+
+DATASET_LOADERS = {
+    "fineweb": fineweb_loader.get_dataset,
+    "wikitext": wikitext_loader.get_dataset,
+    "lam": lam_loader.get_dataset,
+    "sciq": sciq_loader.get_dataset,
+}
 
 
 def prefetch_checkpoint(model_name, revision):
@@ -74,8 +81,15 @@ def _force_delete_cached_revision(model_name, revision):
         print(f"Warning: could not clean cache for {revision}: {e}")
 
 
-def extract_activations_for_checkpoint(model_name, revision, filtered_texts,
-                                       tokenizer, max_length, batch_size):
+def extract_activations_for_checkpoint(
+    model_name,
+    revision,
+    filtered_texts,
+    tokenizer,
+    max_length,
+    batch_size,
+    collection_method: str,
+):
     print(f"Running model {model_name}/{revision}")
 
     try:
@@ -91,7 +105,8 @@ def extract_activations_for_checkpoint(model_name, revision, filtered_texts,
             model_name, revision=revision,
             torch_dtype=torch.bfloat16, trust_remote_code=True
         )
-        model.lm_head = nn.Identity()
+        if collection_method == "identity":
+            replace_output_head_with_identity(model)
         model.to(device)
 
         activations_arr = []
@@ -103,12 +118,14 @@ def extract_activations_for_checkpoint(model_name, revision, filtered_texts,
             attention_mask = tokenized.attention_mask.to(device)
 
             with torch.no_grad():
-                outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-                last_indices = attention_mask.sum(dim=1) - 1
-                batch_indices = np.arange(attention_mask.shape[0])
-                activations = outputs.logits[batch_indices, last_indices, ...]
+                activations = collect_last_token_activations(
+                    model=model,
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    collection_method=collection_method,
+                )
                 activations_arr.append(activations.float().cpu().numpy())
-                del outputs, activations, input_ids, attention_mask
+                del activations, input_ids, attention_mask
     finally:
         del model
         gc.collect()
@@ -149,11 +166,20 @@ def run_all_checkpoints(model_name="allenai/OLMo-1B", dataset_name="fineweb",
                         batch_size=128, num_samples=2000,
                         max_checkpoints=50,
                         revisions_file="1b_revisions.txt",
-                        early_training_model: str = None):
-    short_name = model_name.split("/")[-1] if "/" in model_name else model_name
+                        early_training_model: str = None,
+                        collection_method: str = "identity"):
+    if collection_method == "kfac":
+        raise NotImplementedError(
+            "collection_method='kfac' is not implemented yet. "
+            "Use 'identity' or 'hf_hidden_states' for now."
+        )
 
-    act_dir = os.path.join('activations', short_name)
+    hook_location = HOOK_LOCATION_BY_METHOD[collection_method]
+
+    short_name = model_name.split("/")[-1] if "/" in model_name else model_name
+    act_dir = os.path.join("activations", dataset_name, short_name)
     os.makedirs(act_dir, exist_ok=True)
+    print(f"Saving activations to {act_dir} (collection_method={collection_method})")
 
     checkpoint_map = get_available_checkpoints(revisions_file)
 
@@ -170,8 +196,14 @@ def run_all_checkpoints(model_name="allenai/OLMo-1B", dataset_name="fineweb",
     step_nums = early_steps + later_steps
     print(f"Total checkpoints: {len(step_nums)} ({len(early_steps)} early + {len(later_steps)} later)")
 
-    to_process = [s for s in step_nums
-                  if not os.path.exists(os.path.join(act_dir, f'step{s}.npy'))]
+    to_process = []
+    for step_num in step_nums:
+        path = os.path.join(act_dir, f"step{step_num}.npy") if collection_method == "identity" else os.path.join(act_dir, f"step{step_num}_{hook_location}.npy")
+        if os.path.exists(path):
+            continue
+        if collection_method == "identity" and os.path.exists(os.path.join(act_dir, f"step{step_num}_{hook_location}.npy")):
+            continue
+        to_process.append(step_num)
 
     # Filter dataset, caching to disk so subsequent runs skip filtering
     import json
@@ -182,7 +214,7 @@ def run_all_checkpoints(model_name="allenai/OLMo-1B", dataset_name="fineweb",
             filtered_texts = json.load(f)
         print(f"Loaded {len(filtered_texts)} cached sequences from {cache_path}")
     else:
-        dataset = fineweb_loader.get_dataset()
+        dataset = DATASET_LOADERS[dataset_name]()
         first_rev = checkpoint_map[to_process[0]] if to_process else list(checkpoint_map.values())[0]
         tokenizer = AutoTokenizer.from_pretrained(model_name, revision=first_rev, trust_remote_code=True)
         filtered_texts = []
@@ -219,9 +251,19 @@ def run_all_checkpoints(model_name="allenai/OLMo-1B", dataset_name="fineweb",
 
         try:
             step_num, activations = extract_activations_for_checkpoint(
-                step_model, revision, filtered_texts, tokenizer, max_length, batch_size)
+                step_model,
+                revision,
+                filtered_texts,
+                tokenizer,
+                max_length,
+                batch_size,
+                collection_method=collection_method,
+            )
             if activations is not None:
-                save_path = os.path.join(act_dir, f'step{step_num}.npy')
+                if collection_method == "identity":
+                    save_path = os.path.join(act_dir, f"step{step_num}.npy")
+                else:
+                    save_path = os.path.join(act_dir, f"step{step_num}_{hook_location}.npy")
                 np.save(save_path, activations)
                 tqdm.write(f"Step {step_num}: saved {activations.shape} to {save_path}")
         except Exception as e:

@@ -4,3 +4,4 @@ __pycache__
 .claude
 cache
 activations
+memorization_kfac

@@ -2,11 +2,17 @@ import gc, os, sys, torch, numpy as np
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 from transformers import GPTNeoXForCausalLM, AutoTokenizer
-import datasets
-import torch.nn as nn
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from data import fineweb_loader
+from data import fineweb_loader, wikitext_loader, lam_loader, sciq_loader
+from rankme_alpha_scripts.activation_collection import collect_last_token_activations, HOOK_LOCATION_BY_METHOD, replace_output_head_with_identity
+
+DATASET_LOADERS = {
+    "fineweb": fineweb_loader.get_dataset,
+    "wikitext": wikitext_loader.get_dataset,
+    "lam": lam_loader.get_dataset,
+    "sciq": sciq_loader.get_dataset,
+}
 
 
 def prefetch_checkpoint(model_name, step_num):
@@ -75,16 +81,23 @@ def _force_delete_cached_revision(model_name, revision):
         print(f"Warning: could not clean cache for {revision}: {e}")
 
 
-def extract_activations(model_name: str, step_num: int,
-                        filtered_texts: list, tokenizer,
-                        max_length: int = 512, batch_size: int = 128) -> np.ndarray:
+def extract_activations(
+    model_name: str,
+    step_num: int,
+    filtered_texts: list,
+    tokenizer,
+    collection_method: str,
+    max_length: int = 512,
+    batch_size: int = 128,
+) -> np.ndarray:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     revision = f"step{step_num}"
 
     model = None
     try:
         model = GPTNeoXForCausalLM.from_pretrained(model_name, revision=revision, torch_dtype=torch.float16)
-        model.embed_out = nn.Identity()
+        if collection_method == "identity":
+            replace_output_head_with_identity(model)
         model.to(device)
 
         activations_arr = []
@@ -96,13 +109,14 @@ def extract_activations(model_name: str, step_num: int,
                 input_ids = tokenized.input_ids.to(device)
                 attention_mask = tokenized.attention_mask.to(device)
 
-                out = model(input_ids=input_ids, attention_mask=attention_mask)
-
-                last_indices = attention_mask.sum(dim=1) - 1
-                batch_indices = torch.arange(input_ids.shape[0])
-                activations = out.logits[batch_indices, last_indices, ...]
+                activations = collect_last_token_activations(
+                    model=model,
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    collection_method=collection_method,
+                )
                 activations_arr.append(activations.float().cpu().numpy())
-                del out, activations, input_ids, attention_mask
+                del activations, input_ids, attention_mask
     finally:
         del model
         gc.collect()
@@ -112,19 +126,27 @@ def extract_activations(model_name: str, step_num: int,
     return np.vstack(activations_arr)
 
 
-def main(model_name: str = "EleutherAI/pythia-70m-deduped",
-         dataset_name: str = "fineweb",
-         num_samples: int = 2000,
-         max_length: int = 512,
-         min_length: int = 32,
-         max_checkpoints: int = 50,
-         batch_size: int = 128):
+def main(
+    model_name: str = "EleutherAI/pythia-70m-deduped",
+    dataset_name: str = "fineweb",
+    dataset_content_key: str = "text",
+    num_samples: int = 2000,
+    max_length: int = 512,
+    min_length: int = 32,
+    max_checkpoints: int = 50,
+    batch_size: int = 128,
+    collection_method: str = "identity",
+):
     print(model_name, dataset_name)
-    assert dataset_name in ['fineweb'], NotImplementedError
+    if collection_method == "kfac":
+        raise NotImplementedError(
+            "collection_method='kfac' is not implemented yet. "
+            "Use 'identity' or 'hf_hidden_states' for now."
+        )
 
-    short_name = model_name.split("/")[-1] if "/" in model_name else model_name
+    hook_location = HOOK_LOCATION_BY_METHOD[collection_method]
 
-    dataset = fineweb_loader.get_dataset()
+    dataset = DATASET_LOADERS[dataset_name]()
 
     # step_nums = [0,1,2,4,8,16,32,64,128,256,512] + list(np.arange(1000,143000+1,10000))
     early_steps = [0,8,16,32,64,128,256,512]
@@ -139,11 +161,19 @@ def main(model_name: str = "EleutherAI/pythia-70m-deduped",
     step_nums = early_steps + later_steps
     print(f"Total checkpoints: {len(step_nums)} ({len(early_steps)} early + {len(later_steps)} later)")
 
-    act_dir = os.path.join('activations', short_name)
+    short_name = model_name.split("/")[-1] if "/" in model_name else model_name
+    act_dir = os.path.join("activations", dataset_name, short_name)
     os.makedirs(act_dir, exist_ok=True)
+    print(f"Saving activations to {act_dir} (collection_method={collection_method})")
 
-    to_process = [s for s in step_nums
-                  if not os.path.exists(os.path.join(act_dir, f'step{s}.npy'))]
+    to_process = []
+    for step_num in step_nums:
+        path = os.path.join(act_dir, f"step{step_num}.npy") if collection_method == "identity" else os.path.join(act_dir, f"step{step_num}_{hook_location}.npy")
+        if os.path.exists(path):
+            continue
+        if collection_method == "identity" and os.path.exists(os.path.join(act_dir, f"step{step_num}_{hook_location}.npy")):
+            continue
+        to_process.append(step_num)
 
     # Load tokenizer once for filtering (all Pythia checkpoints share the same tokenizer)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -161,7 +191,7 @@ def main(model_name: str = "EleutherAI/pythia-70m-deduped",
     else:
         filtered_texts = []
         for seq in tqdm(dataset, desc="Filtering"):
-            text = seq["text"]
+            text = seq[dataset_content_key]
             if tokenizer(text, return_tensors="pt").input_ids.shape[-1] > min_length:
                 filtered_texts.append(text)
                 if len(filtered_texts) >= num_samples:
@@ -179,9 +209,19 @@ def main(model_name: str = "EleutherAI/pythia-70m-deduped",
             executor.submit(prefetch_checkpoint, model_name, to_process[idx + 1])
 
         try:
-            activations = extract_activations(model_name, step_num, filtered_texts, tokenizer,
-                                              max_length=max_length, batch_size=batch_size)
-            save_path = os.path.join(act_dir, f'step{step_num}.npy')
+            activations = extract_activations(
+                model_name,
+                step_num,
+                filtered_texts,
+                tokenizer,
+                collection_method=collection_method,
+                max_length=max_length,
+                batch_size=batch_size,
+            )
+            if collection_method == "identity":
+                save_path = os.path.join(act_dir, f"step{step_num}.npy")
+            else:
+                save_path = os.path.join(act_dir, f"step{step_num}_{hook_location}.npy")
             np.save(save_path, activations)
             tqdm.write(f"Step {step_num}: saved {activations.shape} to {save_path}")
         except Exception as e:

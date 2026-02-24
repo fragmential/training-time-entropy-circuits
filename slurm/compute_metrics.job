@@ -13,6 +13,8 @@ module purge
 
 cd "$HOME/Tracing-representation-geometry-reproduction" || exit 1
 
+DATASET="fineweb"
+
 MODELS=(
     "pythia-14m"
     "pythia-31m"
@@ -35,10 +37,11 @@ MODELS=(
 )
 
 for MODEL in "${MODELS[@]}"; do
-    if [ -d "activations/${MODEL}" ]; then
+    if [ -d "activations/${DATASET}/${MODEL}" ]; then
         echo "--- ${MODEL} ---"
         time uv run rankme_alpha_scripts/compute_metrics.py \
             --model_name "${MODEL}" \
+            --dataset_name "${DATASET}" \
             --num_workers "${SLURM_CPUS_PER_TASK}"
     fi
 done
