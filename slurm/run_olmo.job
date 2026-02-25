@@ -43,7 +43,7 @@ if [ -n "${EARLY_MODEL}" ]; then
 fi
 
 # shellcheck disable=SC2086
-time uv run rankme_alpha_scripts/compute_alpha_rankme_olmo2.py \
+time uv run rankme_alpha_scripts/extract_activations.py \
     --model_name "${MODEL_NAME}" \
     --dataset_name "fineweb" \
     --revisions_file "${REV_FILE}" \

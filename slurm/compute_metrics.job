@@ -18,8 +18,11 @@ DATASET="fineweb"
 
 MODELS=(
     "pythia-14m"
+    "pythia-14m-deduped"
     "pythia-31m"
+    "pythia-31m-deduped"
     "pythia-70m"
+    "pythia-70m-deduped"
     "pythia-160m"
     "pythia-160m-deduped"
     "pythia-410m"
@@ -33,6 +36,7 @@ MODELS=(
     "pythia-6.9b"
     "pythia-6.9b-deduped"
     "pythia-12b"
+    "pythia-12b-deduped"
     "OLMo-2-0425-1B"
     "OLMo-2-1124-7B"
 )

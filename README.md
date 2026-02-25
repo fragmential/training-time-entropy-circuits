@@ -21,17 +21,17 @@ pip install torch transformers datasets numpy matplotlib seaborn scikit-learn tq
 
 ## Quick Start
 
-### Compute metrics for Pythia models
+### Extract activations
 
 ```bash
-python rankme_alpha_scripts/compute_alpha_pythia.py --model_name EleutherAI/pythia-6.9b
+python rankme_alpha_scripts/extract_activations.py --model_name EleutherAI/pythia-6.9b
+python rankme_alpha_scripts/extract_activations.py --model_name allenai/OLMo-2-1124-7B --revisions_file 7b_revisions.txt
 ```
 
-### Compute metrics for OLMo models
+### Compute metrics from saved activations
 
 ```bash
-python rankme_alpha_scripts/compute_alpha_rankme_olmo2.py \
-    --model_name allenai/OLMo-2-1124-7B 
+python rankme_alpha_scripts/compute_metrics.py pythia-6.9b
 ```
 
 ### Visualize results
@@ -55,12 +55,13 @@ python memorization_scripts/compute_llm_likelihood.py
 ├── memorization_scripts/           # ∞-gram and LLM likelihood analysis
 │   ├── compute_infgrams.py
 │   └── compute_llm_likelihood.py
-├── rankme_alpha_scripts/          # Compute geometric metrics
-│   ├── compute_alpha_pythia.py
-│   ├── compute_rankme_pythia.py
-│   └── compute_alpha_rankme_olmo2.py
+├── rankme_alpha_scripts/          # Activation extraction and metric computation
+│   ├── extract_activations.py
+│   └── compute_metrics.py
 └── utils/
-    ├── powerlaw.py                # Eigenspectrum and metric utilities         
+    ├── model_registry.py          # Model-specific config, loading, checkpoint discovery
+    ├── checkpoint_info.py         # Step-to-token mapping
+    └── powerlaw.py                # Eigenspectrum and metric utilities
 ```
 
 ## Key Metrics
@@ -83,9 +84,13 @@ Output saved as `.npy` files containing:
 {
     step_num: {
         'rankme': float,
+        'sq_rankme': float,
+        'lin_matent': float,
+        'matent': float,
         'alpha': float,
         'eigenspectrum': array,
-        'r2': float
+        'r2': float,
+        'r2_100': float
     }
 }
 ```

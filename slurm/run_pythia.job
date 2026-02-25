@@ -7,12 +7,15 @@
 #SBATCH --time=06:00:00
 #SBATCH --output=slurm/logs/pythia_%A_%a.out
 #SBATCH --error=slurm/logs/pythia_%A_%a.err
-#SBATCH --array=0-15
+#SBATCH --array=0-19
 
 MODELS=(
     "EleutherAI/pythia-14m"
+    "EleutherAI/pythia-14m-deduped"
     "EleutherAI/pythia-31m"
+    "EleutherAI/pythia-31m-deduped"
     "EleutherAI/pythia-70m"
+    "EleutherAI/pythia-70m-deduped"
     "EleutherAI/pythia-160m"
     "EleutherAI/pythia-160m-deduped"
     "EleutherAI/pythia-410m"
@@ -26,6 +29,7 @@ MODELS=(
     "EleutherAI/pythia-6.9b"
     "EleutherAI/pythia-6.9b-deduped"
     "EleutherAI/pythia-12b"
+    "EleutherAI/pythia-12b-deduped"
 )
 
 MODEL_NAME="${MODELS[$SLURM_ARRAY_TASK_ID]}"
@@ -51,7 +55,7 @@ module purge
 export HF_HOME="/projects/prjs1815/hf_cache"
 cd "$HOME/Tracing-representation-geometry-reproduction" || exit 1
 
-time uv run rankme_alpha_scripts/compute_alpha_pythia.py \
+time uv run rankme_alpha_scripts/extract_activations.py \
     --model_name "${MODEL_NAME}" \
     --dataset_name "fineweb" \
     --num_samples 5000 \

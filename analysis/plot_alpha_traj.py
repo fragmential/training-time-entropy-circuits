@@ -28,12 +28,22 @@ def get_xs_tokens(model_name, step_nums):
     return [get_token_count(model_name, s) for s in step_nums]
 
 
+def _parse_param_count(model_name):
+    """Extract parameter count from model name (e.g. 'pythia-70m' -> 70e6, 'OLMo-2-0425-1B' -> 1e9)."""
+    name = model_name.lower()
+    if 'pythia' in name:
+        size_str = model_name.split('pythia-')[-1].split('-deduped')[0]
+    elif 'olmo' in name:
+        size_str = model_name.split('-')[-1]
+    else:
+        raise ValueError(f"Cannot extract param count from {model_name}")
+    multiplier = 1e6 if size_str[-1].lower() == 'm' else 1e9
+    return float(size_str[:-1]) * multiplier
+
+
 def get_xs_flops(model_name, step_nums):
-    num_params_str = model_name.split('pythia-')[-1].split('-deduped')[0]
-    num_params_val = float(num_params_str[:-1])
-    num_params_order = 1e6 if num_params_str[-1] == 'm' else 1e9
-    flops_per_step = num_params_val * num_params_order
-    return [flops_per_step * s for s in step_nums]
+    num_params = _parse_param_count(model_name)
+    return [num_params * s for s in step_nums]
 
 
 XVAR_FNS = {
@@ -68,10 +78,7 @@ def plot_model_training_isoflops(model_name: str, yvar: str = 'alpha',
                                  dataset_name: str = 'fineweb',
                                  marker: str = 'o', max_flops: int = 2e15):
     res, step_nums = load_results(model_name, dataset_name=dataset_name)
-    num_params_str = model_name.split('pythia-')[-1].split('-deduped')[0]
-    num_params_val = float(num_params_str[:-1])
-    num_params_order = 1e6 if num_params_str[-1] == 'm' else 1e9
-    flops_per_step = num_params_val * num_params_order
+    flops_per_step = _parse_param_count(model_name)
     isoflops = np.array([1e13, 5e13, 1e14])
     isoflops_steps = (isoflops / flops_per_step // 1000 * 1000).astype(int)
     plot_steps = [s for s in isoflops_steps if s < max(step_nums) and s > min(step_nums)]
@@ -82,7 +89,8 @@ def plot_model_training_isoflops(model_name: str, yvar: str = 'alpha',
 
 
 model_names = [
-    'pythia-14m', 'pythia-31m',
+    'pythia-14m', 'pythia-14m-deduped',
+    'pythia-31m', 'pythia-31m-deduped',
     'pythia-70m', 'pythia-70m-deduped',
     'pythia-160m', 'pythia-160m-deduped',
     'pythia-410m', 'pythia-410m-deduped',
@@ -96,7 +104,8 @@ model_names = [
 ]
 
 colors = [
-    'turquoise', 'cornflowerblue',
+    'turquoise', 'turquoise',
+    'cornflowerblue', 'cornflowerblue',
     'dodgerblue', 'dodgerblue',
     'gold', 'gold',
     'lime', 'lime',
@@ -110,23 +119,23 @@ colors = [
 ]
 
 filter_model_names = [
-    # 'pythia-1.4b-deduped',
+    # 'pythia-14m',
+    # 'pythia-31m',
     # 'pythia-70m-deduped',
     # 'pythia-160m-deduped',
     # 'pythia-410m-deduped',
     # 'pythia-1b-deduped',
+    # 'pythia-1.4b-deduped',
     # 'pythia-2.8b-deduped',
     # 'pythia-6.9b-deduped',
     # 'pythia-12b-deduped',
-    'pythia-14m',
-    'pythia-31m',
-    'pythia-70m',
-    'pythia-160m',
-    'pythia-410m',
-    'pythia-1b',
-    'pythia-1.4b',
-    'pythia-2.8b',
-    'pythia-6.9b',
+    # 'pythia-70m',
+    # 'pythia-160m',
+    # 'pythia-410m',
+    # 'pythia-1b',
+    # 'pythia-1.4b',
+    # 'pythia-2.8b',
+    # 'pythia-6.9b',
     # 'pythia-12b',
     # 'OLMo-2-0425-1B',
     # 'OLMo-2-1124-7B',

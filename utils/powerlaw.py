@@ -35,7 +35,7 @@ def stringer_get_powerlaw(ss, trange):
     ''' fit exponent to variance curve'''
     logss = np.log(np.abs(ss))
     y = logss[trange][:, np.newaxis]
-    trange += 1
+    trange = trange + 1
     nt = trange.size
     x = np.concatenate((-np.log(trange)[:, np.newaxis], np.ones((nt, 1))), axis=1)
     w = 1.0 / trange.astype(np.float32)[:, np.newaxis]
