@@ -48,6 +48,7 @@ time uv run rankme_alpha_scripts/extract_activations.py \
     --dataset_name "fineweb" \
     --revisions_file "${REV_FILE}" \
     --num_samples 5000 \
+    --max_length 512 \
     --batch_size "${BATCH_SIZE}" \
     ${EARLY_ARGS}
 
