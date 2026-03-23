@@ -1,0 +1,16 @@
+# Same as reproduce_rankme_pythia.yaml but using hook-based post-norm capture.
+# Should produce identical results to identity_head (after norming).
+# Used for verification that both methods agree.
+dataset_name: fineweb
+num_samples: 2000
+max_length: 512
+min_length: 32
+batch_size: 128
+max_checkpoints: 50
+packing: padded
+token_selection: last
+collect_residual: true
+residual_hook_point: post_norm
+collect_A: false
+collect_G: false
+collect_B: false

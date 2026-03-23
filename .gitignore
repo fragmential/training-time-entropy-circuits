@@ -5,3 +5,4 @@ __pycache__
 cache
 activations
 memorization_kfac
+local_experiments

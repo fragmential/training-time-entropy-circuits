@@ -21,25 +21,63 @@ pip install torch transformers datasets numpy matplotlib seaborn scikit-learn tq
 
 ## Quick Start
 
-### Extract activations
+### Unified pipeline (recommended)
+
+The unified collection script replaces the separate activation and K-FAC pipelines. It is driven by YAML config files.
+
+```bash
+# Collect residual activations (equivalent to old extract_activations.py)
+python scripts/collect.py --config configs/reproduce_rankme_pythia.yaml \
+    --model_name EleutherAI/pythia-6.9b
+
+# Collect K-FAC covariance factors (equivalent to old collect_kfac.py)
+python scripts/collect.py --config configs/reproduce_kfac_pythia.yaml \
+    --model_name EleutherAI/pythia-1.4b-deduped --batch_size 64
+
+# OLMo models
+python scripts/collect.py --config configs/reproduce_rankme_pythia.yaml \
+    --model_name allenai/OLMo-2-1124-7B --revisions_file 7b_revisions.txt
+```
+
+Config files set defaults; CLI flags override them. Available configs:
+
+| Config | What it does |
+|--------|-------------|
+| `reproduce_rankme_pythia.yaml` | Padded fineweb, identity head, last token |
+| `reproduce_rankme_pythia_hook.yaml` | Same but hook-based post-norm |
+| `reproduce_kfac_pythia.yaml` | Packed fineweb, A+G covariance, sampled labels |
+
+### Legacy scripts (still work)
 
 ```bash
 python rankme_alpha_scripts/extract_activations.py --model_name EleutherAI/pythia-6.9b
-python rankme_alpha_scripts/extract_activations.py --model_name allenai/OLMo-2-1124-7B --revisions_file 7b_revisions.txt
+python kfac_scripts/collect_kfac.py --model_name EleutherAI/pythia-1.4b-deduped
 ```
 
-### Compute metrics from saved activations
+### Compute metrics
 
 ```bash
 python rankme_alpha_scripts/compute_metrics.py pythia-6.9b
+python kfac_scripts/compute_kfac_metrics.py --model_name EleutherAI/pythia-1.4b-deduped
 ```
 
 ### Visualize results
 
 ```bash
-python analysis/plot_alpha_traj.py 
+python analysis/plot_alpha_traj.py
 ```
-###  ∞-gram and LLM likelihood analysis
+
+### Verify the pipeline
+
+```bash
+# Self-consistency tests (CPU, no existing data needed)
+python scripts/verify_collect.py --mode self_consistency
+
+# Compare against existing computed data (on server)
+python scripts/verify_collect.py --mode all
+```
+
+###  Memorization analysis
 
 ```bash
 python memorization_scripts/compute_infgrams.py
@@ -49,20 +87,51 @@ python memorization_scripts/compute_llm_likelihood.py
 ## Repository Structure
 
 ```
-├── analysis/                       # Visualization scripts
-│   └── plot_alpha_traj.py
-    └── llm_prob.py     
-├── memorization_scripts/           # ∞-gram and LLM likelihood analysis
-│   ├── compute_infgrams.py
-│   └── compute_llm_likelihood.py
-├── rankme_alpha_scripts/          # Activation extraction and metric computation
-│   ├── extract_activations.py
-│   └── compute_metrics.py
-└── utils/
-    ├── model_registry.py          # Model-specific config, loading, checkpoint discovery
-    ├── checkpoint_info.py         # Step-to-token mapping
-    └── powerlaw.py                # Eigenspectrum and metric utilities
+scripts/                            # Unified pipeline
+├── collect.py                      # Main collection (residual + K-FAC)
+├── verify_collect.py               # Verification tests
+
+configs/                            # YAML configs for collect.py
+
+rankme_alpha_scripts/               # Legacy activation pipeline
+├── extract_activations.py
+└── compute_metrics.py
+
+kfac_scripts/                       # Legacy K-FAC pipeline
+├── collect_kfac.py
+└── compute_kfac_metrics.py
+
+utils/
+├── model_registry.py               # Model loading, checkpoint discovery
+├── hooks.py                        # CovarianceCollector, ResidualCapture
+├── storage.py                      # Storage format handling
+├── data_utils.py                   # Packing, padding, token masks
+├── powerlaw.py                     # Eigenspectrum and metric utilities
+└── checkpoint_info.py              # Step-to-token mapping
+
+data/                               # Dataset loaders
+├── fineweb_loader.py
+├── wikitext_loader.py
+├── lam_loader.py
+└── sciq_loader.py
+
+memorization_kfac/                  # Merullo et al. released code (unmodified)
+analysis/                           # Visualization scripts
+slurm/                              # SLURM job scripts
 ```
+
+## Collection Features
+
+The unified `scripts/collect.py` supports:
+
+- **Residual capture**: `identity_head` (fast, post-norm), `post_norm` (hook), `pre_norm` (raw residual), per-block hooks
+- **Covariance collection**: A (input), G (gradient), B (post-weight output) for MLP projections
+- **Data modes**: packed (no padding) or padded sequences
+- **Token selection**: all tokens or last token (per sequence or per document)
+- **Storage formats**: `cov` (raw matrix), `cov_svd` (eigendecomposition), `eigenvalues` (cheapest)
+- **Cross-basis projections**: project onto previously stored eigenbases
+- **Skip positions**: skip first k tokens after document boundaries in packed data
+- **Answer-only gradients**: mask prompt tokens for task-specific G collection (planned)
 
 ## Key Metrics
 

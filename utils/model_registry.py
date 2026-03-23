@@ -132,6 +132,56 @@ def load_tokenizer(config, revision=None):
     return tok
 
 
+# --- Architecture helpers ---
+
+def get_mlp_projections(model, config, block_idx):
+    """Return [(name, nn.Linear), ...] for MLP projections in the given block."""
+    if config.family == "pythia":
+        block = model.gpt_neox.layers[block_idx]
+        return [
+            (f"blk{block_idx}.up",   block.mlp.dense_h_to_4h),
+            (f"blk{block_idx}.down", block.mlp.dense_4h_to_h),
+        ]
+    block = model.model.layers[block_idx]
+    return [
+        (f"blk{block_idx}.gate", block.mlp.gate_proj),
+        (f"blk{block_idx}.up",   block.mlp.up_proj),
+        (f"blk{block_idx}.down", block.mlp.down_proj),
+    ]
+
+
+def get_num_layers(model, config):
+    """Return number of transformer blocks."""
+    if config.family == "pythia":
+        return len(model.gpt_neox.layers)
+    return len(model.model.layers)
+
+
+def get_final_layernorm(model, config):
+    """Return the final layernorm module (before the lm_head).
+
+    Pythia: model.gpt_neox.final_layer_norm (nn.LayerNorm)
+    OLMo:   model.model.norm (RMSNorm)
+    """
+    if config.family == "pythia":
+        return model.gpt_neox.final_layer_norm
+    return model.model.norm
+
+
+def get_block_layernorms(model, config, block_idx):
+    """Return (input_layernorm, post_attention_layernorm) for a block.
+
+    These allow hooking:
+    - Before attention: input_layernorm (pre-hook = block input residual)
+    - Between attention and MLP: post_attention_layernorm (pre-hook = post-attention residual)
+    """
+    if config.family == "pythia":
+        block = model.gpt_neox.layers[block_idx]
+        return block.input_layernorm, block.post_attention_layernorm
+    block = model.model.layers[block_idx]
+    return block.input_layernorm, block.post_attention_layernorm
+
+
 # --- HF cache management ---
 
 def prefetch_checkpoint(model_name, revision):
