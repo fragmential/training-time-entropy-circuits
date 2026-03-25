@@ -150,17 +150,17 @@ class ResidualCapture:
     """Capture residual stream activations at configurable hook points.
 
     Hook points:
-        "identity_head"  — replace lm_head/embed_out with nn.Identity() (fast path, post-norm)
-        "post_norm"      — forward_hook on final layernorm output
-        "pre_norm"       — forward_pre_hook on final layernorm input (raw residual)
-        "post_attn_N"    — forward_pre_hook on block N's post-attention layernorm
-        "pre_block_N"    — forward_pre_hook on block N's input layernorm
+        "identity_head"      — replace lm_head/embed_out with nn.Identity() (fast path, after final norm)
+        "after_final_norm"   — forward_hook on final layernorm output
+        "before_final_norm"  — forward_pre_hook on final layernorm input (raw residual)
+        "post_attn_N"        — forward_pre_hook on block N's post-attention layernorm
+        "pre_block_N"        — forward_pre_hook on block N's input layernorm
 
     The identity_head method replaces the output head entirely. The hook methods
     capture activations non-destructively.
     """
 
-    def __init__(self, model, config, hook_point: str = "pre_norm"):
+    def __init__(self, model, config, hook_point: str = "before_final_norm"):
         from utils.model_registry import get_final_layernorm, get_block_layernorms
 
         self.hook_point = hook_point
@@ -171,10 +171,10 @@ class ResidualCapture:
 
         if hook_point == "identity_head":
             self._setup_identity_head(model)
-        elif hook_point == "post_norm":
+        elif hook_point == "after_final_norm":
             target = get_final_layernorm(model, config)
             self._handle = target.register_forward_hook(self._capture_output)
-        elif hook_point == "pre_norm":
+        elif hook_point == "before_final_norm":
             target = get_final_layernorm(model, config)
             self._handle = target.register_forward_pre_hook(self._capture_input)
         elif hook_point.startswith("post_attn_"):
@@ -187,7 +187,7 @@ class ResidualCapture:
             self._handle = input_ln.register_forward_pre_hook(self._capture_input)
         else:
             raise ValueError(f"Unknown hook_point: {hook_point}. "
-                             f"Expected: identity_head, post_norm, pre_norm, post_attn_N, pre_block_N")
+                             f"Expected: identity_head, after_final_norm, before_final_norm, post_attn_N, pre_block_N")
 
     def _setup_identity_head(self, model):
         """Replace lm_head/embed_out with nn.Identity()."""

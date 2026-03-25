@@ -95,17 +95,12 @@ def main(
     max_checkpoints: int = 50,
     batch_size: int = 128,
     collection_method: str = "identity",
-    revisions_file: str = None,
-    early_training_model: str = None,
 ):
     config = get_model_config(model_name)
     print(model_name, dataset_name)
 
     # Checkpoint schedule
-    schedule = get_checkpoint_schedule(
-        config, max_checkpoints,
-        revisions_file=revisions_file, early_training_model=early_training_model,
-    )
+    schedule = get_checkpoint_schedule(config, max_checkpoints)
     print(f"Total checkpoints: {len(schedule)}")
 
     # Output directory

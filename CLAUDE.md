@@ -1,31 +1,30 @@
 # Codebase Guide
 
 ## What this project does
-Tracks how LLM representations evolve during pretraining through spectral methods (RankMe, alpha/power-law exponent) and K-FAC curvature analysis. Supports Pythia (14m–12b) and OLMo-2 (1B, 7B) model families.
+Tracks how LLM representations evolve during pretraining through spectral methods (RankMe, alpha/power-law exponent) and covariance curvature analysis. Supports Pythia (14m–12b) and OLMo-2 (1B, 7B) model families.
 
 ## Project structure
 
 ```
-scripts/              # Unified pipeline (new)
-  collect.py          # Main collection: residual activations + K-FAC covariance
-  verify_collect.py   # CPU-friendly verification tests
-  storage_tool.py     # CLI for storage format manipulation (planned)
+scripts/              # Unified pipeline
+  collect.py          # Main collection: residual activations + covariance factors
+  verify_collect.py   # Verification tests (self-consistency + server comparison)
 
 configs/              # YAML configs for collect.py (--config flag)
-  reproduce_rankme_pythia.yaml      # padded fineweb, identity head, last token
-  reproduce_rankme_pythia_hook.yaml # same but hook-based post-norm
-  reproduce_kfac_pythia.yaml        # packed fineweb, A+G cov, all tokens
+  reproduce_rankme_alpha.yaml      # padded fineweb, identity head, last token
+  reproduce_rankme_alpha_hook.yaml # same but hook-based post-norm (verification)
+  reproduce_kfac.yaml              # packed fineweb, A+G covariance, all tokens
 
 rankme_alpha_scripts/ # Legacy activation pipeline (kept for reference)
   extract_activations.py
   compute_metrics.py
 
-kfac_scripts/         # Legacy K-FAC pipeline (kept for reference)
+kfac_scripts/         # Legacy covariance pipeline (kept for reference)
   collect_kfac.py
   compute_kfac_metrics.py
 
 utils/
-  model_registry.py   # Model loading, checkpoint discovery, architecture helpers
+  model_registry.py   # ModelConfig, checkpoint discovery, model loading, architecture helpers
   hooks.py            # CovarianceCollector, ResidualCapture hook classes
   storage.py          # Storage format handling (cov, cov_svd, eigenvalues)
   data_utils.py       # Packing, padding, token mask computation
@@ -35,37 +34,52 @@ utils/
 data/                 # Dataset loaders (HuggingFace)
   fineweb_loader.py, wikitext_loader.py, lam_loader.py, sciq_loader.py
 
-memorization_kfac/    # Merullo et al. released code (unmodified)
+memorization_kfac (reference repo)/  # Merullo et al. released code (unmodified)
 
-slurm/                # SLURM job scripts for cluster
+slurm/                # SLURM job scripts and wrapper
+  run_collect.sh      # Array job wrapper: reads config, resolves models, submits sbatch
+  run_pythia.job      # Legacy: Pythia activation extraction
+  run_olmo.job        # Legacy: OLMo activation extraction
+  run_kfac_pythia.job # Legacy: Pythia covariance collection
+  run_kfac_olmo.job   # Legacy: OLMo covariance collection
+
 analysis/             # Plotting scripts
 ```
 
 ## Running the unified pipeline
 
 ```bash
-# Collect residual activations (like old extract_activations.py)
-python scripts/collect.py --config configs/reproduce_rankme_pythia.yaml \
-    --model_name EleutherAI/pythia-70m-deduped
+# Single model (scalar config)
+python scripts/collect.py --model_name EleutherAI/pythia-70m-deduped \
+    --config configs/reproduce_rankme_alpha.yaml
 
-# Collect K-FAC factors (like old collect_kfac.py)
-python scripts/collect.py --config configs/reproduce_kfac_pythia.yaml \
-    --model_name EleutherAI/pythia-1.4b-deduped --batch_size 64
+# Model sweep via SLURM wrapper (comment out models in the script to skip)
+./slurm/run_collect.sh configs/reproduce_rankme_alpha.yaml
+./slurm/run_collect.sh configs/reproduce_kfac.yaml --time 12:00:00
 
 # CLI flags override config values
-python scripts/collect.py --config configs/reproduce_kfac_pythia.yaml \
+python scripts/collect.py --config configs/reproduce_kfac.yaml \
     --model_name EleutherAI/pythia-14m --max_checkpoints 3 --num_samples 50
 ```
+
+## Config system
+
+Configs use a `CollectConfig` dataclass (in collect.py). YAML files can specify:
+- **`model_name`**: single string or list of models for sweep
+- **Vectorizable fields** (`batch_size`, `max_checkpoints`, `max_layers_per_pass`): scalar (same for all), list (zipped with model_name), or dict keyed by model name
+- **`array_id`**: passed by SLURM wrapper to select one model from the list
+
+Model-specific loading details (`revisions_file`, `early_training_model`) are in `utils/model_registry.py`, not in configs.
 
 ## Key concepts
 
 ### Collection modes
-- **collect_residual**: Capture residual stream. Hook points: `identity_head` (fast, post-norm), `post_norm` (hook), `pre_norm` (raw residual), `post_attn_N`, `pre_block_N`
+- **collect_residual**: Capture residual stream. Hook points: `identity_head` (fast, after final norm), `after_final_norm` (hook), `before_final_norm` (raw residual), `post_attn_N`, `pre_block_N`
 - **collect_A/G/B**: Covariance matrices for MLP projections. A=input, G=gradient, B=output. G requires backward pass.
 
 ### Data modes
 - **packing=padded**: Individual sequences, padding to longest. Good for last-token extraction.
-- **packing=packed**: Concatenated tokens, no padding. Standard for K-FAC and training-like data.
+- **packing=packed**: Concatenated tokens, no padding. Standard for covariance collection and training-like data.
 - **token_selection=last**: Last token per sequence (padded) or per document (packed, needs boundary_token_ids).
 - **token_selection=all**: All positions except last (which has no next-token target).
 
@@ -78,6 +92,7 @@ python scripts/collect.py --config configs/reproduce_kfac_pythia.yaml \
 ### Model families
 - **Pythia** (GPTNeoX): 2 MLP projections (dense_h_to_4h, dense_4h_to_h). float16.
 - **OLMo-2** (LLaMA-style): 3 MLP projections (gate_proj, up_proj, down_proj). bfloat16. RMSNorm.
+- Per-model config (revisions, early training repos) in `utils/model_registry.py`.
 - Checkpoint discovery via `utils/model_registry.get_checkpoint_schedule()`.
 
 ## Verification
@@ -99,9 +114,9 @@ python scripts/verify_collect.py --mode all
 export HF_HOME="/projects/prjs1815/hf_cache"
 cd ~/Tracing-representation-geometry-reproduction
 
-# Array jobs use model list + batch size logic
-sbatch slurm/run_kfac_pythia.job
-sbatch slurm/run_olmo.job
+# New unified wrapper (comment out models in run_collect.sh to run a subset)
+./slurm/run_collect.sh configs/reproduce_rankme_alpha.yaml
+./slurm/run_collect.sh configs/reproduce_kfac.yaml --time 12:00:00
 ```
 
 ## Dependencies

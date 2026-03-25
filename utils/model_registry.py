@@ -12,15 +12,19 @@ class ModelConfig:
     dtype: str            # "float16" or "bfloat16"
     trust_remote_code: bool
     pad_token_from_eos: bool
+    revisions_file: str = None        # path to file mapping step→revision hash
+    early_training_model: str = None  # separate HF repo for early checkpoints
 
 
-# The EleutherAI 14m/31m repos are actually deduped-trained.
-# The non-deduped versions live under stellaathena.
-_PYTHIA_HF_REPO = {
-    "EleutherAI/pythia-14m": "stellaathena/pythia-14m",
-    "EleutherAI/pythia-31m": "stellaathena/pythia-31m",
-    "EleutherAI/pythia-14m-deduped": "EleutherAI/pythia-14m",
-    "EleutherAI/pythia-31m-deduped": "EleutherAI/pythia-31m",
+# Per-model overrides for fields that differ within a family.
+_OLMO_OVERRIDES = {
+    "allenai/OLMo-2-0425-1B": {
+        "revisions_file": "1b_revisions.txt",
+        "early_training_model": "allenai/OLMo-2-0425-1B-early-training",
+    },
+    "allenai/OLMo-2-1124-7B": {
+        "revisions_file": "7b_revisions.txt",
+    },
 }
 
 
@@ -29,13 +33,14 @@ def get_model_config(model_name: str) -> ModelConfig:
     if "pythia" in name:
         return ModelConfig(
             family="pythia",
-            hf_repo=_PYTHIA_HF_REPO.get(model_name, model_name),
+            hf_repo=model_name,
             model_class="GPTNeoXForCausalLM",
             dtype="float16",
             trust_remote_code=False,
             pad_token_from_eos=True,
         )
     if "olmo" in name:
+        overrides = _OLMO_OVERRIDES.get(model_name, {})
         return ModelConfig(
             family="olmo",
             hf_repo=model_name,
@@ -43,6 +48,7 @@ def get_model_config(model_name: str) -> ModelConfig:
             dtype="bfloat16",
             trust_remote_code=True,
             pad_token_from_eos=False,
+            **overrides,
         )
     raise ValueError(f"Unknown model family for '{model_name}'. Expected 'pythia' or 'olmo' in the name.")
 
@@ -58,8 +64,10 @@ def _pythia_checkpoints(config, max_checkpoints):
     return [(s, f"step{s}", config.hf_repo) for s in early + later]
 
 
-def _olmo_checkpoints(config, max_checkpoints, revisions_file, early_training_model):
-    checkpoint_map = _read_revisions_file(revisions_file)
+def _olmo_checkpoints(config, max_checkpoints):
+    if config.revisions_file is None:
+        raise ValueError(f"OLMo model '{config.hf_repo}' has no revisions_file configured in model_registry.")
+    checkpoint_map = _read_revisions_file(config.revisions_file)
     all_steps = sorted(checkpoint_map.keys())
     early = sorted(s for s in all_steps if s <= 10_000)
     later = sorted(s for s in all_steps if s > 10_000 and s % 10_000 == 0)
@@ -70,8 +78,8 @@ def _olmo_checkpoints(config, max_checkpoints, revisions_file, early_training_mo
     for s in early + later:
         rev = checkpoint_map[s]
         m = config.hf_repo
-        if early_training_model and 1000 <= s <= 10_000:
-            m = early_training_model
+        if config.early_training_model and 1000 <= s <= 10_000:
+            m = config.early_training_model
         schedule.append((s, rev, m))
     return schedule
 
@@ -97,12 +105,11 @@ def _read_revisions_file(filepath: str) -> dict:
     return checkpoint_map
 
 
-def get_checkpoint_schedule(config, max_checkpoints=50,
-                            revisions_file=None, early_training_model=None):
+def get_checkpoint_schedule(config, max_checkpoints=50):
     """Return list of (step_num, revision_str, hf_model_name) tuples."""
     if config.family == "pythia":
         return _pythia_checkpoints(config, max_checkpoints)
-    return _olmo_checkpoints(config, max_checkpoints, revisions_file, early_training_model)
+    return _olmo_checkpoints(config, max_checkpoints)
 
 
 # --- Model loading ---

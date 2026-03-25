@@ -14,46 +14,26 @@ MODELS=(
     "allenai/OLMo-2-1124-7B"
 )
 
-REVFILES=(
-    "1b_revisions.txt"
-    "7b_revisions.txt"
-)
-
-EARLY_TRAINING_MODELS=(
-    "allenai/OLMo-2-0425-1B-early-training"
-    ""
-)
-
 BATCH_SIZES=(64 16)
 
 MODEL_NAME="${MODELS[$SLURM_ARRAY_TASK_ID]}"
-REV_FILE="${REVFILES[$SLURM_ARRAY_TASK_ID]}"
 BATCH_SIZE="${BATCH_SIZES[$SLURM_ARRAY_TASK_ID]}"
-EARLY_MODEL="${EARLY_TRAINING_MODELS[$SLURM_ARRAY_TASK_ID]}"
 
-echo "=== K-FAC collection: ${MODEL_NAME} with ${REV_FILE} (array task ${SLURM_ARRAY_TASK_ID}, batch_size ${BATCH_SIZE}) ==="
+echo "=== K-FAC collection: ${MODEL_NAME} (array task ${SLURM_ARRAY_TASK_ID}, batch_size ${BATCH_SIZE}) ==="
 
 module purge
 
 export HF_HOME="/projects/prjs1815/hf_cache"
 cd "$HOME/Tracing-representation-geometry-reproduction" || exit 1
 
-EARLY_ARGS=""
-if [ -n "${EARLY_MODEL}" ]; then
-    EARLY_ARGS="--early_training_model ${EARLY_MODEL}"
-fi
-
-# shellcheck disable=SC2086
 time uv run kfac_scripts/collect_kfac.py \
     --model_name "${MODEL_NAME}" \
     --dataset_name "fineweb" \
-    --revisions_file "${REV_FILE}" \
     --num_samples 5000 \
     --seq_len 512 \
     --batch_size "${BATCH_SIZE}" \
     --layers_per_pass 4 \
     --sample_labels true \
-    --max_checkpoints 30 \
-    ${EARLY_ARGS}
+    --max_checkpoints 30
 
 echo "=== Done: ${MODEL_NAME} ==="

@@ -1,0 +1,156 @@
+=== Computing metrics from saved activations ===
+--- pythia-14m ---
+Computing metrics for 58/58 steps using 18 workers...
+  Step 87000: rankme=48.195, alpha=0.919, r2_100=0.974
+  Step 119000: rankme=47.518, alpha=1.006, r2_100=0.975
+  Step 41000: rankme=56.688, alpha=0.819, r2_100=0.978
+  Step 131000: rankme=47.147, alpha=1.024, r2_100=0.977
+  Step 125000: rankme=47.762, alpha=1.018, r2_100=0.974
+  Step 64000: rankme=51.270, alpha=0.862, r2_100=0.982
+  Step 82000: rankme=47.266, alpha=0.922, r2_100=0.982
+  Step 0: rankme=35.301, alpha=1.596, r2_100=0.964
+  Step 256: rankme=6.536, alpha=1.961, r2_100=0.999
+  Step 32000: rankme=59.908, alpha=0.822, r2_100=0.977
+  Step 6000: rankme=57.774, alpha=0.871, r2_100=0.991
+  Step 99000: rankme=47.734, alpha=0.954, r2_100=0.977
+  Step 96000: rankme=48.419, alpha=0.948, r2_100=0.976
+  Step 16: rankme=36.157, alpha=1.602, r2_100=0.963
+  Step 70000: rankme=49.319, alpha=0.884, r2_100=0.981
+  Step 3000: rankme=53.844, alpha=0.912, r2_100=0.991
+  Step 76000: rankme=47.747, alpha=0.890, r2_100=0.981
+  Step 128: rankme=3.803, alpha=1.369, r2_100=0.943
+  Step 44000: rankme=56.352, alpha=0.833, r2_100=0.977
+  Step 122000: rankme=48.269, alpha=1.011, r2_100=0.972
+  Step 73000: rankme=47.654, alpha=0.896, r2_100=0.979
+  Step 58000: rankme=53.875, alpha=0.836, r2_100=0.974
+  Step 47000: rankme=56.593, alpha=0.837, r2_100=0.978
+  Step 12000: rankme=61.306, alpha=0.854, r2_100=0.989
+  Step 143000: rankme=48.095, alpha=1.034, r2_100=0.974
+  Step 114000: rankme=47.820, alpha=0.995, r2_100=0.975
+  Step 85000: rankme=48.171, alpha=0.921, r2_100=0.976
+  Step 61000: rankme=51.723, alpha=0.849, r2_100=0.977
+  Step 35000: rankme=57.425, alpha=0.810, r2_100=0.978
+  Step 128000: rankme=47.720, alpha=1.022, r2_100=0.973
+  Step 64: rankme=14.600, alpha=1.591, r2_100=0.947
+  Step 79000: rankme=48.407, alpha=0.907, r2_100=0.978
+  Step 111000: rankme=48.208, alpha=0.987, r2_100=0.976
+  Step 140000: rankme=48.062, alpha=1.029, r2_100=0.976
+  Step 90000: rankme=48.936, alpha=0.935, r2_100=0.977
+  Step 116000: rankme=47.518, alpha=1.008, r2_100=0.975
+  Step 137000: rankme=47.123, alpha=1.026, r2_100=0.977
+  Step 134000: rankme=47.482, alpha=1.028, r2_100=0.976
+  Step 50000: rankme=55.932, alpha=0.837, r2_100=0.977
+  Step 512: rankme=17.420, alpha=1.739, r2_100=0.985
+  Step 18000: rankme=62.955, alpha=0.838, r2_100=0.985
+  Step 29000: rankme=60.359, alpha=0.821, r2_100=0.977
+  Step 8: rankme=35.515, alpha=1.597, r2_100=0.964
+  Step 38000: rankme=58.937, alpha=0.810, r2_100=0.973
+  Step 32: rankme=36.794, alpha=1.632, r2_100=0.960
+  Step 24000: rankme=62.550, alpha=0.822, r2_100=0.980
+  Step 27000: rankme=60.448, alpha=0.822, r2_100=0.979
+  Step 108000: rankme=47.395, alpha=0.987, r2_100=0.976
+  Step 15000: rankme=62.474, alpha=0.839, r2_100=0.987
+  Step 53000: rankme=53.910, alpha=0.834, r2_100=0.981
+  Step 93000: rankme=47.647, alpha=0.938, r2_100=0.977
+  Step 9000: rankme=61.186, alpha=0.860, r2_100=0.991
+  Step 102000: rankme=48.132, alpha=0.975, r2_100=0.975
+  Step 21000: rankme=63.502, alpha=0.821, r2_100=0.978
+  Step 1000: rankme=34.318, alpha=1.395, r2_100=0.964
+  Step 105000: rankme=47.909, alpha=0.973, r2_100=0.975
+  Step 56000: rankme=52.086, alpha=0.840, r2_100=0.981
+  Step 67000: rankme=49.946, alpha=0.880, r2_100=0.983
+Saved 58 results to results/fineweb/results_pythia-14m.npy
+--- pythia-14m-deduped ---
+All 58 steps already have metrics in results/fineweb/results_pythia-14m-deduped.npy
+--- pythia-31m ---
+Computing metrics for 58/58 steps using 18 workers...
+  Step 41000: rankme=88.744, alpha=0.763, r2_100=0.998
+  Step 99000: rankme=69.819, alpha=0.887, r2_100=0.999
+  Step 70000: rankme=76.787, alpha=0.808, r2_100=0.999
+  Step 6000: rankme=112.612, alpha=0.776, r2_100=0.999
+  Step 3000: rankme=101.421, alpha=0.812, r2_100=0.999
+  Step 0: rankme=51.488, alpha=1.083, r2_100=0.975
+  Step 32000: rankme=94.460, alpha=0.748, r2_100=0.999
+  Step 76000: rankme=76.922, alpha=0.819, r2_100=0.999
+  Step 119000: rankme=94.289, alpha=0.819, r2_100=0.998
+  Step 96000: rankme=73.825, alpha=0.852, r2_100=0.999
+  Step 256: rankme=12.188, alpha=1.613, r2_100=0.997
+  Step 82000: rankme=74.250, alpha=0.833, r2_100=0.999
+  Step 16: rankme=54.130, alpha=1.083, r2_100=0.975
+  Step 87000: rankme=75.297, alpha=0.839, r2_100=0.999
+  Step 131000: rankme=87.722, alpha=0.854, r2_100=0.997
+  Step 64000: rankme=78.716, alpha=0.777, r2_100=0.998
+  Step 125000: rankme=91.166, alpha=0.827, r2_100=0.998
+  Step 128: rankme=7.846, alpha=1.483, r2_100=0.977
+  Step 85000: rankme=75.085, alpha=0.825, r2_100=0.999
+  Step 58000: rankme=79.799, alpha=0.787, r2_100=0.998
+  Step 44000: rankme=83.601, alpha=0.768, r2_100=0.998
+  Step 90000: rankme=74.392, alpha=0.849, r2_100=0.999
+  Step 61000: rankme=80.061, alpha=0.783, r2_100=0.998
+  Step 73000: rankme=77.488, alpha=0.808, r2_100=0.999
+  Step 35000: rankme=93.745, alpha=0.741, r2_100=0.998
+  Step 122000: rankme=92.471, alpha=0.822, r2_100=0.997
+  Step 128000: rankme=89.451, alpha=0.836, r2_100=0.997
+  Step 114000: rankme=96.233, alpha=0.819, r2_100=0.998
+  Step 47000: rankme=85.206, alpha=0.767, r2_100=0.998
+  Step 143000: rankme=77.772, alpha=0.912, r2_100=0.997
+  Step 111000: rankme=97.997, alpha=0.803, r2_100=0.998
+  Step 12000: rankme=113.751, alpha=0.748, r2_100=0.999
+  Step 140000: rankme=81.562, alpha=0.875, r2_100=0.996
+  Step 64: rankme=8.828, alpha=0.970, r2_100=0.963
+  Step 79000: rankme=77.474, alpha=0.818, r2_100=0.999
+  Step 116000: rankme=93.703, alpha=0.811, r2_100=0.998
+  Step 29000: rankme=100.352, alpha=0.741, r2_100=0.999
+  Step 93000: rankme=72.485, alpha=0.846, r2_100=0.999
+  Step 32: rankme=57.768, alpha=1.072, r2_100=0.967
+  Step 38000: rankme=90.116, alpha=0.759, r2_100=0.999
+  Step 50000: rankme=83.393, alpha=0.775, r2_100=0.998
+  Step 8: rankme=52.002, alpha=1.083, r2_100=0.975
+  Step 53000: rankme=79.886, alpha=0.789, r2_100=0.998
+  Step 134000: rankme=86.528, alpha=0.860, r2_100=0.996
+  Step 27000: rankme=100.437, alpha=0.738, r2_100=0.999
+  Step 15000: rankme=110.006, alpha=0.732, r2_100=0.999
+  Step 24000: rankme=104.696, alpha=0.726, r2_100=0.999
+  Step 137000: rankme=84.475, alpha=0.871, r2_100=0.997
+  Step 512: rankme=32.777, alpha=1.402, r2_100=0.996
+  Step 18000: rankme=111.034, alpha=0.731, r2_100=0.998
+  Step 21000: rankme=107.779, alpha=0.733, r2_100=0.999
+  Step 108000: rankme=96.615, alpha=0.817, r2_100=0.998
+  Step 102000: rankme=94.547, alpha=0.809, r2_100=0.998
+  Step 9000: rankme=113.467, alpha=0.757, r2_100=0.999
+  Step 56000: rankme=76.848, alpha=0.790, r2_100=0.998
+  Step 1000: rankme=67.971, alpha=1.003, r2_100=0.996
+  Step 105000: rankme=99.993, alpha=0.809, r2_100=0.997
+  Step 67000: rankme=77.538, alpha=0.832, r2_100=0.998
+Saved 58 results to results/fineweb/results_pythia-31m.npy
+--- pythia-31m-deduped ---
+All 58 steps already have metrics in results/fineweb/results_pythia-31m-deduped.npy
+--- pythia-70m ---
+All 58 steps already have metrics in results/fineweb/results_pythia-70m.npy
+--- pythia-160m ---
+All 58 steps already have metrics in results/fineweb/results_pythia-160m.npy
+--- pythia-160m-deduped ---
+All 58 steps already have metrics in results/fineweb/results_pythia-160m-deduped.npy
+--- pythia-410m ---
+All 58 steps already have metrics in results/fineweb/results_pythia-410m.npy
+--- pythia-410m-deduped ---
+All 58 steps already have metrics in results/fineweb/results_pythia-410m-deduped.npy
+--- pythia-1b ---
+All 58 steps already have metrics in results/fineweb/results_pythia-1b.npy
+--- pythia-1b-deduped ---
+All 58 steps already have metrics in results/fineweb/results_pythia-1b-deduped.npy
+--- pythia-1.4b ---
+All 58 steps already have metrics in results/fineweb/results_pythia-1.4b.npy
+--- pythia-1.4b-deduped ---
+All 58 steps already have metrics in results/fineweb/results_pythia-1.4b-deduped.npy
+--- pythia-2.8b-deduped ---
+All 58 steps already have metrics in results/fineweb/results_pythia-2.8b-deduped.npy
+--- pythia-6.9b ---
+All 58 steps already have metrics in results/fineweb/results_pythia-6.9b.npy
+--- pythia-6.9b-deduped ---
+All 58 steps already have metrics in results/fineweb/results_pythia-6.9b-deduped.npy
+--- OLMo-2-0425-1B ---
+All 62 steps already have metrics in results/fineweb/results_OLMo-2-0425-1B.npy
+--- OLMo-2-1124-7B ---
+All 66 steps already have metrics in results/fineweb/results_OLMo-2-1124-7B.npy
+=== Done ===

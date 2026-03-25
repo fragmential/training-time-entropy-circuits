@@ -9,7 +9,6 @@
 #SBATCH --error=slurm/logs/test_olmo_%j.err
 
 MODEL_NAME="allenai/OLMo-2-0425-1B"
-REV_FILE="1b_revisions.txt"
 echo "=== Test run: ${MODEL_NAME} ==="
 
 module purge
@@ -19,7 +18,6 @@ cd "$HOME/Tracing-representation-geometry-reproduction" || exit 1
 
 time uv run rankme_alpha_scripts/extract_activations.py \
     --model_name "${MODEL_NAME}" \
-    --revisions_file "${REV_FILE}" \
     --num_samples 100 \
     --batch_size 128
 

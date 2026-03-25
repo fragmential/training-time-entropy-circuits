@@ -199,17 +199,12 @@ def main(
     target_blocks: list = None,
     layers_per_pass: int = 4,
     sample_labels: bool = True,
-    revisions_file: str = None,
-    early_training_model: str = None,
 ):
     config = get_model_config(model_name)
     print(f"Model: {model_name} (family={config.family})")
 
     # Checkpoint schedule
-    schedule = get_checkpoint_schedule(
-        config, max_checkpoints,
-        revisions_file=revisions_file, early_training_model=early_training_model,
-    )
+    schedule = get_checkpoint_schedule(config, max_checkpoints)
     print(f"Total checkpoints: {len(schedule)}")
 
     # Output directory

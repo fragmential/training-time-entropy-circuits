@@ -1,0 +1,40 @@
+# Residual activation collection for all Pythia and OLMo models.
+# Uses identity head replacement (fast path, post-layernorm residual), padded fineweb, last token.
+
+model_name:
+  - "EleutherAI/pythia-14m"
+  - "EleutherAI/pythia-14m-deduped"
+  - "EleutherAI/pythia-31m"
+  - "EleutherAI/pythia-31m-deduped"
+  - "EleutherAI/pythia-70m"
+  - "EleutherAI/pythia-70m-deduped"
+  - "EleutherAI/pythia-160m"
+  - "EleutherAI/pythia-160m-deduped"
+  - "EleutherAI/pythia-410m"
+  - "EleutherAI/pythia-410m-deduped"
+  - "EleutherAI/pythia-1b"
+  - "EleutherAI/pythia-1b-deduped"
+  - "EleutherAI/pythia-1.4b"
+  - "EleutherAI/pythia-1.4b-deduped"
+  - "EleutherAI/pythia-2.8b"
+  - "EleutherAI/pythia-2.8b-deduped"
+  - "EleutherAI/pythia-6.9b"
+  - "EleutherAI/pythia-6.9b-deduped"
+  - "EleutherAI/pythia-12b"
+  - "EleutherAI/pythia-12b-deduped"
+  - "allenai/OLMo-2-0425-1B"
+  - "allenai/OLMo-2-1124-7B"
+#            14m  14md 31m  31md 70m  70md 160m 160d 410m 410d 1b   1bd  1.4b 1.4d 2.8b 2.8d 6.9b 6.9d 12b  12bd OL1B OL7B
+batch_size: [1024,1024,1024,1024,1024,1024,1024,1024,1024,1024, 512, 512, 512, 512, 256, 256, 128, 128,  80,  80, 512, 200]
+dataset_name: fineweb
+num_samples: 5000
+max_length: 512
+min_length: 32
+max_checkpoints: 50
+packing: padded
+token_selection: last
+collect_residual: true
+residual_hook_point: identity_head
+collect_A: false
+collect_G: false
+collect_B: false

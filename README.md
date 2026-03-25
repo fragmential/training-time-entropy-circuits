@@ -27,25 +27,25 @@ The unified collection script replaces the separate activation and K-FAC pipelin
 
 ```bash
 # Collect residual activations (equivalent to old extract_activations.py)
-python scripts/collect.py --config configs/reproduce_rankme_pythia.yaml \
+python scripts/collect.py --config configs/reproduce_rankme_alpha.yaml \
     --model_name EleutherAI/pythia-6.9b
 
 # Collect K-FAC covariance factors (equivalent to old collect_kfac.py)
-python scripts/collect.py --config configs/reproduce_kfac_pythia.yaml \
+python scripts/collect.py --config configs/reproduce_kfac.yaml \
     --model_name EleutherAI/pythia-1.4b-deduped --batch_size 64
 
-# OLMo models
-python scripts/collect.py --config configs/reproduce_rankme_pythia.yaml \
-    --model_name allenai/OLMo-2-1124-7B --revisions_file 7b_revisions.txt
+# OLMo models (revisions_file and early_training_model are in model_registry)
+python scripts/collect.py --config configs/reproduce_rankme_alpha.yaml \
+    --model_name allenai/OLMo-2-1124-7B
 ```
 
 Config files set defaults; CLI flags override them. Available configs:
 
 | Config | What it does |
 |--------|-------------|
-| `reproduce_rankme_pythia.yaml` | Padded fineweb, identity head, last token |
-| `reproduce_rankme_pythia_hook.yaml` | Same but hook-based post-norm |
-| `reproduce_kfac_pythia.yaml` | Packed fineweb, A+G covariance, sampled labels |
+| `reproduce_rankme_alpha.yaml` | Padded fineweb, identity head, last token |
+| `reproduce_rankme_alpha_hook.yaml` | Same but hook-based post-norm |
+| `reproduce_kfac.yaml` | Packed fineweb, A+G covariance, sampled labels |
 
 ### Legacy scripts (still work)
 
@@ -124,7 +124,7 @@ slurm/                              # SLURM job scripts
 
 The unified `scripts/collect.py` supports:
 
-- **Residual capture**: `identity_head` (fast, post-norm), `post_norm` (hook), `pre_norm` (raw residual), per-block hooks
+- **Residual capture**: `identity_head` (fast, after final norm), `after_final_norm` (hook), `before_final_norm` (raw residual), per-block hooks
 - **Covariance collection**: A (input), G (gradient), B (post-weight output) for MLP projections
 - **Data modes**: packed (no padding) or padded sequences
 - **Token selection**: all tokens or last token (per sequence or per document)
