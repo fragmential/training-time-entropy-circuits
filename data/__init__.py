@@ -15,9 +15,11 @@ DATASET_LOADERS = {
 # Lazy-loaded optional loaders (to avoid import errors if not installed)
 _OPTIONAL_LOADERS = {
     "pile": ("data.pile_loader", "get_dataset", {}),
-    "pile_deduped_eleutherai": ("data.pile_loader", "get_dataset", {"variant": "eleutherai"}),
-    "pile_deduped_pietrolesci": ("data.pile_loader", "get_dataset", {"variant": "pietrolesci"}),
+    "pile_deduped_eleutherai": ("data.pile_loader", "get_dataset", {"variant": "eleutherai-dedup"}),
+    "pile_deduped_pietrolesci": ("data.pile_loader", "get_dataset", {"variant": "pietrolesci-dedup"}),
     "olmo_mix": ("data.olmomix_loader", "get_dataset", {}),
+    "dolmino": ("data.dolmino_loader", "get_dataset", {}),
+    "tulu_sft": ("data.tulu_sft_loader", "get_dataset", {}),
 }
 
 

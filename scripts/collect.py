@@ -53,7 +53,7 @@ from utils.data_utils import (
 
 
 # Fields that may vary per model in a sweep (accept scalar, list, or dict).
-VECTORIZABLE_FIELDS = {"batch_size", "max_checkpoints", "max_layers_per_pass"}
+VECTORIZABLE_FIELDS = {"batch_size", "max_checkpoints", "max_layers_per_pass", "dataset_name"}
 
 
 @dataclass
@@ -61,11 +61,11 @@ class CollectConfig:
     # --- Model ---
     model_name: "str | list[str]" = "EleutherAI/pythia-14m"
     max_checkpoints: "int | dict[str, int] | list[int]" = 50
-    target_blocks: "list | None" = None
+    target_layers: "list | dict[str, list] | None" = None
     max_layers_per_pass: "int | dict[str, int] | list[int]" = 4
 
     # --- Data ---
-    dataset_name: str = "fineweb"
+    dataset_name: "str | dict[str, str] | list[str]" = "fineweb"
     dataset_content_key: str = "text"
     num_samples: int = 5000
     seq_len: int = 512
@@ -111,6 +111,9 @@ class CollectConfig:
                         f"{name} is vectorized but model_name is a single string. "
                         f"Use a model_name list or pass a scalar {name}."
                     )
+            # Resolve target_layers dict for single model
+            if isinstance(self.target_layers, dict):
+                self.target_layers = self.target_layers.get(self.model_name, None)
             return
 
         # Non-vectorizable fields must not be lists
@@ -118,7 +121,7 @@ class CollectConfig:
             if f.name not in VECTORIZABLE_FIELDS and f.name != "model_name":
                 val = getattr(self, f.name)
                 if isinstance(val, list) and f.name not in (
-                    "target_blocks", "boundary_token_ids", "cross_basis_refs",
+                    "target_layers", "boundary_token_ids", "cross_basis_refs",
                 ):
                     raise ValueError(
                         f"{f.name} must be the same for all models (got a list). "
@@ -144,6 +147,9 @@ class CollectConfig:
                 val = getattr(self, name)
                 if isinstance(val, dict):
                     setattr(self, name, val.get(model, None))
+            # Resolve target_layers if it's a dict keyed by model name
+            if isinstance(self.target_layers, dict):
+                self.target_layers = self.target_layers.get(model, None)
             self.model_name = model
 
 
@@ -239,7 +245,7 @@ def _collect_covariance_for_checkpoint(
     model,
     config,
     packed_ids,
-    target_blocks,
+    target_layers,
     max_layers_per_pass,
     batch_size,
     sample_labels,
@@ -248,13 +254,14 @@ def _collect_covariance_for_checkpoint(
     collect_A,
     collect_G,
     collect_B,
+    collect_means,
     token_mask_fn,
 ):
     """Collect covariance factors for one checkpoint (packed data). Returns factors dict."""
     loader = DataLoader(TensorDataset(packed_ids), batch_size=batch_size, shuffle=False)
     all_factors = {}
 
-    for blk_group in chunked(target_blocks, max_layers_per_pass):
+    for blk_group in chunked(target_layers, max_layers_per_pass):
         # Freeze everything, then unfreeze only target layers if we need gradients
         needs_grad = collect_G
         for p in model.parameters():
@@ -269,7 +276,7 @@ def _collect_covariance_for_checkpoint(
                 layer.weight.requires_grad_(True)
 
         collectors = {
-            name: CovarianceCollector(layer, collect_A=collect_A, collect_G=collect_G, collect_B=collect_B)
+            name: CovarianceCollector(layer, collect_A=collect_A, collect_G=collect_G, collect_B=collect_B, collect_means=collect_means)
             for name, layer in targets
         }
 
@@ -321,7 +328,7 @@ def _collect_covariance_padded_for_checkpoint(
     config,
     texts,
     tokenizer,
-    target_blocks,
+    target_layers,
     max_layers_per_pass,
     batch_size,
     max_length,
@@ -331,6 +338,7 @@ def _collect_covariance_padded_for_checkpoint(
     collect_A,
     collect_G,
     collect_B,
+    collect_means,
     token_selection,
     answer_start_positions_all=None,
 ):
@@ -338,7 +346,7 @@ def _collect_covariance_padded_for_checkpoint(
     all_factors = {}
     needs_grad = collect_G
 
-    for blk_group in chunked(target_blocks, max_layers_per_pass):
+    for blk_group in chunked(target_layers, max_layers_per_pass):
         for p in model.parameters():
             p.requires_grad_(False)
 
@@ -351,7 +359,7 @@ def _collect_covariance_padded_for_checkpoint(
                 layer.weight.requires_grad_(True)
 
         collectors = {
-            name: CovarianceCollector(layer, collect_A=collect_A, collect_G=collect_G, collect_B=collect_B)
+            name: CovarianceCollector(layer, collect_A=collect_A, collect_G=collect_G, collect_B=collect_B, collect_means=collect_means)
             for name, layer in targets
         }
 
@@ -426,7 +434,17 @@ def main(cfg: CollectConfig):
 
     model_config = get_model_config(model_name)
     short_name = model_name.split("/")[-1] if "/" in model_name else model_name
-    print(f"Model: {model_name} (family={model_config.family})")
+
+    # Resolve "native" dataset to model's training data
+    if cfg.dataset_name == "native":
+        if model_config.training_dataset is None:
+            raise ValueError(
+                f"dataset_name='native' but {model_name} has no training_dataset configured "
+                f"in model_registry. Set training_dataset or use an explicit dataset_name."
+            )
+        cfg.dataset_name = model_config.training_dataset
+
+    print(f"Model: {model_name} (family={model_config.family}, dataset={cfg.dataset_name})")
 
     needs_covariance = cfg.collect_A or cfg.collect_G or cfg.collect_B
 
@@ -528,7 +546,7 @@ def main(cfg: CollectConfig):
                         m.p = 0.0
 
             n_layers = get_num_layers(model, model_config)
-            blocks = cfg.target_blocks if cfg.target_blocks is not None else list(range(n_layers))
+            blocks = cfg.target_layers if cfg.target_layers is not None else list(range(n_layers))
 
             # --- Collect residual activations ---
             if cfg.collect_residual:
@@ -551,13 +569,15 @@ def main(cfg: CollectConfig):
                     if cfg.sample_labels and cfg.seed is not None:
                         torch.manual_seed(cfg.seed + step_num)
 
+                    collect_means = "+m" in cfg.storage_format
+
                     if cfg.packing == "packed":
                         factors = _collect_covariance_for_checkpoint(
                             model, model_config, packed_ids, blocks,
                             cfg.max_layers_per_pass,
                             cfg.batch_size, cfg.sample_labels, cfg.label_samples,
                             device, cfg.collect_A, cfg.collect_G, cfg.collect_B,
-                            token_mask_fn,
+                            collect_means, token_mask_fn,
                         )
                     else:
                         factors = _collect_covariance_padded_for_checkpoint(
@@ -566,7 +586,7 @@ def main(cfg: CollectConfig):
                             cfg.batch_size, cfg.max_length,
                             cfg.sample_labels, cfg.label_samples,
                             device, cfg.collect_A, cfg.collect_G, cfg.collect_B,
-                            cfg.token_selection,
+                            collect_means, cfg.token_selection,
                         )
                     save_factors(factors, cov_path, cfg.storage_format, cfg.cross_basis_refs)
                     tqdm.write(f"Step {step_num}: {len(factors)} projections -> {cov_path}")

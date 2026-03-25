@@ -8,7 +8,7 @@ Tracks how LLM representations evolve during pretraining through spectral method
 ```
 scripts/              # Unified pipeline
   collect.py          # Main collection: residual activations + covariance factors
-  verify_collect.py   # Verification tests (self-consistency + server comparison)
+  verify.py   # Verification tests (self-consistency + server comparison)
 
 configs/              # YAML configs for collect.py (--config flag)
   reproduce_rankme_alpha.yaml      # padded fineweb, identity head, last token
@@ -99,13 +99,13 @@ Model-specific loading details (`revisions_file`, `early_training_model`) are in
 
 ```bash
 # Self-consistency tests (CPU, no existing data needed)
-python scripts/verify_collect.py --mode self_consistency
+python scripts/verify.py --mode self_consistency
 
 # Compare against existing computed data (on server)
-python scripts/verify_collect.py --mode server
+python scripts/verify.py --mode server
 
 # Both
-python scripts/verify_collect.py --mode all
+python scripts/verify.py --mode all
 ```
 
 ## On the SLURM cluster

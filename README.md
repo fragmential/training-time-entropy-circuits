@@ -71,10 +71,10 @@ python analysis/plot_alpha_traj.py
 
 ```bash
 # Self-consistency tests (CPU, no existing data needed)
-python scripts/verify_collect.py --mode self_consistency
+python scripts/verify.py --mode self_consistency
 
 # Compare against existing computed data (on server)
-python scripts/verify_collect.py --mode all
+python scripts/verify.py --mode all
 ```
 
 ###  Memorization analysis
@@ -89,7 +89,7 @@ python memorization_scripts/compute_llm_likelihood.py
 ```
 scripts/                            # Unified pipeline
 ├── collect.py                      # Main collection (residual + K-FAC)
-├── verify_collect.py               # Verification tests
+├── verify.py               # Verification tests
 
 configs/                            # YAML configs for collect.py
 

@@ -3,16 +3,16 @@
 
 To verify on server:
     1. Ensure pythia-14m-deduped activations exist: activations/fineweb/pythia-14m-deduped/step0.npy
-    2. Run: python scripts/verify_collect.py --mode all
+    2. Run: python scripts/verify.py --mode all
 
 To verify locally (no existing data needed, CPU only):
-    python scripts/verify_collect.py --mode self_consistency
+    python scripts/verify.py --mode self_consistency
 
 Self-consistency tests run on CPU. Server tests use GPU if available.
 
 For Claude on server:
     cd ~/Tracing-representation-geometry-reproduction
-    python scripts/verify_collect.py --mode all
+    python scripts/verify.py --mode all
     # Expects exit code 0 if all checks pass.
 """
 
@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from utils.model_registry import (
     get_model_config, load_model, load_tokenizer, get_mlp_projections,
-    get_final_layernorm,
+    get_final_layernorm, get_num_layers,
 )
 from utils.hooks import CovarianceCollector, ResidualCapture
 from utils.data_utils import load_and_cache_texts, pack_sequences, compute_token_mask, compute_labels
@@ -243,6 +243,107 @@ def test_token_masks():
 
 
 # ---------------------------------------------------------------------------
+# Test 4b: B ≈ W A W^T (output covariance identity)
+# ---------------------------------------------------------------------------
+
+def test_B_equals_WAWt():
+    """Verify B recoverability from A, with and without input mean correction.
+
+    For y = xW^T + b:
+        E[yy^T] = W E[xx^T] W^T + W μ b^T + b μ^T W^T + bb^T
+    where μ = E[x]. Without μ, the bias cross-terms cause significant error
+    on trained models. With μ, B is exactly recoverable.
+
+    Tests on the final checkpoint (step143000), last block, up and down projections.
+    """
+    print("\n=== Test 4b: B recoverability from A ===")
+    t0 = time.time()
+
+    config = get_model_config(MODEL)
+    model = load_model(config, config.hf_repo, "step143000")
+    tokenizer = load_tokenizer(config, revision="step143000")
+    loader_fn = get_loader("fineweb")
+    texts = load_and_cache_texts(loader_fn, NUM_SAMPLES, 32, tokenizer, "fineweb")
+
+    packed = pack_sequences(texts, tokenizer, SEQ_LEN)
+    x = packed[:4]
+    mask = compute_token_mask(x, token_selection="all")
+
+    n_layers = get_num_layers(model, config)
+    last_block = n_layers - 1
+    projections = get_mlp_projections(model, config, last_block)
+
+    # Collect A and B for all projections, plus accumulate input means
+    collectors = {}
+    input_sums = {}
+    for name, layer in projections:
+        collectors[name] = CovarianceCollector(layer, collect_A=True, collect_G=False, collect_B=True)
+        collectors[name].set_token_mask(mask)
+        input_sums[name] = None
+
+    # Hook to accumulate input means
+    handles = []
+    for name, layer in projections:
+        def make_hook(proj_name):
+            def hook_fn(module, inp):
+                x_flat = inp[0].detach()
+                if x_flat.dim() == 3:
+                    x_flat = x_flat[mask].float()
+                else:
+                    x_flat = x_flat.float()
+                if input_sums[proj_name] is None:
+                    input_sums[proj_name] = x_flat.sum(dim=0)
+                else:
+                    input_sums[proj_name] += x_flat.sum(dim=0)
+            return hook_fn
+        handles.append(layer.register_forward_pre_hook(make_hook(name)))
+
+    with torch.no_grad():
+        model(x)
+
+    for h in handles:
+        h.remove()
+
+    ok = True
+    for name, layer in projections:
+        factors = collectors[name].factors()
+        collectors[name].close()
+
+        n = factors["n"]
+        A_mean = factors["A"].float() / n
+        B_mean = factors["B"].float() / n
+        W = layer.weight.detach().float()
+        b = layer.bias.detach().float() if layer.bias is not None else None
+        mu = input_sums[name] / n  # E[x]
+
+        # Without mean correction
+        B_naive = W @ A_mean @ W.T
+        naive_err = (B_mean - B_naive).norm().item() / B_mean.norm().item() * 100
+
+        # With mean correction: add W μ b^T + b μ^T W^T + bb^T
+        if b is not None:
+            Wmu = W @ mu  # (d_out,)
+            B_corrected = B_naive + torch.outer(Wmu, b) + torch.outer(b, Wmu) + torch.outer(b, b)
+        else:
+            B_corrected = B_naive
+        corrected_err = (B_mean - B_corrected).norm().item() / B_mean.norm().item() * 100
+
+        bias_mag = f"mean={b.abs().mean():.4f} max={b.abs().max():.4f}" if b is not None else "none"
+        print(f"  {name}: bias [{bias_mag}]")
+        print(f"    W A W^T only:      {naive_err:.3f}% error (Frobenius)")
+        print(f"    W A W^T + μ terms:  {corrected_err:.6f}% error (Frobenius)")
+
+        # The mean-corrected version should be near machine precision
+        assert corrected_err < 0.01, f"FAIL: {name} corrected error {corrected_err}% > 0.01%"
+
+    print(f"  PASS ({time.time() - t0:.1f}s)")
+
+    del model
+    gc.collect()
+    return ok
+
+
+# ---------------------------------------------------------------------------
 # Test 5: Storage round-trip
 # ---------------------------------------------------------------------------
 
@@ -403,6 +504,45 @@ def test_collect_vs_extract_activations():
 
 
 # ---------------------------------------------------------------------------
+# Test 7: Data loaders
+# ---------------------------------------------------------------------------
+
+def test_data_loaders():
+    """Verify all registered data loaders can stream at least one sample."""
+    print("\n=== Test 7: Data loaders ===")
+    t0 = time.time()
+
+    from data import DATASET_LOADERS, _OPTIONAL_LOADERS, get_loader
+
+    all_names = list(DATASET_LOADERS.keys()) + list(_OPTIONAL_LOADERS.keys())
+    passed, failed, skipped = [], [], []
+
+    for name in sorted(all_names):
+        try:
+            loader_fn = get_loader(name)
+            ds = loader_fn()
+            sample = next(iter(ds))
+            fields = list(sample.keys())
+            text_fields = {"text", "messages", "input_ids", "question", "content"}
+            has_text = bool(text_fields & set(fields))
+            if has_text:
+                passed.append(name)
+                print(f"    {name:30s} OK  fields={fields[:4]}{'...' if len(fields) > 4 else ''}")
+            else:
+                failed.append(name)
+                print(f"    {name:30s} FAIL  no text/messages/input_ids field. fields={fields}")
+        except Exception as e:
+            err = str(e)[:80]
+            skipped.append(name)
+            print(f"    {name:30s} SKIP  {err}")
+
+    print(f"  Passed: {len(passed)}, Failed: {len(failed)}, Skipped: {len(skipped)}")
+    ok = len(failed) == 0
+    print(f"  {'PASS' if ok else 'FAIL'} ({time.time() - t0:.1f}s)")
+    return ok if not failed else False
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -421,8 +561,10 @@ def main():
         results["identity_vs_hook"] = test_identity_vs_hook()
         results["before_norm_recovers_after_norm"] = test_before_norm_recovers_after_norm()
         results["covariance_shapes"] = test_covariance_collector_shapes()
+        results["B_equals_WAWt"] = test_B_equals_WAWt()
         results["token_masks"] = test_token_masks()
         results["storage_roundtrip"] = test_storage_roundtrip()
+        results["data_loaders"] = test_data_loaders()
 
     if args.mode in ("server", "all"):
         results["collect_vs_extract_activations"] = test_collect_vs_extract_activations()

@@ -27,6 +27,7 @@ class CovarianceCollector:
         collect_A: bool = True,
         collect_G: bool = True,
         collect_B: bool = False,
+        collect_means: bool = False,
     ):
         d_out, d_in = layer.weight.shape
         dev = layer.weight.device
@@ -34,10 +35,13 @@ class CovarianceCollector:
         self.collect_A = collect_A
         self.collect_G = collect_G
         self.collect_B = collect_B
+        self.collect_means = collect_means
 
         if collect_A:
             self.A = torch.zeros(d_in, d_in, dtype=torch.float32, device=dev)
             self.n_A = 0
+            if collect_means:
+                self.A_sum = torch.zeros(d_in, dtype=torch.float32, device=dev)
         if collect_B:
             self.B = torch.zeros(d_out, d_out, dtype=torch.float32, device=dev)
             self.n_B = 0
@@ -81,6 +85,8 @@ class CovarianceCollector:
         if self.collect_A:
             self.A.add_(x_flat.T @ x_flat)
             self.n_A += x_flat.size(0)
+            if self.collect_means:
+                self.A_sum.add_(x_flat.sum(dim=0))
 
     def _fwd_post(self, module, inp, output):
         if not self.active:
@@ -114,6 +120,8 @@ class CovarianceCollector:
         if self.collect_A:
             result["A"] = self.A.cpu()
             result["n_A"] = self.n_A
+            if self.collect_means:
+                result["A_mean"] = (self.A_sum / self.n_A).cpu()
         if self.collect_B:
             result["B"] = self.B.cpu()
             result["n_B"] = self.n_B
@@ -129,6 +137,8 @@ class CovarianceCollector:
         if self.collect_A:
             self.A.zero_()
             self.n_A = 0
+            if self.collect_means:
+                self.A_sum.zero_()
         if self.collect_B:
             self.B.zero_()
             self.n_B = 0

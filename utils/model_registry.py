@@ -12,6 +12,7 @@ class ModelConfig:
     dtype: str            # "float16" or "bfloat16"
     trust_remote_code: bool
     pad_token_from_eos: bool
+    training_dataset: str = None      # dataset name for "native" resolution
     revisions_file: str = None        # path to file mapping step→revision hash
     early_training_model: str = None  # separate HF repo for early checkpoints
 
@@ -38,6 +39,7 @@ def get_model_config(model_name: str) -> ModelConfig:
             dtype="float16",
             trust_remote_code=False,
             pad_token_from_eos=True,
+            training_dataset="pile_deduped_eleutherai",
         )
     if "olmo" in name:
         overrides = _OLMO_OVERRIDES.get(model_name, {})
@@ -48,6 +50,7 @@ def get_model_config(model_name: str) -> ModelConfig:
             dtype="bfloat16",
             trust_remote_code=True,
             pad_token_from_eos=False,
+            training_dataset="olmo_mix",
             **overrides,
         )
     raise ValueError(f"Unknown model family for '{model_name}'. Expected 'pythia' or 'olmo' in the name.")

@@ -2,12 +2,16 @@
 
 Storage formats (from most to least data):
     acts        — raw per-token activation vectors (N, d). Largest.
-    cov         — accumulated d×d outer product matrix (Σ xxT) + sample count n.
+    cov         — accumulated (d,d) outer product matrix (Σ xxT) + sample count n.
     acts_svd    — SVD of activations: U(N,k), S(k), V(d,k). Numerically stable.
     cov_svd     — eigendecomposition of covariance: eigvecs V(d,k) + eigvals λ(k).
                   Default for multi-checkpoint. Has basis for cross-projection.
                   Recoverable: V @ diag(λ) @ V.T
     eigenvalues — just eigenvalues λ(k). Cheapest, no basis stored.
+
+Modifiers (usage example: cov_svd+m):
+    +m          - for cov and cov_svd: store the means of the activations.
+                  Used to recover B from A.
 
 Cross-basis projections are stored *additionally* alongside the primary format.
 
@@ -38,15 +42,17 @@ def save_factors(
         storage_format: "cov" | "cov_svd" | "eigenvalues"
         cross_basis_refs: list of .pt paths with cov_svd data to project onto
     """
-    if storage_format == "cov":
-        result = _prepare_cov(factors_dict)
-    elif storage_format == "cov_svd":
-        result = _prepare_cov_svd(factors_dict)
-    elif storage_format == "eigenvalues":
+    base_format = storage_format.split("+")[0]
+    store_means = "+m" in storage_format
+
+    if base_format == "cov":
+        result = _prepare_cov(factors_dict, store_means=store_means)
+    elif base_format == "cov_svd":
+        result = _prepare_cov_svd(factors_dict, store_means=store_means)
+    elif base_format == "eigenvalues":
         result = _prepare_eigenvalues(factors_dict)
     else:
-        raise ValueError(f"Unknown storage_format: {storage_format}. "
-                         f"Expected: cov, cov_svd, eigenvalues")
+        raise ValueError(f"Unknown storage_format: {storage_format}")
 
     # Add cross-basis projections if requested
     if cross_basis_refs:
@@ -68,8 +74,8 @@ def save_activations(activations: np.ndarray, save_path: str):
 # Format preparation
 # ---------------------------------------------------------------------------
 
-def _prepare_cov(factors_dict: dict) -> dict:
-    """Store raw covariance matrices + counts."""
+def _prepare_cov(factors_dict: dict, store_means: bool = False) -> dict:
+    """Store raw covariance matrices + counts, optionally with means."""
     result = {}
     for name, data in factors_dict.items():
         entry = {"n": data.get("n", 0)}
@@ -79,12 +85,16 @@ def _prepare_cov(factors_dict: dict) -> dict:
             n_key = f"n_{key}"
             if n_key in data:
                 entry[n_key] = data[n_key]
+            if store_means:
+                mean_key = f"{key}_mean"
+                if mean_key in data and data[mean_key] is not None:
+                    entry[mean_key] = data[mean_key].cpu().float()
         result[name] = entry
     return result
 
 
-def _prepare_cov_svd(factors_dict: dict) -> dict:
-    """Eigendecompose each covariance matrix. Store eigvecs + eigvals."""
+def _prepare_cov_svd(factors_dict: dict, store_means: bool = False) -> dict:
+    """Eigendecompose each covariance matrix. Store eigvecs + eigvals, optionally means."""
     result = {}
     for name, data in factors_dict.items():
         entry = {"n": data.get("n", 0)}
@@ -99,6 +109,10 @@ def _prepare_cov_svd(factors_dict: dict) -> dict:
                 idx = eigvals.argsort(descending=True)
                 entry[f"{key}_eigvals"] = eigvals[idx]
                 entry[f"{key}_eigvecs"] = eigvecs[:, idx]
+            if store_means:
+                mean_key = f"{key}_mean"
+                if mean_key in data and data[mean_key] is not None:
+                    entry[mean_key] = data[mean_key].cpu().float()
         result[name] = entry
     return result
 
