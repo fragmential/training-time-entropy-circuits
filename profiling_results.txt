@@ -1,0 +1,51 @@
+VRAM Profiling — H100 (90 GiB budget), collect_A+G, seq=512, packed
+===================================================================
+Measured 2026-03-30, job 21342910. All values in GiB unless noted.
+
+MEASURED (per-sample = marginal VRAM slope from profiling)
+----------------------------------------------------------
+Model        Layers  Weight  Accum/L  /Sample  Max BS @mlpp=2  @mlpp=all
+pythia-14m      6    0.03    0.004    0.49     128             128
+pythia-1b      16    1.88    1.11     0.77     111              90
+OLMo-2-1B     16    2.77    ~1.5     1.71      50             ~30
+
+OLMo 2.2x costlier per sample than Pythia-1b (3 proj, 2x vocab, SwiGLU gating).
+
+EXTRAPOLATED (★ = low confidence, profile before large runs)
+------------------------------------------------------------
+Model          Layers  Weight  Accum/L  /Sample  Max BS @mlpp=2  @mlpp=all
+pythia-70m        6    0.13    0.07     0.47     128+            128+
+pythia-160m      12    0.30    0.16     0.65     128+             96
+pythia-410m      24    0.75    0.28     1.01      84              64
+pythia-1.4b      24    2.63    1.11     1.01      72              48
+pythia-2.8b ★    32    5.16    1.74     1.32      48              24
+pythia-6.9b ★    32   12.76    4.45     1.54      16            OOM
+pythia-12b  ★    36   22.03    6.96     1.86       4            OOM
+OLMo-2-7B  ★    32   13.58    3.08     3.16      16            OOM
+
+RECOMMENDED SETTINGS (full_limited.yaml)
+----------------------------------------
+Model           mlpp    BS   ~VRAM  Passes
+pythia-14m         6   128     63      1
+pythia-70m         6   128     63      1
+pythia-160m       12    96     63      1
+pythia-410m        8    64     66      3
+pythia-1b         16    90     89      1
+pythia-1.4b        8    64     69      3
+pythia-2.8b ★      4    48     68      8
+pythia-6.9b ★      2    16     47     16
+pythia-12b  ★      2     4     44     18
+OLMo-2-1B         4    46     87      4
+OLMo-2-7B   ★     2    16     70     16
+
+(deduped variants = same arch = same settings)
+
+RECOMMENDED SETTINGS (kfac_merullo.yaml — target layers only)
+-------------------------------------------------------------
+Model         Layers       mlpp   BS   ~VRAM
+OLMo-2-1B    [14,15]        2    48     86   (measured)
+OLMo-2-7B    [23,24,25]     3    16     63   (est ★)
+
+SPEED: higher mlpp = fewer passes = faster. Each pass does full forward
+regardless of mlpp. Pythia-1b: mlpp=8 is 48% faster than mlpp=2.
+Exception: with target_layers, mlpp >= len(targets) gives 1 pass.

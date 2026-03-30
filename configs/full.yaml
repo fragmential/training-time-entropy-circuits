@@ -1,3 +1,4 @@
+output_dir: inferences/full
 # Full collection: pre-norm residual activations + A + G + B covariance.
 # Packed training data, all tokens. "native" resolves per model family.
 
@@ -35,11 +36,10 @@ min_length: 32
 max_checkpoints: 30
 packing: packed
 token_selection: all
-collect_residual: true
+collect_final_acts: true
 residual_hook_point: before_final_norm
 collect_A: true
 collect_G: true
-collect_B: true
 sample_labels: true
 label_samples: 1
 seed: 42

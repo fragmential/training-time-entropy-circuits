@@ -1,47 +1,61 @@
 # Codebase Guide
 
 ## What this project does
-Tracks how LLM representations evolve during pretraining through spectral methods (RankMe, alpha/power-law exponent) and covariance curvature analysis. Supports Pythia (14m–12b) and OLMo-2 (1B, 7B) model families.
+Tracks how LLM representations evolve during pretraining through spectral methods (RankMe, alpha/power-law exponent) and K-FAC covariance curvature analysis. Supports Pythia (14m–12b) and OLMo-2 (1B, 7B) model families.
 
 ## Project structure
 
 ```
-scripts/              # Unified pipeline
-  collect.py          # Main collection: residual activations + covariance factors
-  verify.py   # Verification tests (self-consistency + server comparison)
+scripts/
+  collect.py            # Main collection: residual activations + MLP covariance factors
+  compute_metrics.py    # Unified metrics: RankMe, alpha, K-FAC log-det
+  activation_ratio.py   # Band analysis on stored eigenvectors + activations
+  verify.py             # Verification tests (self-consistency + server comparison)
+  estimate_vram.py      # GPU VRAM estimator (forward peak; backward is typically 2-3x higher)
+  convert_npy.py        # Convert legacy .npy activation files to .pt format
 
-configs/              # YAML configs for collect.py (--config flag)
-  reproduce_rankme_alpha.yaml      # padded fineweb, identity head, last token
-  reproduce_rankme_alpha_hook.yaml # same but hook-based post-norm (verification)
-  reproduce_kfac.yaml              # packed fineweb, A+G covariance, all tokens
+configs/                # YAML configs for collect.py (--config flag)
+  reproduce_rankme_alpha.yaml       # padded fineweb, identity head, last token
+  reproduce_rankme_alpha_hook.yaml  # same but hook-based post-norm (verification)
+  reproduce_kfac.yaml               # packed fineweb, A+G covariance, all tokens
+  full.yaml                         # full sweep: residual + A + G, all checkpoints
+  full_final.yaml                   # same but final checkpoint only
+  full_limited.yaml                 # same but max 10 checkpoints
+  rankme_alpha_packed.yaml          # residual only, packed, all checkpoints
+  rankme_alpha_packed_limited.yaml  # residual only, packed, limited
+  kfac_merullo.yaml                 # reproduce Merullo et al. layers/config
+  1b-minimal.yaml                   # minimal test config for 1B models
 
-rankme_alpha_scripts/ # Legacy activation pipeline (kept for reference)
-  extract_activations.py
-  compute_metrics.py
-
-kfac_scripts/         # Legacy covariance pipeline (kept for reference)
-  collect_kfac.py
-  compute_kfac_metrics.py
+rankme_alpha_scripts/   # Legacy activation pipeline (kept for reference)
+kfac_scripts/           # Legacy K-FAC pipeline (kept for reference)
 
 utils/
   model_registry.py   # ModelConfig, checkpoint discovery, model loading, architecture helpers
-  hooks.py            # CovarianceCollector, ResidualCapture hook classes
-  storage.py          # Storage format handling (cov, cov_svd, eigenvalues)
-  data_utils.py       # Packing, padding, token mask computation
+  hooks.py            # HookCollector — single unified hook class for all collection modes
+  storage.py          # Storage formats (acts/cov/cov_svd/eigenvalues/acts_svd) + CLI tool
+  accessor.py         # DataAccessor — format-agnostic chainable reader for stored data
+  data_utils.py       # Packing, padding, token mask computation, load_and_cache_texts
   powerlaw.py         # Eigenspectrum, RankMe, alpha fitting
-  checkpoint_info.py  # Token count lookups
+  checkpoint_info.py  # Step-to-token count lookups
 
-data/                 # Dataset loaders (HuggingFace)
-  fineweb_loader.py, wikitext_loader.py, lam_loader.py, sciq_loader.py
+data/                 # Dataset loaders (HuggingFace streaming)
+  fineweb_loader.py, pile_loader.py, olmomix_loader.py,
+  dolmino_loader.py, tulu_sft_loader.py, wikitext_loader.py,
+  lam_loader.py, sciq_loader.py
 
 memorization_kfac (reference repo)/  # Merullo et al. released code (unmodified)
 
-slurm/                # SLURM job scripts and wrapper
-  run_collect.sh      # Array job wrapper: reads config, resolves models, submits sbatch
-  run_pythia.job      # Legacy: Pythia activation extraction
-  run_olmo.job        # Legacy: OLMo activation extraction
-  run_kfac_pythia.job # Legacy: Pythia covariance collection
-  run_kfac_olmo.job   # Legacy: OLMo covariance collection
+inferences/           # Symlink → /projects/prjs1815/inferences (collected data)
+  full_limited/       # output from full_limited.yaml
+  rankme_alpha_packed/# output from rankme_alpha_packed.yaml
+  ...                 # one subdir per config (output_dir set in each config)
+
+activations/          # Legacy collected data (.npy and old .pt formats)
+slurm/
+  run_collect.sh      # SLURM array job wrapper for collect.py
+  compute_metrics.sh  # SLURM array job wrapper for compute_metrics.py
+  storage.sh          # SLURM array job wrapper for storage CLI
+  run_*.job           # Legacy job scripts
 
 analysis/             # Plotting scripts
 ```
@@ -53,47 +67,89 @@ analysis/             # Plotting scripts
 python scripts/collect.py --model_name EleutherAI/pythia-70m-deduped \
     --config configs/reproduce_rankme_alpha.yaml
 
-# Model sweep via SLURM wrapper (comment out models in the script to skip)
-./slurm/run_collect.sh configs/reproduce_rankme_alpha.yaml
-./slurm/run_collect.sh configs/reproduce_kfac.yaml --time 12:00:00
+# Model sweep via SLURM wrapper
+./slurm/run_collect.sh configs/rankme_alpha_packed.yaml
+./slurm/run_collect.sh configs/full.yaml --time 12:00:00
 
 # CLI flags override config values
-python scripts/collect.py --config configs/reproduce_kfac.yaml \
-    --model_name EleutherAI/pythia-14m --max_checkpoints 3 --num_samples 50
+python scripts/collect.py --config configs/full_limited.yaml \
+    --model_name EleutherAI/pythia-14m --max_checkpoints 3
 ```
 
 ## Config system
 
-Configs use a `CollectConfig` dataclass (in collect.py). YAML files can specify:
-- **`model_name`**: single string or list of models for sweep
-- **Vectorizable fields** (`batch_size`, `max_checkpoints`, `max_layers_per_pass`): scalar (same for all), list (zipped with model_name), or dict keyed by model name
-- **`array_id`**: passed by SLURM wrapper to select one model from the list
+Each config starts with `output_dir: inferences/<config_name>`. All output lands under `inferences/` (symlinked to `/projects/prjs1815/inferences`).
 
-Model-specific loading details (`revisions_file`, `early_training_model`) are in `utils/model_registry.py`, not in configs.
+Configs use a `CollectConfig` dataclass (in `scripts/collect.py`). Key fields:
+- **`model_name`**: single string or list of models for sweep
+- **Vectorizable fields** (`batch_size`, `max_checkpoints`, `max_layers_per_pass`, `dataset_name`, `accumulation_dtype`, `activation_dtype`): scalar (same for all), list (zipped with model_name), or dict keyed by model name
+- **`array_id`**: passed by SLURM wrapper to select one model from the list
+- **`checkpoints`**: list of step ints, or `"final"` for last checkpoint only
+- **`max_layers_per_pass`**: 0 = all layers in one pass; N = groups of N layers
+- **`max_bytes`**: data budget by byte count (e.g. `80_000_000` ≈ 20M tokens); overrides `num_samples`
 
 ## Key concepts
 
 ### Collection modes
-- **collect_residual**: Capture residual stream. Hook points: `identity_head` (fast, after final norm), `after_final_norm` (hook), `before_final_norm` (raw residual), `post_attn_N`, `pre_block_N`
-- **collect_A/G/B**: Covariance matrices for MLP projections. A=input, G=gradient, B=output. G requires backward pass.
+- **collect_final_acts**: Capture residual stream at `residual_hook_point`. Hook points: `identity_head` (fast, after final norm via head replacement), `after_final_norm` (hook), `before_final_norm` (raw residual), `post_attn_N`, `pre_block_N`
+- **collect_A/G**: Covariance matrices for MLP projections. A=input covariance, G=gradient covariance. G requires backward pass (`sample_labels`, `label_samples`).
+- **collect_final_grads**: Also collect gradient covariance at the final residual hook point.
 
 ### Data modes
 - **packing=padded**: Individual sequences, padding to longest. Good for last-token extraction.
-- **packing=packed**: Concatenated tokens, no padding. Standard for covariance collection and training-like data.
-- **token_selection=last**: Last token per sequence (padded) or per document (packed, needs boundary_token_ids).
-- **token_selection=all**: All positions except last (which has no next-token target).
+- **packing=packed**: Concatenated tokens, no padding. Standard for covariance collection.
+- **token_selection=last**: Last token per sequence (padded) or per document boundary (packed).
+- **token_selection=all**: All positions except last.
+- **max_bytes**: Accumulate texts until total UTF-8 byte count exceeds limit (cache filename: `filtered_texts_{dataset}_{N}MB.json`). More consistent than num_samples across model families (OLMo-mix docs are longer than Pile).
 
 ### Storage formats
-- **cov**: Raw d×d covariance matrix + count n. `M = Σ xxT`, divide by n for E[xxT].
-- **cov_svd**: Eigenvectors + eigenvalues of E[xxT]. Default for multi-checkpoint. Reconstruct: `V @ diag(λ) @ V.T`.
-- **eigenvalues**: Just eigenvalues. Cheapest.
+- **acts**: Raw (N, d) activation tensors. Largest.
+- **acts_svd**: Full SVD: U(N,d), S(d,), V(d,d). Larger than acts; use for explicit basis.
+- **cov**: Raw d×d covariance Σ xxT + count n. Divide by n for E[xxT].
+- **cov_svd**: Eigendecomposition of E[xxT]: eigvecs V(d,k) + eigvals λ(k). Default for multi-checkpoint. Recoverable: V @ diag(λ) @ V.T
+- **eigenvalues**: Just eigenvalues λ(k). Cheapest.
+- **+m modifier** (e.g. `cov_svd+m`): also store activation means, needed for B derivation when layer has bias.
+- Full name aliases: `activations`=`acts`, `covariance`=`cov`.
 - Cross-basis projections stored additionally alongside primary format.
 
+### Precision
+- `accumulation_dtype: fp64` (default) — covariance accumulators in fp64 for numerical stability
+- `activation_dtype: fp32` (default) — activations cast to fp32 before outer products
+- Storage: eigvals→fp64, eigvecs/acts/cov→fp32 (smart defaults; overridable via `storage_dtype`)
+
 ### Model families
-- **Pythia** (GPTNeoX): 2 MLP projections (dense_h_to_4h, dense_4h_to_h). float16.
-- **OLMo-2** (LLaMA-style): 3 MLP projections (gate_proj, up_proj, down_proj). bfloat16. RMSNorm.
+- **Pythia** (GPTNeoX): 2 MLP projections (dense_h_to_4h, dense_4h_to_h). fp16.
+- **OLMo-2** (LLaMA-style): 3 MLP projections (gate_proj, up_proj, down_proj). bfloat16. RMSNorm (no bias).
 - Per-model config (revisions, early training repos) in `utils/model_registry.py`.
-- Checkpoint discovery via `utils/model_registry.get_checkpoint_schedule()`.
+
+### Storage CLI
+```bash
+python -m utils.storage info step0.pt
+python -m utils.storage convert --input <dir_or_file> --to cov_svd
+python -m utils.storage project --input <dir_or_file> --onto both   # same-layer G↔B cross-basis
+python -m utils.storage project --input <dir_or_file> --onto-file ref.pt  # cross-checkpoint
+python -m utils.storage set-filter --input <dir> --token-selection last
+```
+
+### DataAccessor
+```python
+from utils.accessor import DataAccessor
+acc = DataAccessor("inferences/full_limited/pythia-14m/step143000.pt")
+acc["blk3.up"].A.eigvals        # 1D tensor, descending
+acc["blk3.up"].G.cov            # (d,d) normalized covariance
+acc.after_final_norm.A.eigvals  # final residual stream
+acc.blocks[3].up.A.eigh         # (eigvals, eigvecs) tuple
+```
+
+## Compute metrics
+
+```bash
+python scripts/compute_metrics.py --model_name pythia-14m \
+    --input_dir inferences/full_limited/pythia-14m --num_workers 4
+
+# Or via SLURM
+./slurm/compute_metrics.sh inferences/full_limited/
+```
 
 ## Verification
 
@@ -103,9 +159,6 @@ python scripts/verify.py --mode self_consistency
 
 # Compare against existing computed data (on server)
 python scripts/verify.py --mode server
-
-# Both
-python scripts/verify.py --mode all
 ```
 
 ## On the SLURM cluster
@@ -114,10 +167,13 @@ python scripts/verify.py --mode all
 export HF_HOME="/projects/prjs1815/hf_cache"
 cd ~/Tracing-representation-geometry-reproduction
 
-# New unified wrapper (comment out models in run_collect.sh to run a subset)
-./slurm/run_collect.sh configs/reproduce_rankme_alpha.yaml
-./slurm/run_collect.sh configs/reproduce_kfac.yaml --time 12:00:00
+./slurm/run_collect.sh configs/rankme_alpha_packed.yaml
+./slurm/run_collect.sh configs/full_limited.yaml --time 4:00:00
 ```
+
+- Staging partition: CPU-only, I/O bound work (metrics, storage conversions)
+- gpu_a100 partition: any collection job (forward/backward pass)
+- VRAM estimator only gives forward-pass GPU VRAM; backward pass (collect_G=True) is typically 2–3× higher due to retained computation graph
 
 ## Dependencies
 torch, transformers, numpy, sklearn, datasets, tqdm, jsonargparse, matplotlib, seaborn

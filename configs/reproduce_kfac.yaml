@@ -1,3 +1,4 @@
+output_dir: inferences/reproduce_kfac
 # Covariance factor collection for all Pythia and OLMo models.
 # Uses packed fineweb, all tokens, A+G covariance, sampled labels (Monte Carlo Fisher).
 
@@ -35,10 +36,9 @@ min_length: 32
 max_checkpoints: 30
 packing: packed
 token_selection: all
-collect_residual: false
+collect_final_acts: false
 collect_A: true
 collect_G: true
-collect_B: false
 sample_labels: true
 label_samples: 1
 seed: 42

@@ -1,33 +1,37 @@
 #!/usr/bin/env python
-"""Unified collection pipeline for residual activations and covariance factors.
+"""Unified collection pipeline for activations and covariance factors.
 
-Replaces both rankme_alpha_scripts/extract_activations.py and kfac_scripts/collect_kfac.py
-with a single configurable script driven by YAML config files.
+Collects data at arbitrary hook points (residual stream, MLP projections) using
+a single configurable script driven by YAML config files. All hook points go
+through the same HookCollector and produce the same output format.
 
 Supports:
-    - Residual stream capture: identity_head, after_final_norm, before_final_norm, per-block hooks
-    - Covariance collection: A (input), G (gradient), B (post-weight output)
+    - Residual stream: identity_head, after_final_norm, before_final_norm, per-block hooks
+    - MLP projections: A (input covariance), G (gradient covariance)
     - Data modes: packed (no padding) or padded
     - Token selection: all tokens or last token (per sequence or per document)
-    - Storage formats: cov, cov_svd, eigenvalues
+    - Storage formats: acts, cov, cov_svd, eigenvalues (with +m modifier)
     - Answer-only gradient collection for downstream tasks
     - Cross-basis projections at save time
 
 Usage:
-    python scripts/collect.py --config configs/residual_pythia.yaml --model_name EleutherAI/pythia-14m
-    python scripts/collect.py --config configs/covariance_pythia.yaml --array_id 0
+    python scripts/collect.py --config configs/reproduce_rankme_alpha.yaml --model_name EleutherAI/pythia-14m
+    python scripts/collect.py --config configs/full.yaml --array_id 0
 """
 
 import gc
 import os
 import sys
-import numpy as np
 import torch
 import torch.nn as nn
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, fields
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
+
+# Disable tqdm nested-bar cursor movement when stderr is not a terminal (e.g. SLURM logs)
+# This prevents [A escape codes from cluttering log files.
+_IS_TTY = sys.stderr.isatty()
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -39,11 +43,13 @@ from utils.model_registry import (
     load_tokenizer,
     get_mlp_projections,
     get_num_layers,
+    get_final_layernorm,
+    get_block_layernorms,
     prefetch_checkpoint,
     delete_cached_revision,
 )
-from utils.hooks import CovarianceCollector, ResidualCapture
-from utils.storage import save_factors, save_activations
+from utils.hooks import HookCollector, setup_identity_head, restore_head
+from utils.storage import save_factors
 from utils.data_utils import (
     load_and_cache_texts,
     pack_sequences,
@@ -52,8 +58,31 @@ from utils.data_utils import (
 )
 
 
+# Maps identity_head hook_point to its semantic storage key (it gives post-norm activations)
+_RESIDUAL_HOOK_STORAGE_KEY = {"identity_head": "after_final_norm"}
+
 # Fields that may vary per model in a sweep (accept scalar, list, or dict).
-VECTORIZABLE_FIELDS = {"batch_size", "max_checkpoints", "max_layers_per_pass", "dataset_name"}
+VECTORIZABLE_FIELDS = {"batch_size", "max_checkpoints", "max_layers_per_pass", "dataset_name",
+                       "accumulation_dtype", "activation_dtype"}
+
+
+def _resolve_wildcard_dict(d: dict, model_name: str, default=None):
+    """Look up model_name in a dict that may contain wildcard keys (ending with *).
+
+    Resolution order:
+        1. Exact match
+        2. Longest matching wildcard prefix (e.g. "EleutherAI/pythia-14m*" beats "EleutherAI/*")
+        3. default
+    """
+    if model_name in d:
+        return d[model_name]
+    best_val, best_len = default, -1
+    for key, val in d.items():
+        if key.endswith("*"):
+            prefix = key[:-1]
+            if model_name.startswith(prefix) and len(prefix) > best_len:
+                best_val, best_len = val, len(prefix)
+    return best_val
 
 
 @dataclass
@@ -61,6 +90,7 @@ class CollectConfig:
     # --- Model ---
     model_name: "str | list[str]" = "EleutherAI/pythia-14m"
     max_checkpoints: "int | dict[str, int] | list[int]" = 50
+    checkpoints: "list[int] | list[list[int]] | dict | str | None" = None
     target_layers: "list | dict[str, list] | None" = None
     max_layers_per_pass: "int | dict[str, int] | list[int]" = 4
 
@@ -78,13 +108,14 @@ class CollectConfig:
     token_selection: str = "last"
     skip_positions: int = 0
     boundary_token_ids: "list | None" = None
+    max_bytes: "int | None" = None  # if set, replaces num_samples as data budget (e.g. 80_000_000)
 
     # --- What to collect ---
-    collect_residual: bool = True
+    collect_final_acts: bool = True
+    collect_final_grads: bool = False
     residual_hook_point: str = "identity_head"
     collect_A: bool = False
     collect_G: bool = False
-    collect_B: bool = False
     sample_labels: bool = True
     label_samples: int = 1
     seed: int = 42
@@ -93,8 +124,13 @@ class CollectConfig:
     answer_only: bool = False
     answer_start_key: "str | None" = None
 
+    # --- Precision ---
+    accumulation_dtype: "str | dict[str, str] | list[str]" = "fp64"
+    activation_dtype: "str | dict[str, str] | list[str]" = "fp32"
+
     # --- Storage ---
     storage_format: str = "cov"
+    storage_dtype: "str | None" = None  # None → smart defaults (eigvals:fp64, eigvecs/acts/cov:fp32)
     cross_basis_refs: "list | None" = None
     output_dir: "str | None" = None
 
@@ -102,6 +138,8 @@ class CollectConfig:
     array_id: "int | None" = None
 
     def __post_init__(self):
+        _LIST_FIELDS = {"target_layers", "boundary_token_ids", "cross_basis_refs", "checkpoints"}
+
         if not isinstance(self.model_name, list):
             # Single model — validate no vectorized fields are lists
             for name in VECTORIZABLE_FIELDS:
@@ -111,18 +149,20 @@ class CollectConfig:
                         f"{name} is vectorized but model_name is a single string. "
                         f"Use a model_name list or pass a scalar {name}."
                     )
-            # Resolve target_layers dict for single model
+            # Resolve dict fields for single model (with wildcard support)
             if isinstance(self.target_layers, dict):
-                self.target_layers = self.target_layers.get(self.model_name, None)
+                self.target_layers = _resolve_wildcard_dict(
+                    self.target_layers, self.model_name)
+            if isinstance(self.checkpoints, dict):
+                self.checkpoints = _resolve_wildcard_dict(
+                    self.checkpoints, self.model_name)
             return
 
-        # Non-vectorizable fields must not be lists
+        # Non-vectorizable fields must not be lists (exempting known list fields)
         for f in fields(self):
             if f.name not in VECTORIZABLE_FIELDS and f.name != "model_name":
                 val = getattr(self, f.name)
-                if isinstance(val, list) and f.name not in (
-                    "target_layers", "boundary_token_ids", "cross_basis_refs",
-                ):
+                if isinstance(val, list) and f.name not in _LIST_FIELDS:
                     raise ValueError(
                         f"{f.name} must be the same for all models (got a list). "
                         f"Only {VECTORIZABLE_FIELDS} can vary per model."
@@ -140,18 +180,32 @@ class CollectConfig:
                     )
                 setattr(self, name, dict(zip(model_list, val)))
 
+        # checkpoints: list[list|str] → vectorized dict, list[int] → same for all (leave as-is)
+        if isinstance(self.checkpoints, list) and self.checkpoints and isinstance(self.checkpoints[0], (list, str)):
+            if len(self.checkpoints) != len(model_list):
+                raise ValueError(
+                    f"checkpoints list-of-lists length ({len(self.checkpoints)}) "
+                    f"!= model_name list length ({len(model_list)})"
+                )
+            self.checkpoints = dict(zip(model_list, self.checkpoints))
+
         # If array_id is set, resolve to a single model
         if self.array_id is not None:
             model = model_list[self.array_id]
             for name in VECTORIZABLE_FIELDS:
                 val = getattr(self, name)
                 if isinstance(val, dict):
-                    setattr(self, name, val.get(model, None))
-            # Resolve target_layers if it's a dict keyed by model name
+                    setattr(self, name, _resolve_wildcard_dict(val, model))
             if isinstance(self.target_layers, dict):
-                self.target_layers = self.target_layers.get(model, None)
+                self.target_layers = _resolve_wildcard_dict(self.target_layers, model)
+            if isinstance(self.checkpoints, dict):
+                self.checkpoints = _resolve_wildcard_dict(self.checkpoints, model)
             self.model_name = model
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def chunked(lst, n):
     """Yield successive n-sized chunks from lst."""
@@ -159,246 +213,208 @@ def chunked(lst, n):
         yield lst[i : i + n]
 
 
-def _collect_residual_for_checkpoint(
-    model,
-    config,
-    texts,
-    tokenizer,
-    residual_hook_point,
-    token_selection,
-    max_length,
-    batch_size,
-    packing,
-    packed_ids,
-    boundary_token_ids,
-):
-    """Collect residual stream activations for one checkpoint. Returns numpy array."""
-    capture = ResidualCapture(model, config, hook_point=residual_hook_point)
-    all_acts = []
+def _batch_iterator(texts, tokenizer, packed_ids, packing, batch_size, max_length, device):
+    """Yield (input_ids, attention_mask_or_None) batches.
 
-    with torch.no_grad():
-        if packing == "packed":
-            loader = DataLoader(TensorDataset(packed_ids), batch_size=batch_size, shuffle=False)
-            for (ids_batch,) in tqdm(loader, desc="Residual", leave=False):
-                x = ids_batch.to(next(model.parameters()).device, non_blocking=True)
-
-                if residual_hook_point == "identity_head":
-                    outputs = model(x)
-                    acts = outputs.logits.detach()
-                else:
-                    model(x)
-                    acts = capture.activations
-
-                if acts is None:
-                    continue
-
-                if token_selection == "last":
-                    mask = compute_token_mask(
-                        x, token_selection="last",
-                        boundary_token_ids=boundary_token_ids,
-                    )
-                    selected = acts[mask]
-                else:
-                    # All except last position
-                    selected = acts[:, :-1].reshape(-1, acts.size(-1))
-
-                all_acts.append(selected.float().cpu().numpy())
-        else:
-            # Padded mode
-            for bidx in tqdm(range(0, len(texts), batch_size), desc="Residual", leave=False):
-                batch = texts[bidx : bidx + batch_size]
-                tokenized = tokenizer(
-                    batch, padding="longest", return_tensors="pt",
-                    max_length=max_length, truncation=True,
-                )
-                device = next(model.parameters()).device
-                input_ids = tokenized.input_ids.to(device)
-                attention_mask = tokenized.attention_mask.to(device)
-
-                if residual_hook_point == "identity_head":
-                    outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-                    acts = outputs.logits.detach()
-                else:
-                    model(input_ids=input_ids, attention_mask=attention_mask)
-                    acts = capture.activations
-
-                if acts is None:
-                    continue
-
-                if token_selection == "last":
-                    last_indices = attention_mask.sum(dim=1) - 1
-                    batch_indices = torch.arange(acts.size(0), device=device)
-                    selected = acts[batch_indices, last_indices]
-                else:
-                    selected = acts[attention_mask.bool()]
-
-                all_acts.append(selected.float().cpu().numpy())
-                del input_ids, attention_mask
-
-    capture.restore(model)
-    if not all_acts:
-        return None
-    return np.vstack(all_acts)
-
-
-def _collect_covariance_for_checkpoint(
-    model,
-    config,
-    packed_ids,
-    target_layers,
-    max_layers_per_pass,
-    batch_size,
-    sample_labels,
-    label_samples,
-    device,
-    collect_A,
-    collect_G,
-    collect_B,
-    collect_means,
-    token_mask_fn,
-):
-    """Collect covariance factors for one checkpoint (packed data). Returns factors dict."""
-    loader = DataLoader(TensorDataset(packed_ids), batch_size=batch_size, shuffle=False)
-    all_factors = {}
-
-    for blk_group in chunked(target_layers, max_layers_per_pass):
-        # Freeze everything, then unfreeze only target layers if we need gradients
-        needs_grad = collect_G
-        for p in model.parameters():
-            p.requires_grad_(False)
-
-        targets = []
-        for b in blk_group:
-            targets.extend(get_mlp_projections(model, config, b))
-
-        if needs_grad:
-            for _, layer in targets:
-                layer.weight.requires_grad_(True)
-
-        collectors = {
-            name: CovarianceCollector(layer, collect_A=collect_A, collect_G=collect_G, collect_B=collect_B, collect_means=collect_means)
-            for name, layer in targets
-        }
-
-        for (ids_batch,) in tqdm(loader, desc=f"Cov blk {blk_group}", leave=False):
-            x = ids_batch.to(device, non_blocking=True)
-
-            # Compute and set token mask
-            mask = token_mask_fn(x)
-            for collector in collectors.values():
-                collector.set_token_mask(mask)
-
-            if needs_grad:
-                model.zero_grad(set_to_none=True)
-                logits = model(x).logits[:, :-1].float()
-
-                if sample_labels:
-                    probs = torch.softmax(logits, dim=-1).reshape(-1, logits.size(-1))
-                    flat_logits = logits.reshape(-1, logits.size(-1))
-                    # Accumulate gradients from multiple samples (Monte Carlo Fisher)
-                    for _ in range(label_samples):
-                        with torch.no_grad():
-                            y = torch.multinomial(probs, 1).squeeze(1)
-                        loss = nn.functional.cross_entropy(flat_logits, y)
-                        (loss / label_samples).backward(retain_graph=True)
-                else:
-                    labels = compute_labels(x)
-                    loss = nn.functional.cross_entropy(
-                        logits.reshape(-1, logits.size(-1)),
-                        labels[:, :-1].reshape(-1),
-                        ignore_index=-100,
-                    )
-                    loss.backward()
-            else:
-                with torch.no_grad():
-                    model(x)
-
-        # Collect factors and clean up
-        for name, collector in collectors.items():
-            all_factors[name] = collector.factors()
-            collector.close()
-        del collectors
-        torch.cuda.empty_cache()
-
-    return all_factors
-
-
-def _collect_covariance_padded_for_checkpoint(
-    model,
-    config,
-    texts,
-    tokenizer,
-    target_layers,
-    max_layers_per_pass,
-    batch_size,
-    max_length,
-    sample_labels,
-    label_samples,
-    device,
-    collect_A,
-    collect_G,
-    collect_B,
-    collect_means,
-    token_selection,
-    answer_start_positions_all=None,
-):
-    """Collect covariance factors with padded data for one checkpoint."""
-    all_factors = {}
-    needs_grad = collect_G
-
-    for blk_group in chunked(target_layers, max_layers_per_pass):
-        for p in model.parameters():
-            p.requires_grad_(False)
-
-        targets = []
-        for b in blk_group:
-            targets.extend(get_mlp_projections(model, config, b))
-
-        if needs_grad:
-            for _, layer in targets:
-                layer.weight.requires_grad_(True)
-
-        collectors = {
-            name: CovarianceCollector(layer, collect_A=collect_A, collect_G=collect_G, collect_B=collect_B, collect_means=collect_means)
-            for name, layer in targets
-        }
-
-        for bidx in tqdm(range(0, len(texts), batch_size), desc=f"Cov blk {blk_group}", leave=False):
+    Abstracts the packed vs padded data preparation so the collection loop
+    doesn't need to branch.
+    """
+    if packing == "packed":
+        loader = DataLoader(TensorDataset(packed_ids), batch_size=batch_size, shuffle=False)
+        for (ids_batch,) in loader:
+            yield ids_batch.to(device, non_blocking=True), None
+    else:
+        for bidx in range(0, len(texts), batch_size):
             batch = texts[bidx : bidx + batch_size]
             tokenized = tokenizer(
                 batch, padding="longest", return_tensors="pt",
                 max_length=max_length, truncation=True,
             )
-            input_ids = tokenized.input_ids.to(device)
-            attention_mask = tokenized.attention_mask.to(device)
-
-            ans_starts = None
-            if answer_start_positions_all is not None:
-                ans_starts = answer_start_positions_all[bidx : bidx + batch_size].to(device)
-
-            mask = compute_token_mask(
-                input_ids,
-                attention_mask=attention_mask,
-                token_selection=token_selection,
-                answer_start_positions=ans_starts,
+            yield (
+                tokenized.input_ids.to(device),
+                tokenized.attention_mask.to(device),
             )
-            for collector in collectors.values():
-                collector.set_token_mask(mask)
+
+
+def _resolve_residual_hook(model, model_config, hook_point):
+    """Resolve a residual hook_point to (module, capture_type) or None for identity_head.
+
+    Returns:
+        (module, "input"|"output") or (None, None) for identity_head.
+    """
+    if hook_point == "identity_head":
+        return None, None
+    elif hook_point == "after_final_norm":
+        return get_final_layernorm(model, model_config), "output"
+    elif hook_point == "before_final_norm":
+        return get_final_layernorm(model, model_config), "input"
+    elif hook_point.startswith("post_attn_"):
+        block_idx = int(hook_point.split("_")[-1])
+        _, post_attn_ln = get_block_layernorms(model, model_config, block_idx)
+        return post_attn_ln, "input"
+    elif hook_point.startswith("pre_block_"):
+        block_idx = int(hook_point.split("_")[-1])
+        input_ln, _ = get_block_layernorms(model, model_config, block_idx)
+        return input_ln, "input"
+    else:
+        raise ValueError(f"Unknown hook_point: {hook_point}")
+
+
+# ---------------------------------------------------------------------------
+# Unified collection
+# ---------------------------------------------------------------------------
+
+def _collect_for_checkpoint(
+    model, model_config, cfg, texts, tokenizer, packed_ids,
+    target_layers, device, boundary_token_ids,
+):
+    """Collect all requested data for one checkpoint.
+
+    Sets up HookCollectors for both residual and MLP hook points, runs
+    forward (+ optional backward) passes, returns a single factors dict.
+    """
+    collects_mlp = cfg.collect_A or cfg.collect_G
+    needs_grad = cfg.collect_G or cfg.collect_final_grads
+    storage_mode = "acts" if cfg.storage_format.split("+")[0] == "acts" else "cov"
+    collect_means = "+m" in cfg.storage_format
+
+    all_factors = {}
+
+    # Determine which block groups to iterate over
+    if collects_mlp:
+        if cfg.max_layers_per_pass == 0:
+            block_groups = [target_layers]
+        else:
+            block_groups = list(chunked(target_layers, cfg.max_layers_per_pass))
+    else:
+        # No covariance — single pass with no block groups
+        block_groups = [None]
+
+    for blk_group in block_groups:
+        collectors = {}
+
+        # --- Set up residual collector ---
+        identity_head_state = None
+        residual_collector = None
+        residual_key = _RESIDUAL_HOOK_STORAGE_KEY.get(cfg.residual_hook_point, cfg.residual_hook_point)
+
+        if cfg.collect_final_acts or cfg.collect_final_grads:
+            module, capture = _resolve_residual_hook(model, model_config, cfg.residual_hook_point)
+            if module is not None:
+                # Hook-based residual capture
+                residual_collector = HookCollector(
+                    module, capture=capture, mode=storage_mode,
+                    collect_means=collect_means,
+                    collect_grad=cfg.collect_final_grads,
+                    accumulation_dtype=cfg.accumulation_dtype,
+                    activation_dtype=cfg.activation_dtype,
+                )
+                collectors[residual_key] = residual_collector
+            else:
+                # identity_head: replace head, feed output manually
+                if cfg.collect_final_grads:
+                    raise ValueError(
+                        "collect_final_grads requires a hook-based residual_hook_point "
+                        "(e.g. after_final_norm or before_final_norm), not identity_head"
+                    )
+                identity_head_state = setup_identity_head(model)
+                residual_collector = HookCollector(
+                    module=None, mode=storage_mode,
+                    collect_means=collect_means,
+                    accumulation_dtype=cfg.accumulation_dtype,
+                    activation_dtype=cfg.activation_dtype,
+                )
+                collectors[residual_key] = residual_collector
+
+        # --- Set up MLP collectors ---
+        if blk_group is not None:
+            # Freeze everything, then unfreeze only target layers if we need gradients
+            for p in model.parameters():
+                p.requires_grad_(False)
+
+            for b in blk_group:
+                for name, layer in get_mlp_projections(model, model_config, b):
+                    if needs_grad:
+                        layer.weight.requires_grad_(True)
+                    collectors[name] = HookCollector(
+                        layer, capture="input", mode=storage_mode,
+                        collect_grad=cfg.collect_G,
+                        collect_means=collect_means,
+                        accumulation_dtype=cfg.accumulation_dtype,
+                        activation_dtype=cfg.activation_dtype,
+                    )
+
+        # --- Token mask function ---
+        token_sel = cfg.token_selection
+        if collects_mlp:
+            # For covariance collection, always use all tokens for MLP hooks
+            # Residual collector uses the config's token_selection
+            cov_token_sel = "all"
+        else:
+            cov_token_sel = token_sel
+
+        # --- Run batches ---
+        desc = f"Cov blk {blk_group}" if blk_group is not None else "Collecting"
+        batches = _batch_iterator(
+            texts, tokenizer, packed_ids, cfg.packing,
+            cfg.batch_size, cfg.max_length, device,
+        )
+        # Compute total for progress bar
+        if cfg.packing == "packed" and packed_ids is not None:
+            n_batches = (len(packed_ids) + cfg.batch_size - 1) // cfg.batch_size
+        else:
+            n_batches = (len(texts) + cfg.batch_size - 1) // cfg.batch_size
+
+        bar_kwargs = dict(desc=desc, total=n_batches)
+        if _IS_TTY:
+            bar_kwargs.update(leave=False)
+        else:
+            # Non-TTY: write one clean line per update, no cursor codes
+            bar_kwargs.update(leave=True, bar_format="{desc}: {n}/{total} [{elapsed}<{remaining}, {rate_fmt}]")
+
+        for input_ids, attention_mask in tqdm(batches, **bar_kwargs):
+            # Compute masks
+            residual_mask = compute_token_mask(
+                input_ids, attention_mask=attention_mask,
+                token_selection=token_sel,
+                skip_positions=cfg.skip_positions,
+                boundary_token_ids=boundary_token_ids,
+            )
+            cov_mask = compute_token_mask(
+                input_ids, attention_mask=attention_mask,
+                token_selection=cov_token_sel,
+                skip_positions=cfg.skip_positions,
+                boundary_token_ids=boundary_token_ids,
+            ) if collects_mlp and cov_token_sel != token_sel else residual_mask
+
+            # Set masks on collectors
+            for cname, collector in collectors.items():
+                if cname == residual_key:
+                    collector.set_token_mask(residual_mask)
+                else:
+                    collector.set_token_mask(cov_mask)
+
+            # Forward (+ backward) pass
+            fwd_kwargs = {"input_ids": input_ids}
+            if attention_mask is not None:
+                fwd_kwargs["attention_mask"] = attention_mask
 
             if needs_grad:
                 model.zero_grad(set_to_none=True)
-                logits = model(input_ids=input_ids, attention_mask=attention_mask).logits[:, :-1].float()
+                logits = model(**fwd_kwargs).logits[:, :-1].float()
 
-                if sample_labels:
-                    probs = torch.softmax(logits, dim=-1).reshape(-1, logits.size(-1))
+                if cfg.sample_labels:
+                    with torch.no_grad():
+                        probs = torch.softmax(logits, dim=-1).reshape(-1, logits.size(-1))
                     flat_logits = logits.reshape(-1, logits.size(-1))
-                    for _ in range(label_samples):
+                    for i in range(cfg.label_samples):
                         with torch.no_grad():
                             y = torch.multinomial(probs, 1).squeeze(1)
                         loss = nn.functional.cross_entropy(flat_logits, y)
-                        (loss / label_samples).backward(retain_graph=True)
+                        last = (i == cfg.label_samples - 1)
+                        (loss / cfg.label_samples).backward(retain_graph=not last)
                 else:
-                    labels = compute_labels(input_ids, attention_mask, ans_starts)
+                    labels = compute_labels(input_ids, attention_mask)
                     loss = nn.functional.cross_entropy(
                         logits.reshape(-1, logits.size(-1)),
                         labels[:, :-1].reshape(-1),
@@ -407,13 +423,30 @@ def _collect_covariance_padded_for_checkpoint(
                     loss.backward()
             else:
                 with torch.no_grad():
-                    model(input_ids=input_ids, attention_mask=attention_mask)
+                    outputs = model(**fwd_kwargs)
 
-            del input_ids, attention_mask
+                # For identity_head: manually feed model output to collector
+                if identity_head_state is not None and residual_collector is not None:
+                    acts = outputs.logits.detach()
+                    if residual_collector.mode == "acts" and acts.dim() == 3:
+                        residual_collector._accumulate_acts(acts)
+                    else:
+                        acts_masked = residual_collector._apply_mask(acts)
+                        residual_collector.accumulate(acts_masked)
 
-        for name, collector in collectors.items():
-            all_factors[name] = collector.factors()
+        # --- Collect factors and clean up ---
+        for cname, collector in collectors.items():
+            # Each key is unique per layer; residual key may repeat across block_groups,
+            # so only save it once (first block_group wins).
+            if cname not in all_factors:
+                all_factors[cname] = collector.factors()
             collector.close()
+
+        # Restore identity head if used
+        if identity_head_state is not None:
+            restore_head(model, *identity_head_state)
+            identity_head_state = None
+
         del collectors
         torch.cuda.empty_cache()
 
@@ -446,33 +479,45 @@ def main(cfg: CollectConfig):
 
     print(f"Model: {model_name} (family={model_config.family}, dataset={cfg.dataset_name})")
 
-    needs_covariance = cfg.collect_A or cfg.collect_G or cfg.collect_B
+    needs_covariance = cfg.collect_A or cfg.collect_G
 
-    # Output directories
+    # Output directory — always include model subfolder
     output_dir = cfg.output_dir
     if output_dir is None:
-        if cfg.collect_residual and not needs_covariance:
+        has_final = cfg.collect_final_acts or cfg.collect_final_grads
+        if has_final and not needs_covariance:
             output_dir = os.path.join("activations", cfg.dataset_name, short_name)
-        elif needs_covariance and not cfg.collect_residual:
+        elif needs_covariance and not has_final:
             output_dir = os.path.join("covariance_factors", cfg.dataset_name, short_name)
         else:
             output_dir = os.path.join("collected", cfg.dataset_name, short_name)
+    else:
+        output_dir = os.path.join(output_dir, short_name)
     os.makedirs(output_dir, exist_ok=True)
 
-    # Checkpoint schedule
+    # Checkpoint schedule — explicit checkpoints list takes priority over max_checkpoints
+    if cfg.checkpoints is not None:
+        cfg.max_checkpoints = None
     schedule = get_checkpoint_schedule(model_config, cfg.max_checkpoints)
+    if cfg.checkpoints == "final":
+        cfg.checkpoints = [schedule[-1][0]] if schedule else []
+    if cfg.checkpoints is not None:
+        wanted = set(cfg.checkpoints)
+        missing = wanted - {s for s, _, _ in schedule}
+        if missing:
+            print(f"  WARNING: {len(missing)} requested steps not in schedule: {sorted(missing)}")
+        schedule = [t for t in schedule if t[0] in wanted]
     print(f"Total checkpoints: {len(schedule)}")
 
     # Filter to unprocessed checkpoints
     to_process = []
     for step_num, revision, step_model in schedule:
-        residual_done = not cfg.collect_residual or os.path.exists(
-            os.path.join(output_dir, f"step{step_num}.npy")
-        )
-        cov_done = not needs_covariance or os.path.exists(
-            os.path.join(output_dir, f"step{step_num}.pt")
-        )
-        if residual_done and cov_done:
+        out_path = os.path.join(output_dir, f"step{step_num}.pt")
+        if os.path.exists(out_path):
+            continue
+        # Also check for old .npy format (backward compat)
+        npy_path = os.path.join(output_dir, f"step{step_num}.npy")
+        if os.path.exists(npy_path):
             continue
         to_process.append((step_num, revision, step_model))
 
@@ -489,6 +534,7 @@ def main(cfg: CollectConfig):
     texts = load_and_cache_texts(
         loader_fn, cfg.num_samples, cfg.min_length, tokenizer,
         cfg.dataset_name, cfg.dataset_content_key,
+        max_bytes=cfg.max_bytes,
     )
 
     # Pack sequences if needed
@@ -503,27 +549,22 @@ def main(cfg: CollectConfig):
         if tokenizer.eos_token_id is not None:
             boundary_token_ids = [tokenizer.eos_token_id]
 
-    # Token mask function for covariance collection
-    def token_mask_fn(input_ids):
-        return compute_token_mask(
-            input_ids,
-            token_selection="all" if needs_covariance else cfg.token_selection,
-            skip_positions=cfg.skip_positions,
-            boundary_token_ids=boundary_token_ids,
-        )
-
     # Main loop
     device = "cuda" if torch.cuda.is_available() else "cpu"
     executor = ThreadPoolExecutor(max_workers=1)
 
     print(f"Processing {len(to_process)} remaining checkpoints...")
-    print(f"  collect_residual={cfg.collect_residual} ({cfg.residual_hook_point})")
-    print(f"  collect_A={cfg.collect_A}, collect_G={cfg.collect_G}, collect_B={cfg.collect_B}")
+    print(f"  collect_final_acts={cfg.collect_final_acts}, collect_final_grads={cfg.collect_final_grads} ({cfg.residual_hook_point})")
+    print(f"  collect_A={cfg.collect_A}, collect_G={cfg.collect_G}")
     print(f"  packing={cfg.packing}, token_selection={cfg.token_selection}")
     print(f"  sample_labels={cfg.sample_labels}, label_samples={cfg.label_samples}, seed={cfg.seed}")
     print(f"  storage_format={cfg.storage_format}")
 
-    for idx, (step_num, revision, step_model) in enumerate(tqdm(to_process, desc="Checkpoints")):
+    ckpt_bar_kwargs = dict(desc="Checkpoints")
+    if not _IS_TTY:
+        ckpt_bar_kwargs.update(bar_format="{desc}: {n}/{total} [{elapsed}<{remaining}]")
+
+    for idx, (step_num, revision, step_model) in enumerate(tqdm(to_process, **ckpt_bar_kwargs)):
         # Prefetch next
         if idx + 1 < len(to_process):
             _, next_rev, next_model = to_process[idx + 1]
@@ -535,8 +576,7 @@ def main(cfg: CollectConfig):
             model = load_model(model_config, step_model, revision)
             model.to(device)
 
-            needs_backward = cfg.collect_G
-            if needs_backward:
+            if cfg.collect_G or cfg.collect_final_grads:
                 model.gradient_checkpointing_enable()
                 model.enable_input_require_grads()
                 model.config.use_cache = False
@@ -548,48 +588,26 @@ def main(cfg: CollectConfig):
             n_layers = get_num_layers(model, model_config)
             blocks = cfg.target_layers if cfg.target_layers is not None else list(range(n_layers))
 
-            # --- Collect residual activations ---
-            if cfg.collect_residual:
-                residual_path = os.path.join(output_dir, f"step{step_num}.npy")
-                if not os.path.exists(residual_path):
-                    acts = _collect_residual_for_checkpoint(
-                        model, model_config, texts, tokenizer,
-                        cfg.residual_hook_point, cfg.token_selection,
-                        cfg.max_length, cfg.batch_size,
-                        cfg.packing, packed_ids, boundary_token_ids,
-                    )
-                    if acts is not None:
-                        save_activations(acts, residual_path)
-                        tqdm.write(f"Step {step_num}: residual {acts.shape} -> {residual_path}")
+            if cfg.sample_labels and cfg.seed is not None:
+                torch.manual_seed(cfg.seed + step_num)
 
-            # --- Collect covariance factors ---
-            if needs_covariance:
-                cov_path = os.path.join(output_dir, f"step{step_num}.pt")
-                if not os.path.exists(cov_path):
-                    if cfg.sample_labels and cfg.seed is not None:
-                        torch.manual_seed(cfg.seed + step_num)
+            factors = _collect_for_checkpoint(
+                model, model_config, cfg, texts, tokenizer, packed_ids,
+                blocks, device, boundary_token_ids,
+            )
 
-                    collect_means = "+m" in cfg.storage_format
-
-                    if cfg.packing == "packed":
-                        factors = _collect_covariance_for_checkpoint(
-                            model, model_config, packed_ids, blocks,
-                            cfg.max_layers_per_pass,
-                            cfg.batch_size, cfg.sample_labels, cfg.label_samples,
-                            device, cfg.collect_A, cfg.collect_G, cfg.collect_B,
-                            collect_means, token_mask_fn,
-                        )
-                    else:
-                        factors = _collect_covariance_padded_for_checkpoint(
-                            model, model_config, texts, tokenizer, blocks,
-                            cfg.max_layers_per_pass,
-                            cfg.batch_size, cfg.max_length,
-                            cfg.sample_labels, cfg.label_samples,
-                            device, cfg.collect_A, cfg.collect_G, cfg.collect_B,
-                            collect_means, cfg.token_selection,
-                        )
-                    save_factors(factors, cov_path, cfg.storage_format, cfg.cross_basis_refs)
-                    tqdm.write(f"Step {step_num}: {len(factors)} projections -> {cov_path}")
+            out_path = os.path.join(output_dir, f"step{step_num}.pt")
+            token_filter = {
+                "token_selection": cfg.token_selection,
+                "skip_positions": cfg.skip_positions,
+                "boundary_token_ids": cfg.boundary_token_ids,
+            }
+            if cfg.answer_only:
+                token_filter["answer_only"] = True
+                token_filter["answer_start_key"] = cfg.answer_start_key
+            save_factors(factors, out_path, cfg.storage_format, cfg.cross_basis_refs,
+                         cfg.storage_dtype, token_filter)
+            tqdm.write(f"Step {step_num}: {len(factors)} hook points -> {out_path}")
 
         except Exception as e:
             tqdm.write(f"Skipping step {step_num}: {e}")

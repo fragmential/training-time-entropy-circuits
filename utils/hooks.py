@@ -1,66 +1,96 @@
-"""Hook-based collectors for activation covariance, gradient covariance, and residual streams.
+"""Hook-based collector for activations and covariance at arbitrary model hook points.
 
-CovarianceCollector: attaches to a nn.Linear layer to collect any combination of
-    A = E[xxT]  (input covariance)
-    B = E[bbT]  (output covariance, where b = layer(x))
-    G = E[ggT]  (gradient covariance)
+HookCollector: unified class that attaches to any nn.Module to collect:
+    - Forward activations (input or output) as raw tensors or accumulated covariance
+    - Gradient covariance (always accumulated, never raw)
 
-ResidualCapture: captures residual stream activations at configurable hook points.
+Replaces the previous CovarianceCollector + ResidualCapture split.
 """
 
 import torch
 import torch.nn as nn
 from typing import Optional
 
+_DTYPE_MAP = {
+    "float32": torch.float32, "fp32": torch.float32,
+    "float64": torch.float64, "fp64": torch.float64,
+    "bfloat16": torch.bfloat16, "bf16": torch.bfloat16,
+    "float16": torch.float16, "fp16": torch.float16,
+}
 
-class CovarianceCollector:
-    """Collect running outer-product covariance for a single nn.Linear layer.
 
-    Supports any combination of A (input), B (output), G (gradient) collection.
-    Uses an externally-set token mask to select which positions to include,
-    replacing the hardcoded [:, :-1] from the original KFAC class.
+class HookCollector:
+    """Collect activations or covariance at a single hook point.
+
+    Modes:
+        "cov"  — accumulates Σ xxT and n. Optionally means. Default.
+        "acts" — stores raw (masked) activation tensors in a list.
+
+    For gradient collection (collect_grad=True), gradient covariance is always
+    accumulated regardless of mode (storing raw gradients is impractical).
+
+    Args:
+        module: Module to hook. If None, call accumulate() manually (e.g. identity_head).
+        capture: "input" (forward_pre_hook) or "output" (forward_hook).
+        mode: "cov" or "acts".
+        collect_grad: Also collect gradient covariance via backward hook.
+        collect_means: Store running mean of activations (for +m modifier).
+        accumulation_dtype: Dtype for covariance accumulators A and G. Default fp64
+                            for numerical stability of log-det computation.
+        activation_dtype: Dtype activations/gradients are cast to before outer products.
+                          Default fp32.
     """
 
     def __init__(
         self,
-        layer: nn.Linear,
-        collect_A: bool = True,
-        collect_G: bool = True,
-        collect_B: bool = False,
+        module: nn.Module = None,
+        capture: str = "input",
+        mode: str = "cov",
+        collect_grad: bool = False,
         collect_means: bool = False,
+        accumulation_dtype: str = "fp64",
+        activation_dtype: str = "fp32",
     ):
-        d_out, d_in = layer.weight.shape
-        dev = layer.weight.device
+        assert mode in ("cov", "acts"), f"Unknown mode: {mode}"
+        assert capture in ("input", "output"), f"Unknown capture: {capture}"
 
-        self.collect_A = collect_A
-        self.collect_G = collect_G
-        self.collect_B = collect_B
+        self.mode = mode
+        self.capture = capture
+        self.collect_grad = collect_grad
         self.collect_means = collect_means
-
-        if collect_A:
-            self.A = torch.zeros(d_in, d_in, dtype=torch.float32, device=dev)
-            self.n_A = 0
-            if collect_means:
-                self.A_sum = torch.zeros(d_in, dtype=torch.float32, device=dev)
-        if collect_B:
-            self.B = torch.zeros(d_out, d_out, dtype=torch.float32, device=dev)
-            self.n_B = 0
-        if collect_G:
-            self.G = torch.zeros(d_out, d_out, dtype=torch.float32, device=dev)
-            self.n_G = 0
-
-        self._token_mask: Optional[torch.BoolTensor] = None
-        self._buf_x: Optional[torch.Tensor] = None
         self.active = True
+        self._acc_dtype = _DTYPE_MAP.get(accumulation_dtype, torch.float64)
+        self._act_dtype = _DTYPE_MAP.get(activation_dtype, torch.float32)
+
+        # Token mask — set externally per batch
+        self._token_mask: Optional[torch.BoolTensor] = None
+
+        # Forward signal storage (lazy-initialized on first data)
+        self._A_initialized = False
+        self.A = None       # (d, d) covariance or None
+        self.n_A = 0
+        self.A_sum = None   # (d,) running sum for means
+        self._acts_list = [] if mode == "acts" else None
+        self._mask_list = [] if mode == "acts" else None
+
+        # Gradient storage (lazy-initialized)
+        self._G_initialized = False
+        self.G = None
+        self.n_G = 0
 
         # Register hooks
         self._handles = []
-        if collect_A or collect_B:
-            self._handles.append(layer.register_forward_pre_hook(self._fwd_pre))
-        if collect_B:
-            self._handles.append(layer.register_forward_hook(self._fwd_post))
-        if collect_G:
-            self._handles.append(layer.register_full_backward_hook(self._bwd))
+        if module is not None:
+            if capture == "input":
+                self._handles.append(module.register_forward_pre_hook(self._fwd_pre))
+            else:
+                self._handles.append(module.register_forward_hook(self._fwd_post))
+            if collect_grad:
+                self._handles.append(module.register_full_backward_hook(self._bwd))
+
+    # ------------------------------------------------------------------
+    # Token masking
+    # ------------------------------------------------------------------
 
     def set_token_mask(self, mask: Optional[torch.BoolTensor]):
         """Set per-batch token mask. Shape: (batch, seq_len). True = include."""
@@ -69,33 +99,83 @@ class CovarianceCollector:
     def _apply_mask(self, tensor: torch.Tensor) -> torch.Tensor:
         """Apply current token mask to a (batch, seq, dim) tensor → (N, dim)."""
         if tensor.dim() == 2:
-            # Already flat (batch*seq, dim) — shouldn't happen in normal use
-            return tensor.float()
+            return tensor.to(dtype=self._act_dtype)
         if self._token_mask is not None:
-            return tensor[self._token_mask].float()
-        # Fallback: all except last position (backward compat with original KFAC)
-        return tensor[:, :-1].reshape(-1, tensor.size(-1)).float()
+            return tensor[self._token_mask].to(dtype=self._act_dtype)
+        # Fallback: all except last position
+        return tensor[:, :-1].reshape(-1, tensor.size(-1)).to(dtype=self._act_dtype)
+
+    def _accumulate_acts(self, x_3d: torch.Tensor):
+        """Acts mode: save ALL tokens (no mask applied). Track mask separately."""
+        x_flat = x_3d.reshape(-1, x_3d.shape[-1]).to(dtype=self._act_dtype)
+        self._acts_list.append(x_flat.cpu())
+        if self._token_mask is not None:
+            self._mask_list.append(self._token_mask.reshape(-1).cpu())
+        self.n_A += x_flat.shape[0]
+
+    # ------------------------------------------------------------------
+    # Accumulation (public — also used for identity_head manual feeding)
+    # ------------------------------------------------------------------
+
+    def accumulate(self, x_flat: torch.Tensor):
+        """Accumulate a (N, d) activation tensor into storage.
+
+        For cov mode: updates Σ xxT and n.
+        For acts mode: appends to raw tensor list.
+        """
+        if not self.active:
+            return
+        x_f = x_flat.to(dtype=self._act_dtype)
+        n = x_f.size(0)
+
+        if self.mode == "cov":
+            d = x_f.size(1)
+            if not self._A_initialized:
+                self.A = torch.zeros(d, d, dtype=self._acc_dtype, device=x_f.device)
+                if self.collect_means:
+                    self.A_sum = torch.zeros(d, dtype=torch.float32, device=x_f.device)
+                self._A_initialized = True
+            self.A.add_((x_f.T @ x_f).to(dtype=self._acc_dtype))
+            self.n_A += n
+            if self.collect_means:
+                self.A_sum.add_(x_f.float().sum(dim=0))
+        else:
+            self._acts_list.append(x_f.cpu())
+            self.n_A += n
+
+    def accumulate_grad(self, g_flat: torch.Tensor):
+        """Accumulate a (N, d) gradient tensor into G covariance."""
+        if not self.active:
+            return
+        g_f = g_flat.to(dtype=self._act_dtype)
+        d = g_f.size(1)
+        if not self._G_initialized:
+            self.G = torch.zeros(d, d, dtype=self._acc_dtype, device=g_f.device)
+            self._G_initialized = True
+        self.G.add_((g_f.T @ g_f).to(dtype=self._acc_dtype))
+        self.n_G += g_f.size(0)
+
+    # ------------------------------------------------------------------
+    # Hook callbacks
+    # ------------------------------------------------------------------
 
     def _fwd_pre(self, module, inp):
         if not self.active:
             return
         x = inp[0].detach()
-        x_flat = self._apply_mask(x)
-        self._buf_x = x_flat  # buffer for B hook if needed
-        if self.collect_A:
-            self.A.add_(x_flat.T @ x_flat)
-            self.n_A += x_flat.size(0)
-            if self.collect_means:
-                self.A_sum.add_(x_flat.sum(dim=0))
+        if self.mode == "acts" and x.dim() == 3:
+            self._accumulate_acts(x)
+        else:
+            self.accumulate(self._apply_mask(x))
 
     def _fwd_post(self, module, inp, output):
         if not self.active:
             return
-        b = output.detach()
-        b_flat = self._apply_mask(b)
-        if self.collect_B:
-            self.B.add_(b_flat.T @ b_flat)
-            self.n_B += b_flat.size(0)
+        out = output.detach()
+        if self.mode == "acts" and out.dim() == 3:
+            self._accumulate_acts(out)
+        else:
+            self.accumulate(self._apply_mask(out))
 
     def _bwd(self, module, grad_input, grad_output):
         if not self.active:
@@ -104,174 +184,99 @@ class CovarianceCollector:
         if go is None:
             return
         g = go.detach()
-        g_flat = self._apply_mask(g)
-        if self.collect_G:
-            self.G.add_(g_flat.T @ g_flat)
-            self.n_G += g_flat.size(0)
-        self._buf_x = None
+        self.accumulate_grad(self._apply_mask(g))
+
+    # ------------------------------------------------------------------
+    # Results
+    # ------------------------------------------------------------------
 
     def factors(self) -> dict:
-        """Return collected factors as CPU tensors.
+        """Return collected data as CPU tensors.
 
-        Returns dict with keys "A", "B", "G" (whichever were collected) and "n".
-        Matrices are the raw unnormalized sums (Σ xxT). Divide by n to get E[xxT].
+        Returns dict with:
+            "A": covariance matrix (d,d) in cov mode, or raw activations (N,d) in acts mode
+            "n_A": token count
+            "A_mean": mean vector (d,) if collect_means and cov mode
+            "G": gradient covariance (d,d) if collect_grad
+            "n_G": gradient token count
+            "n": convenience alias for n_A
         """
         result = {}
-        if self.collect_A:
-            result["A"] = self.A.cpu()
-            result["n_A"] = self.n_A
-            if self.collect_means:
+
+        if self.mode == "cov":
+            if self.A is not None:
+                result["A"] = self.A.cpu()
+            if self.collect_means and self.A_sum is not None:
                 result["A_mean"] = (self.A_sum / self.n_A).cpu()
-        if self.collect_B:
-            result["B"] = self.B.cpu()
-            result["n_B"] = self.n_B
-        if self.collect_G:
+        else:
+            if self._acts_list:
+                result["A"] = torch.cat(self._acts_list, dim=0)
+                if self._mask_list:
+                    result["A_mask"] = torch.cat(self._mask_list, dim=0)
+
+        result["n_A"] = self.n_A
+
+        if self.collect_grad and self.G is not None:
             result["G"] = self.G.cpu()
             result["n_G"] = self.n_G
-        # Convenience: "n" is the A count if available, else G, else B
-        result["n"] = self.n_A if self.collect_A else (self.n_G if self.collect_G else self.n_B)
+
+        result["n"] = self.n_A
         return result
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
 
     def reset(self):
         """Reset accumulators to zero (for reuse across checkpoints)."""
-        if self.collect_A:
-            self.A.zero_()
-            self.n_A = 0
-            if self.collect_means:
+        if self.mode == "cov":
+            if self.A is not None:
+                self.A.zero_()
+            if self.A_sum is not None:
                 self.A_sum.zero_()
-        if self.collect_B:
-            self.B.zero_()
-            self.n_B = 0
-        if self.collect_G:
+        else:
+            self._acts_list = []
+            if self._mask_list is not None:
+                self._mask_list = []
+        self.n_A = 0
+        if self.G is not None:
             self.G.zero_()
-            self.n_G = 0
-        self._buf_x = None
+        self.n_G = 0
 
     def close(self):
         """Remove all hooks and free buffers."""
         for h in self._handles:
             h.remove()
         self._handles.clear()
-        self._buf_x = None
         self._token_mask = None
+        self._acts_list = None
+        self._mask_list = None
 
 
-class ResidualCapture:
-    """Capture residual stream activations at configurable hook points.
+# ---------------------------------------------------------------------------
+# Identity head setup (used by collect.py for fast post-norm residual capture)
+# ---------------------------------------------------------------------------
 
-    Hook points:
-        "identity_head"      — replace lm_head/embed_out with nn.Identity() (fast path, after final norm)
-        "after_final_norm"   — forward_hook on final layernorm output
-        "before_final_norm"  — forward_pre_hook on final layernorm input (raw residual)
-        "post_attn_N"        — forward_pre_hook on block N's post-attention layernorm
-        "pre_block_N"        — forward_pre_hook on block N's input layernorm
+def setup_identity_head(model) -> tuple:
+    """Replace lm_head/embed_out with nn.Identity().
 
-    The identity_head method replaces the output head entirely. The hook methods
-    capture activations non-destructively.
+    Returns (original_module, attr_name) for later restoration via restore_head().
     """
+    for attr in ("lm_head", "embed_out"):
+        if hasattr(model, attr):
+            original = getattr(model, attr)
+            setattr(model, attr, nn.Identity())
+            return original, attr
+    if hasattr(model, "set_output_embeddings"):
+        original = model.get_output_embeddings()
+        model.set_output_embeddings(nn.Identity())
+        return original, "__output_embeddings__"
+    raise ValueError("Could not locate output head for identity_head setup")
 
-    def __init__(self, model, config, hook_point: str = "before_final_norm"):
-        from utils.model_registry import get_final_layernorm, get_block_layernorms
 
-        self.hook_point = hook_point
-        self._handle = None
-        self._original_head = None
-        self._head_attr = None
-        self.activations = None
-
-        if hook_point == "identity_head":
-            self._setup_identity_head(model)
-        elif hook_point == "after_final_norm":
-            target = get_final_layernorm(model, config)
-            self._handle = target.register_forward_hook(self._capture_output)
-        elif hook_point == "before_final_norm":
-            target = get_final_layernorm(model, config)
-            self._handle = target.register_forward_pre_hook(self._capture_input)
-        elif hook_point.startswith("post_attn_"):
-            block_idx = int(hook_point.split("_")[-1])
-            _, post_attn_ln = get_block_layernorms(model, config, block_idx)
-            self._handle = post_attn_ln.register_forward_pre_hook(self._capture_input)
-        elif hook_point.startswith("pre_block_"):
-            block_idx = int(hook_point.split("_")[-1])
-            input_ln, _ = get_block_layernorms(model, config, block_idx)
-            self._handle = input_ln.register_forward_pre_hook(self._capture_input)
-        else:
-            raise ValueError(f"Unknown hook_point: {hook_point}. "
-                             f"Expected: identity_head, after_final_norm, before_final_norm, post_attn_N, pre_block_N")
-
-    def _setup_identity_head(self, model):
-        """Replace lm_head/embed_out with nn.Identity()."""
-        for attr in ("lm_head", "embed_out"):
-            if hasattr(model, attr):
-                self._original_head = getattr(model, attr)
-                self._head_attr = attr
-                setattr(model, attr, nn.Identity())
-                return
-        if hasattr(model, "set_output_embeddings"):
-            self._original_head = model.get_output_embeddings()
-            self._head_attr = "__output_embeddings__"
-            model.set_output_embeddings(nn.Identity())
-            return
-        raise ValueError("Could not locate output head for identity_head method")
-
-    def _capture_input(self, module, inp):
-        """Forward pre-hook: capture input to the module."""
-        self.activations = inp[0].detach()
-
-    def _capture_output(self, module, inp, output):
-        """Forward hook: capture output of the module."""
-        self.activations = output.detach()
-
-    def get_activations(self, input_ids=None, attention_mask=None, token_selection="last"):
-        """Extract activations based on token_selection.
-
-        For identity_head: activations are in model output logits.
-        For hook methods: activations are captured by the hook.
-
-        Args:
-            input_ids: only needed for identity_head to determine output shape
-            attention_mask: for selecting last-token positions
-            token_selection: "last" or "all"
-
-        Returns:
-            Tensor of shape (batch, dim) for "last" or (N, dim) for "all"
-        """
-        acts = self.activations
-        if acts is None:
-            raise RuntimeError("No activations captured. Run a forward pass first.")
-
-        if token_selection == "last":
-            if attention_mask is not None:
-                last_indices = attention_mask.sum(dim=1) - 1
-                batch_indices = torch.arange(acts.size(0), device=acts.device)
-                return acts[batch_indices, last_indices]
-            # Packed: last position of sequence
-            return acts[:, -1]
-
-        if token_selection == "all":
-            if attention_mask is not None:
-                # Return only non-pad positions
-                return acts[attention_mask.bool()]
-            return acts.reshape(-1, acts.size(-1))
-
-        raise ValueError(f"Unknown token_selection: {token_selection}")
-
-    def restore(self, model):
-        """Remove hooks and restore original head if replaced."""
-        if self._handle is not None:
-            self._handle.remove()
-            self._handle = None
-        if self._original_head is not None and self._head_attr is not None:
-            if self._head_attr == "__output_embeddings__":
-                model.set_output_embeddings(self._original_head)
-            else:
-                setattr(model, self._head_attr, self._original_head)
-            self._original_head = None
-        self.activations = None
-
-    def close(self):
-        """Alias for restore (without model arg — hooks only)."""
-        if self._handle is not None:
-            self._handle.remove()
-            self._handle = None
-        self.activations = None
+def restore_head(model, original, attr_name):
+    """Restore the original output head after identity_head usage."""
+    if attr_name == "__output_embeddings__":
+        model.set_output_embeddings(original)
+    else:
+        setattr(model, attr_name, original)

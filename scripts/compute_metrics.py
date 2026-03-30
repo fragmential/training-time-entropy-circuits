@@ -1,0 +1,427 @@
+#!/usr/bin/env python
+"""Compute spectral metrics (RankMe, alpha, eigenspectrum) from collected data.
+
+Handles all storage formats uniformly via DataAccessor:
+    - acts (.pt): PCA eigendecomposition per hook point → metrics
+    - cov (.pt): eigendecompose covariance per hook point per factor → metrics
+    - cov_svd (.pt): eigenvalues already stored → metrics
+    - eigenvalues (.pt): eigenvalues already stored → metrics
+
+Computes per hook point:
+    - A / G / B spectral metrics (eigenspectrum, RankMe, alpha, R2)
+    - K-FAC curvature: trace(G ⊗ A), damped log-determinant at multiple alpha values
+    - K-FAC top-k eigenspectrum: sorted outer products λ_A^i * λ_G^j
+    - K-FAC sampled spectrum: linearly spaced sample across full outer product distribution
+    - Generalized eigendecomposition G vs B (when B derivable)
+
+Results structure:
+    {step: {hook_name: {
+        "A": {eigenspectrum, rankme, alpha, r2, r2_100},
+        "G": {...},
+        "B": {...},             # when available
+        "kfac": {trace, log_det, top_eigvals, sampled_eigvals, rankme, alpha, ...},
+        "gen_GB": {eigvals, rankme, alpha, ...},  # generalized G vs B
+    }}}
+
+Usage:
+    python scripts/compute_metrics.py --model_name pythia-14m-deduped
+    python scripts/compute_metrics.py --model_name pythia-14m-deduped --input_dir covariance_factors/fineweb/pythia-14m-deduped
+    python scripts/compute_metrics.py --model_name pythia-14m-deduped --recompute
+    python scripts/compute_metrics.py --model_name pythia-14m-deduped --num_workers 8
+"""
+
+import heapq
+import os
+import sys
+import re
+import numpy as np
+from multiprocessing import Pool
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from utils import powerlaw
+from utils.accessor import DataAccessor
+
+_STEP_RE = re.compile(r"step(\d+)\.pt$")
+
+
+# ---------------------------------------------------------------------------
+# Spectral metrics from an eigenvalue array
+# ---------------------------------------------------------------------------
+
+def spectral_metrics(eigen) -> dict:
+    """Compute RankMe, alpha, R2 from an eigenspectrum (descending, non-negative).
+
+    Accepts numpy array or torch.Tensor.
+    """
+    if hasattr(eigen, "numpy"):
+        eigen = eigen.numpy()
+    eigen = np.maximum(eigen, 0)
+    rm = powerlaw.rankme_metrics(eigen)
+    alpha, ypred, fit_r2, fit_r2_100 = powerlaw.stringer_get_powerlaw(eigen, np.arange(11, 100))
+    return {
+        "eigenspectrum": eigen,
+        **rm,
+        "alpha": alpha,
+        "ypred": ypred,
+        "r2": fit_r2,
+        "r2_100": fit_r2_100,
+    }
+
+
+# ---------------------------------------------------------------------------
+# K-FAC metrics
+# ---------------------------------------------------------------------------
+
+def _top_k_outer_products(a: np.ndarray, b: np.ndarray, k: int) -> np.ndarray:
+    """Top-k products from outer(a, b) where a, b are sorted descending.
+
+    Uses flat outer product for small dims, priority queue for large.
+    """
+    m, n = len(a), len(b)
+    if m * n <= 2_000_000:
+        prods = np.outer(a, b).ravel()
+        if len(prods) <= k:
+            return np.sort(prods)[::-1]
+        idx = np.argpartition(prods, -k)[-k:]
+        return np.sort(prods[idx])[::-1]
+
+    # Priority queue: O(k log(min(m,n)))
+    heap = [(-(a[0] * b[0]), 0, 0)]
+    seen = {(0, 0)}
+    result = []
+    while len(result) < k and heap:
+        neg_prod, i, j = heapq.heappop(heap)
+        result.append(-neg_prod)
+        if i + 1 < m and (i + 1, j) not in seen:
+            heapq.heappush(heap, (-(a[i + 1] * b[j]), i + 1, j))
+            seen.add((i + 1, j))
+        if j + 1 < n and (i, j + 1) not in seen:
+            heapq.heappush(heap, (-(a[i] * b[j + 1]), i, j + 1))
+            seen.add((i, j + 1))
+    return np.array(result)
+
+
+def _sample_outer_products_linspace(a: np.ndarray, b: np.ndarray, k: int) -> np.ndarray:
+    """Sample k products linearly spaced across the full outer product distribution.
+
+    For small matrices, computes all products and samples exactly.
+    For large matrices (> 2M products), approximates using sorted index mapping.
+    Returns array of length min(k, m*n) in descending order.
+    """
+    m, n = len(a), len(b)
+    total = m * n
+    if total <= k:
+        prods = np.outer(a, b).ravel()
+        prods.sort()
+        return prods[::-1]
+    if total <= 2_000_000:
+        prods = np.outer(a, b).ravel()
+        prods.sort()
+        prods = prods[::-1]
+        idx = np.round(np.linspace(0, len(prods) - 1, k)).astype(int)
+        return prods[idx]
+    # Approximate: map rank -> (i, j) via sorted row-major order
+    rank_idx = np.round(np.linspace(0, total - 1, k)).astype(int)
+    i_idx = np.minimum(rank_idx // n, m - 1)
+    j_idx = np.minimum(rank_idx % n, n - 1)
+    sampled = a[i_idx] * b[j_idx]
+    return np.sort(sampled)[::-1]
+
+
+def _check_negative_eigenvalues(eigvals: np.ndarray, label: str):
+    """Warn if negative eigenvalues are large relative to the matrix scale."""
+    min_eig = float(eigvals[-1])
+    if min_eig >= 0:
+        return
+    trace = float(eigvals.sum())
+    d = len(eigvals)
+    scale = max(float(eigvals[0]), abs(trace) / max(d, 1), 1e-12)
+    rel = -min_eig / scale
+    if rel > 1e-3:
+        print(f"  WARNING {label}: large negative eigenvalue {min_eig:.3e} (relative {rel:.2e}) — suspect matrix")
+    elif rel > 1e-5:
+        print(f"  Note {label}: small negative eigenvalue {min_eig:.3e} (relative {rel:.2e})")
+
+
+def kfac_metrics(
+    eigvals_A: np.ndarray,
+    eigvals_G: np.ndarray,
+    top_k: int = 10000,
+    sample_k: int = 1000,
+    log_det_alphas: tuple = (1e-4, 1e-5, 1e-6),
+) -> dict:
+    """K-FAC metrics from A and G eigenvalues.
+
+    Returns:
+        trace:          trace(G ⊗ A) = trace(G) * trace(A)
+        log_det:        array of len(log_det_alphas) damped log-determinants
+                        L(α) = d_A * logdet(G + ε_G I) + d_G * logdet(A + ε_A I)
+                        where ε_X = α * trace(X) / d_X
+        log_det_alphas: the alpha values used
+        top_eigvals:    top-k exact products λ_A^i * λ_G^j
+        sampled_eigvals: sample_k products linearly spaced across full distribution
+        + spectral metrics on top_eigvals (rankme, alpha, r2, r2_100)
+    """
+    d_in, d_out = len(eigvals_A), len(eigvals_G)
+
+    trace_A = float(eigvals_A.sum())
+    trace_G = float(eigvals_G.sum())
+    trace = trace_A * trace_G
+
+    # Damped log-determinant at multiple alpha values
+    log_dets = []
+    for alpha in log_det_alphas:
+        eps_A = alpha * trace_A / max(d_in, 1)
+        eps_G = alpha * trace_G / max(d_out, 1)
+        ld_A = float(np.sum(np.log(eigvals_A + eps_A)))
+        ld_G = float(np.sum(np.log(eigvals_G + eps_G)))
+        log_dets.append((ld_A, ld_G, d_in * ld_G + d_out * ld_A))
+    log_det_A, log_det_G, log_det = [np.array(ld) for ld in zip(*log_dets)]
+
+    k_top = min(top_k, d_in * d_out)
+    top_eigvals = _top_k_outer_products(eigvals_A, eigvals_G, k_top)
+    top_eigvals = np.maximum(top_eigvals, 0)
+
+    k_samp = min(sample_k, d_in * d_out)
+    sampled_eigvals = _sample_outer_products_linspace(eigvals_A, eigvals_G, k_samp)
+    sampled_eigvals = np.maximum(sampled_eigvals, 0)
+
+    sm = spectral_metrics(top_eigvals) if len(top_eigvals) >= 11 else {}
+
+    return {
+        "trace": trace,
+        "trace_A": trace_A,
+        "trace_G": trace_G,
+        "log_det": log_det,
+        "log_det_A": log_det_A,
+        "log_det_G": log_det_G,
+        "log_det_alphas": np.array(log_det_alphas),
+        "top_eigvals": top_eigvals,
+        "sampled_eigvals": sampled_eigvals,
+        **sm,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Generalized eigendecomposition G vs B
+# ---------------------------------------------------------------------------
+
+def generalized_eigenvalues_GB(
+    eigvals_G: np.ndarray,
+    eigvecs_G,
+    eigvals_B: np.ndarray,
+    eigvecs_B,
+    eps_factor: float = 1e-6,
+) -> np.ndarray:
+    """Generalized eigenvalues of G w.r.t. B: solve Gv = λBv.
+
+    Both G and B must be in the same space (d_out × d_out).
+    Returns the generalized eigenvalues (descending), which are
+    ratios v^T G v / v^T B v — directions where gradient variance is
+    most/least disproportionate to output activation variance.
+
+    Formula: eigenvalues of B^{-1/2} G B^{-1/2}.
+    Efficient via cross-basis:
+        Q = V_B^T V_G
+        M = Λ_B^{-1/2} Q Λ_G Q^T Λ_B^{-1/2}  (= C C^T where C = Λ_B^{-1/2} Q Λ_G^{1/2})
+    eigenvalues of M = generalized eigenvalues of G w.r.t. B.
+    """
+    import torch
+
+    eG = torch.as_tensor(eigvals_G, dtype=torch.float32)
+    vG = torch.as_tensor(eigvecs_G, dtype=torch.float32)
+    eB = torch.as_tensor(eigvals_B, dtype=torch.float32)
+    vB = torch.as_tensor(eigvecs_B, dtype=torch.float32)
+
+    eps = max(eB.max().item() * eps_factor, 1e-10)
+    lb_inv_sqrt = (eB + eps).rsqrt()          # (d,)
+    lg_sqrt = eG.clamp(min=0).sqrt()          # (d,)
+
+    Q = vB.T @ vG                             # (d, d) cross-basis
+    C = lb_inv_sqrt.unsqueeze(1) * Q * lg_sqrt.unsqueeze(0)  # (d, d)
+    M = C @ C.T                               # symmetric PSD
+
+    gen_eigvals = torch.linalg.eigvalsh(M).flip(0).clamp(min=0)
+    return gen_eigvals.numpy()
+
+
+# ---------------------------------------------------------------------------
+# Per-file metric computation (called by workers)
+# ---------------------------------------------------------------------------
+
+def compute_metrics_for_file(args):
+    """Compute all metrics for a .pt file.
+
+    Returns (step, {hook_name: {factor: metrics, "kfac": {...}, "gen_GB": {...}}}).
+    """
+    import torch
+    step, path = args
+
+    data = torch.load(path, map_location="cpu", weights_only=False)
+
+    acc = DataAccessor(data)
+    step_results = {}
+
+    for hook_name in acc.hook_names():
+        hook_results = {}
+        hook = acc[hook_name]
+        entry = acc._entry(hook_name)
+
+        # --- Per-factor spectral metrics ---
+        factors = ["A", "G"]
+        if "B" in entry or "B_eigvals" in entry or "B_eigvecs" in entry:
+            factors.append("B")
+
+        eA = eG = None  # cache for K-FAC / gen eigen (numpy arrays)
+        for factor in factors:
+            fv = hook._factor(factor)
+            eigvals = fv.eigvals
+            if eigvals is None:
+                continue
+            if hasattr(eigvals, "numpy"):
+                eigvals = eigvals.numpy()
+            _check_negative_eigenvalues(eigvals, f"{hook_name}.{factor}")
+            eigvals = np.maximum(eigvals, 0)
+            hook_results[factor] = spectral_metrics(eigvals)
+            if factor == "A":
+                eA = eigvals
+            elif factor == "G":
+                eG = eigvals
+
+            # Cross-basis eigenvalues stored alongside
+            for ek, ev in entry.items():
+                if ek.startswith(f"{factor}_cross_eigvals_") and isinstance(ev, torch.Tensor):
+                    cross_label = ek[len(f"{factor}_cross_eigvals_"):]
+                    cross_eigvals = np.maximum(ev.numpy(), 0)
+                    hook_results[f"{factor}_cross_{cross_label}"] = spectral_metrics(cross_eigvals)
+
+        # --- K-FAC metrics (needs both A and G eigenvalues) ---
+        if eA is not None and eG is not None:
+            hook_results["kfac"] = kfac_metrics(eA, eG)
+
+        # --- Generalized eigendecomposition G vs B ---
+        # Only when eigenvectors are stored for both G and B
+        g_eigh = hook.G.eigh
+        b_eigh = hook.B.eigh if ("B_eigvecs" in entry or "B" in entry) else None
+
+        if g_eigh is not None and b_eigh is not None:
+            eG_arr, vG = g_eigh
+            eB_arr, vB = b_eigh
+            gen_eigvals = generalized_eigenvalues_GB(eG_arr, vG, eB_arr, vB)
+            gen_sm = spectral_metrics(gen_eigvals) if len(gen_eigvals) >= 11 else {}
+            hook_results["gen_GB"] = {"eigvals": gen_eigvals, **gen_sm}
+
+        if hook_results:
+            step_results[hook_name] = hook_results
+
+    return step, step_results
+
+
+# ---------------------------------------------------------------------------
+# File discovery
+# ---------------------------------------------------------------------------
+
+def discover_step_files(data_dir: str) -> dict:
+    """Return {step: path} for step files (.pt)."""
+    step_files = {}
+    for fname in os.listdir(data_dir):
+        m = _STEP_RE.match(fname)
+        if m:
+            step = int(m.group(1))
+            step_files[step] = os.path.join(data_dir, fname)
+    return step_files
+
+def _resolve_data_root(data_root: str, config_directory: str):
+    config_directory = os.path.normpath(config_directory)
+    parent = os.path.dirname(config_directory)
+    if parent:
+        return parent, os.path.basename(config_directory)
+    return data_root, config_directory
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main(
+    config_directory: str,
+    model_name: str,
+    num_workers: int = None,
+    recompute: bool = False,
+    data_root: str = "inferences",
+    output_root: str = "results",
+):
+    """Compute spectral metrics from collected data.
+
+    Args:
+        config_directory: Parent directory of model directory (e.g. inferences/rankme_alpha_packed).
+        data_root: Parent directory of config_directory. (default: inferences; overwritten by
+                   config_directory dirname if config_directory is more than a basename).
+        output_root: Directory of all result files. (default: results).
+        model_name: Short model name (e.g. pythia-14m-deduped).
+        dataset_name: Dataset name for default directory resolution.
+        num_workers: Number of parallel workers (default: cpu count).
+        recompute: If True, recompute all steps even if results exist.
+    """
+    data_root, config_directory = _resolve_data_root(data_root, config_directory)
+
+    model_dir = os.path.join(data_root, config_directory, model_name)
+    if not os.path.isdir(model_dir):
+        print(f"No data directory found")
+        return
+
+    step_files = discover_step_files(model_dir)
+    if not step_files:
+        print(f"No step files found in {model_dir}")
+        return
+
+    print(f"Input: {model_dir} ({len(step_files)} steps)")
+
+    results_dir = os.path.join(output_root, config_directory)
+    os.makedirs(results_dir, exist_ok=True)
+    results_path = os.path.join(results_dir, f"results_{model_name}.npy")
+
+    res_dict = _load_existing(results_path)
+
+    to_compute = (
+        list(step_files.items())
+        if recompute
+        else [(s, p) for s, p in step_files.items() if s not in res_dict]
+    )
+
+    if not to_compute:
+        print(f"All {len(step_files)} steps already have metrics in {results_path}")
+        return
+
+    print(
+        f"Computing metrics for {len(to_compute)}/{len(step_files)} steps "
+        f"using {num_workers or os.cpu_count()} workers..."
+    )
+
+    with Pool(processes=num_workers) as pool:
+        for step, metrics in pool.imap_unordered(compute_metrics_for_file, to_compute):
+            res_dict[step] = metrics
+            hooks = list(metrics.keys())
+            print(
+                f"  Step {step}: {len(hooks)} hook points "
+                f"({', '.join(hooks[:3])}{'...' if len(hooks) > 3 else ''})"
+            )
+
+    np.save(results_path, res_dict)
+    print(f"Saved {len(res_dict)} results to {results_path}")
+
+
+def _load_existing(results_path):
+    if os.path.exists(results_path):
+        try:
+            return np.load(results_path, allow_pickle=True).item()
+        except (OSError, ValueError, TypeError):
+            pass
+    return {}
+
+
+if __name__ == "__main__":
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["MKL_NUM_THREADS"] = "1"
+    from jsonargparse import CLI
+    CLI(main)

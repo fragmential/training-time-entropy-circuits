@@ -1,3 +1,4 @@
+output_dir: inferences/kfac_merullo
 # Reproduces Merullo et al. K-FAC analysis on OLMo-2 models.
 # Last checkpoint only, specific layers (23/24/25 for 7B, 14/15 for 1B),
 # gate+up+down projections, A+G covariance at 60% energy.
@@ -21,12 +22,11 @@ min_length: 32
 max_checkpoints: 1
 packing: packed
 token_selection: all
-collect_residual: false
+collect_final_acts: false
 collect_A: true
 collect_G: true
-collect_B: false
 sample_labels: true
 label_samples: 1
 seed: 42
 max_layers_per_pass: 4
-storage_format: cov_svd+m
+storage_format: cov_svd # OLMo-2 has no bias, so no need to capture mean

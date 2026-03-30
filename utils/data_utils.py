@@ -17,10 +17,24 @@ def load_and_cache_texts(
     tokenizer,
     dataset_name: str,
     content_key: str = "text",
+    max_bytes: Optional[int] = None,
 ) -> list:
-    """Load dataset texts, filtering by minimum token length. Caches to disk."""
+    """Load dataset texts, filtering by minimum token length. Caches to disk.
+
+    Args:
+        num_samples: Maximum number of documents to collect (used when max_bytes is None).
+        max_bytes: If set, stop collecting once total UTF-8 byte count of accepted texts
+                   exceeds this value. Overrides num_samples as the stopping criterion.
+                   Example: 80_000_000 ≈ 20M tokens, matching the reference K-FAC repo.
+    """
     os.makedirs("data/cache", exist_ok=True)
-    cache_path = os.path.join("data", "cache", f"filtered_texts_{dataset_name}_{num_samples}.json")
+    if max_bytes is not None:
+        mb_hundredths = int(max_bytes / 10_000)   # truncate to 2 decimal places in MB
+        mb_str = f"{mb_hundredths / 100:.2f}".rstrip("0").rstrip(".")
+        cache_key = f"{dataset_name}_{mb_str}MB"
+    else:
+        cache_key = f"{dataset_name}_{num_samples}"
+    cache_path = os.path.join("data", "cache", f"filtered_texts_{cache_key}.json")
     if os.path.exists(cache_path):
         with open(cache_path) as f:
             texts = json.load(f)
@@ -30,15 +44,29 @@ def load_and_cache_texts(
     from tqdm import tqdm
     dataset = dataset_loader_fn()
     texts = []
+    total_bytes = 0
     for seq in tqdm(dataset, desc="Filtering"):
         text = seq[content_key]
         if tokenizer(text, return_tensors="pt").input_ids.shape[-1] > min_length:
-            texts.append(text)
-            if len(texts) >= num_samples:
-                break
+            if max_bytes is not None:
+                doc_bytes = len(text.encode("utf-8"))
+                # Skip docs that alone would overshoot budget by >2x
+                if total_bytes == 0 and doc_bytes > max_bytes * 2:
+                    continue
+                texts.append(text)
+                total_bytes += doc_bytes
+                if total_bytes >= max_bytes:
+                    break
+            else:
+                texts.append(text)
+                if len(texts) >= num_samples:
+                    break
     with open(cache_path, "w") as f:
         json.dump(texts, f)
-    print(f"Filtered and cached {len(texts)} sequences to {cache_path}")
+    if max_bytes is not None:
+        print(f"Filtered and cached {len(texts)} sequences ({total_bytes/1e6:.1f} MB) to {cache_path}")
+    else:
+        print(f"Filtered and cached {len(texts)} sequences to {cache_path}")
     return texts
 
 

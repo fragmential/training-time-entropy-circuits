@@ -32,11 +32,12 @@ from utils.model_registry import (
     get_model_config, load_model, load_tokenizer, get_mlp_projections,
     get_final_layernorm, get_num_layers,
 )
-from utils.hooks import CovarianceCollector, ResidualCapture
+from utils.hooks import HookCollector, setup_identity_head, restore_head
 from utils.data_utils import load_and_cache_texts, pack_sequences, compute_token_mask, compute_labels
 from data import get_loader
 
 MODEL = "EleutherAI/pythia-14m-deduped"
+MODEL_STEP = "step143000"  # use trained checkpoint, not random init
 NUM_SAMPLES = 50
 SEQ_LEN = 512
 BATCH_SIZE = 16
@@ -45,13 +46,13 @@ ATOL = 1e-4  # tolerance for float32 comparisons
 
 def _load_model_cpu():
     config = get_model_config(MODEL)
-    model = load_model(config, config.hf_repo, "step0")
+    model = load_model(config, config.hf_repo, MODEL_STEP)
     return model, config
 
 
 def _get_texts_and_tokenizer():
     config = get_model_config(MODEL)
-    tokenizer = load_tokenizer(config, revision="step0")
+    tokenizer = load_tokenizer(config, revision=MODEL_STEP)
     loader_fn = get_loader("fineweb")
     texts = load_and_cache_texts(loader_fn, NUM_SAMPLES, 32, tokenizer, "fineweb")
     return texts, tokenizer
@@ -74,20 +75,25 @@ def test_identity_vs_hook():
     attention_mask = tokenized.attention_mask
 
     # Method 1: identity_head
-    capture_id = ResidualCapture(model, config, hook_point="identity_head")
+    original, attr = setup_identity_head(model)
     with torch.no_grad():
         out = model(input_ids=input_ids, attention_mask=attention_mask)
     last_indices = attention_mask.sum(dim=1) - 1
     batch_indices = torch.arange(input_ids.size(0))
     acts_identity = out.logits[batch_indices, last_indices].float().numpy()
-    capture_id.restore(model)
+    restore_head(model, original, attr)
 
-    # Method 2: after_final_norm hook
-    capture_hook = ResidualCapture(model, config, hook_point="after_final_norm")
+    # Method 2: after_final_norm hook — set last-token mask to match identity_head
+    ln = get_final_layernorm(model, config)
+    last_mask = torch.zeros(input_ids.shape, dtype=torch.bool)
+    last_mask[batch_indices, last_indices] = True
+    collector = HookCollector(ln, capture="output", mode="acts")
+    collector.set_token_mask(last_mask)
     with torch.no_grad():
         model(input_ids=input_ids, attention_mask=attention_mask)
-    acts_hook = capture_hook.activations[batch_indices, last_indices].float().numpy()
-    capture_hook.restore(model)
+    # _acts_list contains (N_selected, d) — one entry per batch, N=batch_size here
+    acts_hook = torch.cat(collector._acts_list, dim=0).numpy()
+    collector.close()
 
     max_diff = np.max(np.abs(acts_identity - acts_hook))
     print(f"  Max diff (identity vs after_final_norm hook): {max_diff:.2e}")
@@ -116,19 +122,26 @@ def test_before_norm_recovers_after_norm():
     input_ids = tokenized.input_ids
     attention_mask = tokenized.attention_mask
 
-    capture_before = ResidualCapture(model, config, hook_point="before_final_norm")
-    capture_after = ResidualCapture(model, config, hook_point="after_final_norm")
+    ln = get_final_layernorm(model, config)
+    # Use output hook to capture the raw (batch, seq, d) tensor before masking
+    # We need the full sequence to apply layernorm and compare positions
+    _before_buf = []
+    _after_buf = []
+    h_before = ln.register_forward_pre_hook(lambda m, inp: _before_buf.append(inp[0].detach()))
+    h_after = ln.register_forward_hook(lambda m, inp, out: _after_buf.append(out.detach()))
 
     with torch.no_grad():
         model(input_ids=input_ids, attention_mask=attention_mask)
 
-    acts_before = capture_before.activations
-    acts_after = capture_after.activations[0, 0].float().numpy()
+    h_before.remove()
+    h_after.remove()
 
-    # Apply the final layernorm to before_final_norm activations (keep in model dtype)
-    final_ln = get_final_layernorm(model, config)
+    acts_before_3d = _before_buf[0]  # (batch, seq, d)
+    acts_after = _after_buf[0][0, 0].float().numpy()  # first token, first seq
+
+    # Apply the final layernorm to before_final_norm activations
     with torch.no_grad():
-        acts_normed = final_ln(acts_before)
+        acts_normed = ln(acts_before_3d)
     acts_normed = acts_normed[0, 0].float().numpy()
 
     capture_before.close()
@@ -139,7 +152,7 @@ def test_before_norm_recovers_after_norm():
     assert max_diff < ATOL, f"FAIL: layernorm recovery failed, max_diff={max_diff} > {ATOL}"
 
     # Sanity: before and after should actually differ (norm changes values)
-    raw_diff = np.max(np.abs(acts_before[0, 0].float().numpy() - acts_after))
+    raw_diff = np.max(np.abs(acts_before_3d[0, 0].float().numpy() - acts_after))
     print(f"  Raw diff (before vs after, unnormed): {raw_diff:.2e}")
     assert raw_diff > 0.01, f"FAIL: before and after final norm should differ (diff={raw_diff})"
     print(f"  PASS ({time.time() - t0:.1f}s)")
@@ -150,12 +163,12 @@ def test_before_norm_recovers_after_norm():
 
 
 # ---------------------------------------------------------------------------
-# Test 3: CovarianceCollector produces correct shapes
+# Test 3: HookCollector produces correct shapes for MLP projections
 # ---------------------------------------------------------------------------
 
 def test_covariance_collector_shapes():
-    """Verify CovarianceCollector produces correct tensor shapes."""
-    print("\n=== Test 3: CovarianceCollector shapes ===")
+    """Verify HookCollector produces correct tensor shapes for A and G."""
+    print("\n=== Test 3: HookCollector shapes (A + G) ===")
     t0 = time.time()
     model, config = _load_model_cpu()
     texts, tokenizer = _get_texts_and_tokenizer()
@@ -168,7 +181,7 @@ def test_covariance_collector_shapes():
     name0, layer0 = projections[0]
     d_out, d_in = layer0.weight.shape
 
-    collector = CovarianceCollector(layer0, collect_A=True, collect_G=True, collect_B=True)
+    collector = HookCollector(layer0, capture="input", mode="cov", collect_grad=True)
     mask = compute_token_mask(x, token_selection="all")
     collector.set_token_mask(mask)
 
@@ -193,12 +206,10 @@ def test_covariance_collector_shapes():
     print(f"  {name0}: d_in={d_in}, d_out={d_out}")
     print(f"  A shape: {factors['A'].shape} (expected ({d_in}, {d_in}))")
     print(f"  G shape: {factors['G'].shape} (expected ({d_out}, {d_out}))")
-    print(f"  B shape: {factors['B'].shape} (expected ({d_out}, {d_out}))")
     print(f"  n = {factors['n']}")
 
     assert factors["A"].shape == (d_in, d_in), f"FAIL: A shape {factors['A'].shape}"
     assert factors["G"].shape == (d_out, d_out), f"FAIL: G shape {factors['G'].shape}"
-    assert factors["B"].shape == (d_out, d_out), f"FAIL: B shape {factors['B'].shape}"
     assert factors["n"] > 0, "FAIL: n should be > 0"
     print(f"  PASS ({time.time() - t0:.1f}s)")
 
@@ -255,6 +266,7 @@ def test_B_equals_WAWt():
     on trained models. With μ, B is exactly recoverable.
 
     Tests on the final checkpoint (step143000), last block, up and down projections.
+    Uses two HookCollectors per layer: one on input (A), one on output (for B ground truth).
     """
     print("\n=== Test 4b: B recoverability from A ===")
     t0 = time.time()
@@ -273,48 +285,33 @@ def test_B_equals_WAWt():
     last_block = n_layers - 1
     projections = get_mlp_projections(model, config, last_block)
 
-    # Collect A and B for all projections, plus accumulate input means
-    collectors = {}
-    input_sums = {}
+    # Set up paired collectors: input (A + mean) and output (B ground truth)
+    input_collectors = {}
+    output_collectors = {}
     for name, layer in projections:
-        collectors[name] = CovarianceCollector(layer, collect_A=True, collect_G=False, collect_B=True)
-        collectors[name].set_token_mask(mask)
-        input_sums[name] = None
-
-    # Hook to accumulate input means
-    handles = []
-    for name, layer in projections:
-        def make_hook(proj_name):
-            def hook_fn(module, inp):
-                x_flat = inp[0].detach()
-                if x_flat.dim() == 3:
-                    x_flat = x_flat[mask].float()
-                else:
-                    x_flat = x_flat.float()
-                if input_sums[proj_name] is None:
-                    input_sums[proj_name] = x_flat.sum(dim=0)
-                else:
-                    input_sums[proj_name] += x_flat.sum(dim=0)
-            return hook_fn
-        handles.append(layer.register_forward_pre_hook(make_hook(name)))
+        ic = HookCollector(layer, capture="input", mode="cov", collect_means=True)
+        ic.set_token_mask(mask)
+        input_collectors[name] = ic
+        oc = HookCollector(layer, capture="output", mode="cov")
+        oc.set_token_mask(mask)
+        output_collectors[name] = oc
 
     with torch.no_grad():
         model(x)
 
-    for h in handles:
-        h.remove()
-
     ok = True
     for name, layer in projections:
-        factors = collectors[name].factors()
-        collectors[name].close()
+        a_factors = input_collectors[name].factors()
+        b_factors = output_collectors[name].factors()
+        input_collectors[name].close()
+        output_collectors[name].close()
 
-        n = factors["n"]
-        A_mean = factors["A"].float() / n
-        B_mean = factors["B"].float() / n
+        n = a_factors["n"]
+        A_mean = a_factors["A"].float() / n
+        B_mean = b_factors["A"].float() / n  # output collector's "A" is the output covariance
         W = layer.weight.detach().float()
         b = layer.bias.detach().float() if layer.bias is not None else None
-        mu = input_sums[name] / n  # E[x]
+        mu = a_factors["A_mean"]  # E[x]
 
         # Without mean correction
         B_naive = W @ A_mean @ W.T
@@ -394,6 +391,22 @@ def test_storage_roundtrip():
         print(f"  Max reconstruction diff (V diag(λ) V^T vs A/n): {recon_diff:.2e}")
         assert recon_diff < 1e-4, f"FAIL: reconstruction error: {recon_diff}"
 
+        # Test acts format round-trip
+        acts_factors = {"residual": {"A": X, "n_A": n, "n": n}}
+        acts_path = os.path.join(tmpdir, "test_acts.pt")
+        save_factors(acts_factors, acts_path, storage_format="acts")
+
+        # Convert acts → cov_svd
+        acts_svd_path = os.path.join(tmpdir, "test_acts_svd.pt")
+        convert(acts_path, "cov_svd", acts_svd_path)
+        acts_svd_data = torch.load(acts_svd_path, map_location="cpu", weights_only=False)
+
+        # Should match the direct cov → cov_svd path
+        acts_eigvals = acts_svd_data["residual"]["A_eigvals"]
+        max_diff_acts = (svd_eigvals - acts_eigvals).abs().max().item()
+        print(f"  Max diff (acts→cov_svd vs cov→cov_svd): {max_diff_acts:.2e}")
+        assert max_diff_acts < 1e-4, f"FAIL: acts conversion differs: {max_diff_acts}"
+
         # Print info
         print(info(svd_path))
 
@@ -410,7 +423,7 @@ def test_collect_vs_extract_activations():
     verify they produce identical results and time both. Also compare against
     stored activations at activations/fineweb/pythia-14m-deduped/step0.npy.
     """
-    from scripts.collect import _collect_residual_for_checkpoint
+    from scripts.collect import _collect_for_checkpoint, CollectConfig
     from rankme_alpha_scripts.extract_activations import (
         extract_activations, replace_output_head_with_identity,
     )
@@ -454,18 +467,27 @@ def test_collect_vs_extract_activations():
     model = load_model(config, config.hf_repo, "step0")
     model.to(device)
 
-    t_new = time.time()
-    new_acts = _collect_residual_for_checkpoint(
-        model, config, texts, tokenizer,
+    cfg = CollectConfig(
+        model_name=MODEL,
+        collect_final_acts=True,
         residual_hook_point="identity_head",
-        token_selection="last",
-        max_length=512,
-        batch_size=batch_size,
+        collect_A=False, collect_G=False,
         packing="padded",
-        packed_ids=None,
+        token_selection="last",
+        batch_size=batch_size,
+        max_length=512,
+        storage_format="acts",
+    )
+
+    t_new = time.time()
+    factors = _collect_for_checkpoint(
+        model, config, cfg, texts, tokenizer,
+        packed_ids=None, target_layers=[], device=device,
         boundary_token_ids=None,
     )
     t_new = time.time() - t_new
+
+    new_acts = factors["residual"]["A"].numpy()
 
     del model
     if device == "cuda":

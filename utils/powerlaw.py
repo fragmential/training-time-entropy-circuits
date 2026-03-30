@@ -86,12 +86,14 @@ def generate_activations_prelayer_batch(net,layer,images,pool_transform=None):
     handle.remove()
     return activations[0]
 
-def get_eigenspectrum(activations_np,max_eigenvals=2048):
+def get_eigenspectrum(activations_np,max_eigenvals=2048,exclude_last_k=0):
     feats = activations_np.reshape(activations_np.shape[0],-1)
     feats_center = feats - feats.mean(axis=0)
     pca = PCA(n_components=min(max_eigenvals, feats_center.shape[0], feats_center.shape[1]), svd_solver='full')
     pca.fit(feats_center)
     eigenspectrum = pca.explained_variance_ratio_
+    if exclude_last_k > 0:
+        eigenspectrum = eigenspectrum[:-exclude_last_k]
     return eigenspectrum
 
 def plot_eigenspectrum(eigenspectrum):

@@ -1,3 +1,4 @@
+output_dir: inferences/reproduce_rankme_alpha_hook
 # Same as reproduce_rankme_alpha.yaml but using hook-based after-final-norm capture.
 # Used for verification that both methods agree.
 
@@ -35,8 +36,8 @@ min_length: 32
 max_checkpoints: 50
 packing: padded
 token_selection: last
-collect_residual: true
+collect_final_acts: true
 residual_hook_point: after_final_norm
 collect_A: false
 collect_G: false
-collect_B: false
+storage_format: acts
