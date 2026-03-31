@@ -43,7 +43,6 @@ from utils import powerlaw
 from utils.accessor import DataAccessor
 
 _STEP_RE = re.compile(r"step(\d+)\.pt$")
-# _worker_model_name = None
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +57,7 @@ def spectral_metrics(eigen) -> dict:
     if hasattr(eigen, "numpy"):
         eigen = eigen.numpy()
     eigen = np.maximum(eigen, 0)
+    eigen = eigen / np.sum(eigen) # normalise into sum 1
     rm = powerlaw.rankme_metrics(eigen)
     alpha, ypred, fit_r2, fit_r2_100 = powerlaw.stringer_get_powerlaw(eigen, np.arange(11, 100))
     return {
@@ -261,7 +261,6 @@ def compute_metrics_for_file(args):
 
     data = torch.load(path, map_location="cpu", weights_only=False)
 
-    # print(_worker_model_name)
     acc = DataAccessor(data, model_name=model_name)
     avail = acc.available()
     step_results = {}
@@ -367,8 +366,6 @@ def main(
         num_workers: Number of parallel workers (default: cpu count).
         recompute: If True, recompute all steps even if results exist.
     """
-    # global _worker_model_name
-    # _worker_model_name = model_name
 
     data_root, config_directory = _resolve_data_root(data_root, config_directory)
 

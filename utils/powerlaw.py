@@ -33,7 +33,9 @@ def robust_fit_powerlaw(arr, start, end, verbose=False):
 def stringer_get_powerlaw(ss, trange, top_k = 2048):
     # COPIED FROM Stringer+Pachitariu 2018b github repo! (https://github.com/MouseLand/stringer-pachitariu-et-al-2018b/blob/master/python/utils.py)
     ''' fit exponent to variance curve'''
-    ss = ss[:top_k][ss > 0]
+    if top_k is not None:
+        ss = ss[:top_k]
+    ss = ss[ss > 0]
     logss = np.log(np.abs(ss))
     y = logss[trange][:, np.newaxis]
     trange = trange + 1
@@ -144,8 +146,9 @@ def stringer_get_powerlaw_batch(net, layer, data_loader, trange, use_cuda=False,
 def rankme_metrics(eigen, top_k = 2048):
     """eigen: raw covariance eigenvalues (centered or uncentered, normalized or not - doesn't matter)"""
     eigen = np.clip(eigen, 0, None) # We've already done this a million times but it don't hurt to do it another
-    eigen = eigen[:top_k]       # Truncate up to top_k
-    eigen = eigen/np.sum(eigen) # normalise to a distribution
+    if top_k is not None:
+        eigen = eigen[:top_k]       # Truncate up to top_k
+    # eigen = eigen/np.sum(eigen) # normalise to a distribution
     eps = 1e-7
 
     def entropy(p):
@@ -155,10 +158,7 @@ def rankme_metrics(eigen, top_k = 2048):
     p_sv = sv / sv.sum()          # true RankMe weights (∝ σᵢ)
     p_ev = eigen / eigen.sum()    # matrix entropy weights (∝ λᵢ)
 
-    abs_entropy, sq_entropy = entropy(p_sv), entropy(p_ev)
-    return {
-        'lin_matent': abs_entropy,
-        'matent': sq_entropy,
-        'rankme': np.exp(abs_entropy),
-        'sq_rankme': np.exp(sq_entropy),
-    }
+    h_ev, h_sv = entropy(p_ev), entropy(p_sv)
+    return {'matrix_entropy': h_ev, 'sv_entropy': h_sv,
+            'rankme': np.exp(h_ev),       # RankMe per melody, arna and kumar
+            'true_rankme': np.exp(h_sv)}  # true RankMe per the RankMe paper
