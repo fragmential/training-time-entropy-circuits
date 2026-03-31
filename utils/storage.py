@@ -32,6 +32,7 @@ from typing import Optional
 # Factor keys — the signals we store per hook point
 # ---------------------------------------------------------------------------
 _FACTOR_KEYS = ("A", "G")
+_STORABLE_FACTOR_KEYS = ("A", "G", "B")  # includes derived factors
 
 # Accepted aliases for storage format names
 _FORMAT_ALIASES = {
@@ -116,7 +117,7 @@ def save_factors(
     elif base_format == "cov_svd":
         result = _prepare_cov_svd(factors_dict, store_means=store_means, storage_dtype=storage_dtype)
     elif base_format == "eigenvalues":
-        result = _prepare_eigenvalues(factors_dict, storage_dtype)
+        result = _prepare_eigenvalues(factors_dict, store_means=store_means, storage_dtype=storage_dtype)
     else:
         raise ValueError(f"Unknown storage_format: {storage_format!r}")
 
@@ -227,18 +228,28 @@ def _prepare_cov_svd(factors_dict: dict, store_means: bool = False, storage_dtyp
     return result
 
 
-def _prepare_eigenvalues(factors_dict: dict, storage_dtype: str = "bf16") -> dict:
+def _prepare_eigenvalues(factors_dict: dict, store_means: bool = False, storage_dtype: str = "bf16") -> dict:
     """Compute eigenvalues only. No basis stored."""
     result = {}
     for name, data in factors_dict.items():
         entry = {"n": data.get("n", 0)}
-        for key in _FACTOR_KEYS:
+        for key in _STORABLE_FACTOR_KEYS:
             if key in data and data[key] is not None:
                 M = data[key].cpu()  # preserve accumulator dtype
                 n = data.get(f"n_{key}", data.get("n", 1))
                 entry[f"n_{key}"] = n
-                eigvals = torch.linalg.eigvalsh(M / n).flip(0)
-                entry[f"{key}_eigvals"] = _cast_for(eigvals, "eigvals", storage_dtype)
+                cov = (M / n).numpy()
+                mean_key = f"{key}_mean"
+                mu = data[mean_key].cpu().numpy() if mean_key in data and data[mean_key] is not None else None
+                from utils.powerlaw import get_eigenspectrum
+                centered, uncentered = get_eigenspectrum(cov=cov, mu=mu)
+                entry[f"{key}_eigvals"] = _cast_for(torch.from_numpy(uncentered), "eigvals", storage_dtype)
+                if centered is not None:
+                    entry[f"{key}_eigvals_centered"] = _cast_for(torch.from_numpy(centered), "eigvals", storage_dtype)
+            if store_means:
+                mean_key = f"{key}_mean"
+                if mean_key in data and data[mean_key] is not None:
+                    entry[mean_key] = _cast_for(data[mean_key].cpu(), "mean", storage_dtype)
         result[name] = entry
     return result
 

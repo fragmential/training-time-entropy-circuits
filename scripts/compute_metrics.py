@@ -43,6 +43,7 @@ from utils import powerlaw
 from utils.accessor import DataAccessor
 
 _STEP_RE = re.compile(r"step(\d+)\.pt$")
+# _worker_model_name = None
 
 
 # ---------------------------------------------------------------------------
@@ -256,22 +257,19 @@ def compute_metrics_for_file(args):
     Returns (step, {hook_name: {factor: metrics, "kfac": {...}, "gen_GB": {...}}}).
     """
     import torch
-    step, path = args
+    step, path, model_name = args
 
     data = torch.load(path, map_location="cpu", weights_only=False)
 
-    acc = DataAccessor(data)
+    # print(_worker_model_name)
+    acc = DataAccessor(data, model_name=model_name)
+    avail = acc.available()
     step_results = {}
 
-    for hook_name in acc.hook_names():
+    for hook_name, factors in avail.items():
         hook_results = {}
         hook = acc[hook_name]
         entry = acc._entry(hook_name)
-
-        # --- Per-factor spectral metrics ---
-        factors = ["A", "G"]
-        if "B" in entry or "B_eigvals" in entry or "B_eigvecs" in entry:
-            factors.append("B")
 
         eA = eG = None  # cache for K-FAC / gen eigen (numpy arrays)
         for factor in factors:
@@ -289,6 +287,14 @@ def compute_metrics_for_file(args):
             elif factor == "G":
                 eG = eigvals
 
+            # Centered eigenvalues
+            centered = fv.eigvals_centered
+            if centered is not None:
+                if hasattr(centered, "numpy"):
+                    centered = centered.numpy()
+                centered = np.maximum(centered, 0)
+                hook_results[f"{factor}_centered"] = spectral_metrics(centered)
+
             # Cross-basis eigenvalues stored alongside
             for ek, ev in entry.items():
                 if ek.startswith(f"{factor}_cross_eigvals_") and isinstance(ev, torch.Tensor):
@@ -301,16 +307,15 @@ def compute_metrics_for_file(args):
             hook_results["kfac"] = kfac_metrics(eA, eG)
 
         # --- Generalized eigendecomposition G vs B ---
-        # Only when eigenvectors are stored for both G and B
-        g_eigh = hook.G.eigh
-        b_eigh = hook.B.eigh if ("B_eigvecs" in entry or "B" in entry) else None
-
-        if g_eigh is not None and b_eigh is not None:
-            eG_arr, vG = g_eigh
-            eB_arr, vB = b_eigh
-            gen_eigvals = generalized_eigenvalues_GB(eG_arr, vG, eB_arr, vB)
-            gen_sm = spectral_metrics(gen_eigvals) if len(gen_eigvals) >= 11 else {}
-            hook_results["gen_GB"] = {"eigvals": gen_eigvals, **gen_sm}
+        if "B" in factors:
+            g_eigh = hook.G.eigh
+            b_eigh = hook.B.eigh
+            if g_eigh is not None and b_eigh is not None:
+                eG_arr, vG = g_eigh
+                eB_arr, vB = b_eigh
+                gen_eigvals = generalized_eigenvalues_GB(eG_arr, vG, eB_arr, vB)
+                gen_sm = spectral_metrics(gen_eigvals) if len(gen_eigvals) >= 11 else {}
+                hook_results["gen_GB"] = {"eigvals": gen_eigvals, **gen_sm}
 
         if hook_results:
             step_results[hook_name] = hook_results
@@ -359,10 +364,12 @@ def main(
                    config_directory dirname if config_directory is more than a basename).
         output_root: Directory of all result files. (default: results).
         model_name: Short model name (e.g. pythia-14m-deduped).
-        dataset_name: Dataset name for default directory resolution.
         num_workers: Number of parallel workers (default: cpu count).
         recompute: If True, recompute all steps even if results exist.
     """
+    # global _worker_model_name
+    # _worker_model_name = model_name
+
     data_root, config_directory = _resolve_data_root(data_root, config_directory)
 
     model_dir = os.path.join(data_root, config_directory, model_name)
@@ -397,6 +404,8 @@ def main(
         f"Computing metrics for {len(to_compute)}/{len(step_files)} steps "
         f"using {num_workers or os.cpu_count()} workers..."
     )
+
+    to_compute = [(s, p, model_name) for s, p in to_compute]
 
     with Pool(processes=num_workers) as pool:
         for step, metrics in pool.imap_unordered(compute_metrics_for_file, to_compute):

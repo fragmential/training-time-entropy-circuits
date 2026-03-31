@@ -30,9 +30,10 @@ def robust_fit_powerlaw(arr, start, end, verbose=False):
         plt.show()
     return robust_slope
 
-def stringer_get_powerlaw(ss, trange):
+def stringer_get_powerlaw(ss, trange, top_k = 2048):
     # COPIED FROM Stringer+Pachitariu 2018b github repo! (https://github.com/MouseLand/stringer-pachitariu-et-al-2018b/blob/master/python/utils.py)
     ''' fit exponent to variance curve'''
+    ss = ss[:top_k][ss > 0]
     logss = np.log(np.abs(ss))
     y = logss[trange][:, np.newaxis]
     trange = trange + 1
@@ -60,9 +61,9 @@ def generate_activations_prelayer(net,layer,data_loader,use_cuda=False,dim_thres
     def hook_fn(m,i,o):
         activations.append(i[0].cpu().numpy())
     handle = layer.register_forward_hook(hook_fn)
-    
+
     if use_cuda:
-        net = net.cuda()    
+        net = net.cuda()
     net.eval()
     for i, (images, labels) in enumerate(tqdm(data_loader)):
         if use_cuda:
@@ -86,15 +87,23 @@ def generate_activations_prelayer_batch(net,layer,images,pool_transform=None):
     handle.remove()
     return activations[0]
 
-def get_eigenspectrum(activations_np,max_eigenvals=2048,exclude_last_k=0):
-    feats = activations_np.reshape(activations_np.shape[0],-1)
-    feats_center = feats - feats.mean(axis=0)
-    pca = PCA(n_components=min(max_eigenvals, feats_center.shape[0], feats_center.shape[1]), svd_solver='full')
-    pca.fit(feats_center)
-    eigenspectrum = pca.explained_variance_ratio_
-    if exclude_last_k > 0:
-        eigenspectrum = eigenspectrum[:-exclude_last_k]
-    return eigenspectrum
+def _eigh(C, k):
+    v = np.clip(np.linalg.eigvalsh(C)[::-1], 0, None)
+    return v[:k] if k else v
+
+def _from_acts(acts, k):
+    mu = acts.mean(0)
+    n = acts.shape[0]
+    return _eigh((acts - mu).T @ (acts - mu) / n, k), _eigh(acts.T @ acts / n, k)
+
+def _from_cov(cov, mu, k):
+    return _eigh(cov - np.outer(mu, mu), k) if mu is not None else None, _eigh(cov, k)
+
+def get_eigenspectrum(acts=None, cov=None, mu=None, topk=None):
+    """Returns (centered, uncentered). centered is None if mu unavailable."""
+    return _from_acts(acts, topk) if acts is not None else _from_cov(cov, mu, topk)
+
+
 
 def plot_eigenspectrum(eigenspectrum):
     max_range = 500 if len(eigenspectrum) >= 512 else len(eigenspectrum)-10
@@ -122,7 +131,7 @@ def stringer_get_powerlaw_batch(net, layer, data_loader, trange, use_cuda=False,
         with torch.no_grad():
             feats = generate_activations_prelayer_batch(net=net, layer=layer, images=images)
         feats_np = feats.cpu().numpy()
-        feats_eig = get_eigenspectrum(feats_np)
+        feats_eig, _ = get_eigenspectrum(acts=feats_np)
         # print(trange.min(),trange.max(),feats_eig.shape)
         alpha_batch, _, R2_batch, R2_100_batch = stringer_get_powerlaw(ss=feats_eig, trange=trange_orig)
         alpha_arr.append(alpha_batch)
@@ -132,29 +141,21 @@ def stringer_get_powerlaw_batch(net, layer, data_loader, trange, use_cuda=False,
             break
     return np.array(alpha_arr), np.array(R2_arr), np.array(R2_100_arr)
 
-def rankme(eigen):
-    """ Compute rankme score given a covariance eigenspectrum
-    """
-    l1 = np.sum(np.abs(eigen))
-    eps = 1e-7
-    scores = eigen / l1 + eps
-    entropy = - np.sum(scores * np.log(scores))
-    return np.exp(entropy)
-
-
-def rankme_metrics(eigen):
-    """Compute abs and squared rankme variants, returning both entropy and exp(entropy)."""
+def rankme_metrics(eigen, top_k = 2048):
+    """eigen: raw covariance eigenvalues (centered or uncentered, normalized or not - doesn't matter)"""
+    eigen = np.clip(eigen, 0, None) # We've already done this a million times but it don't hurt to do it another
+    eigen = eigen[:top_k]       # Truncate up to top_k
+    eigen = eigen/np.sum(eigen) # normalise to a distribution
     eps = 1e-7
 
-    # Abs normalization (original rankme)
-    abs_scores = np.abs(eigen) / np.sum(np.abs(eigen)) + eps
-    abs_entropy = -np.sum(abs_scores * np.log(abs_scores))
+    def entropy(p):
+        return -np.sum(p * np.log(np.clip(p, eps, None)))
 
-    # Squared normalization (matrix entropy)
-    sq = eigen ** 2
-    sq_scores = sq / np.sum(sq) + eps
-    sq_entropy = -np.sum(sq_scores * np.log(sq_scores))
+    sv = np.sqrt(eigen)
+    p_sv = sv / sv.sum()          # true RankMe weights (∝ σᵢ)
+    p_ev = eigen / eigen.sum()    # matrix entropy weights (∝ λᵢ)
 
+    abs_entropy, sq_entropy = entropy(p_sv), entropy(p_ev)
     return {
         'lin_matent': abs_entropy,
         'matent': sq_entropy,

@@ -21,4 +21,4 @@ collect_G: true
 sample_labels: true
 label_samples: 1
 seed: 42
-storage_format: eigenvalues
+storage_format: eigenvalues+mb

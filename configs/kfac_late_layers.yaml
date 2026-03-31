@@ -1,6 +1,6 @@
-output_dir: inferences/reproduce_kfac
-# Covariance factor collection for all Pythia and OLMo models.
-# Uses packed fineweb, all tokens, A+G covariance, sampled labels (Monte Carlo Fisher).
+output_dir: inferences/kfac_late_layers
+# Full collection (final checkpoint only): pre-norm residual + A + G covariance.
+# Packed training data, all tokens. "native" resolves per model family.
 
 model_name:
   - "EleutherAI/pythia-14m"
@@ -26,21 +26,23 @@ model_name:
   - "allenai/OLMo-2-0425-1B"
   - "allenai/OLMo-2-1124-7B"
 
-#            14m  14md 31m  31md 70m  70md 160m 160d 410m 410d 1b  1bd 1.4b 1.4d 2.8b 2.8d 6.9b 6.9d 12b 12bd OL1B OL7B
-batch_size: [ 256, 256, 256, 256, 256, 256, 256, 256, 128, 128, 64, 64,  64,  64,  32,  32,  16,  16,  8,   8,  64,  16]
+#                      14m  14md 31m  31md 70m  70md 160m 160d 410m 410d 1b  1bd 1.4b 1.4d 2.8b 2.8d 6.9b 6.9d 12b 12bd OL1B OL7B
+batch_size:          [  32,  32,  32,   32, 32,  32,  32,  32,  32,  32, 32, 32,  32,  32,  16,  16,  16,  16, 16,  16,  32,  16]
+max_layers_per_pass: [   3,   3,   3,    3,  3,   3,   4,   4,   4,   4,  4,  4,   4,   4,   4,   4,   4,   4,  2,   2,   4,   4]
 
-dataset_name: fineweb
-num_samples: 5000
+dataset_name: native
+max_bytes: 80_000_000
+# num_samples: 5000
 seq_len: 512
 min_length: 32
-max_checkpoints: 30
+max_checkpoints: 10
 packing: packed
 token_selection: all
-collect_final_acts: false
+collect_final_acts: true
+residual_hook_point: before_final_norm
 collect_A: true
 collect_G: true
 sample_labels: true
 label_samples: 1
 seed: 42
-max_layers_per_pass: 4
-storage_format: cov+m
+storage_format: eigenvalues+mb

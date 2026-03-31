@@ -1,4 +1,4 @@
-output_dir: inferences/reproduce_rankme_alpha
+output_dir: inferences/rankme_fineweb
 # Residual activation collection for all Pythia and OLMo models.
 # Uses identity head replacement (fast path, post-layernorm residual), padded fineweb, last token.
 

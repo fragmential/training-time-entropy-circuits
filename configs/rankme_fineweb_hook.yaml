@@ -1,6 +1,5 @@
-output_dir: inferences/full
-# Full collection: pre-norm residual activations + A + G + B covariance.
-# Packed training data, all tokens. "native" resolves per model family.
+output_dir: inferences/rankme_fineweb_hook
+# Same as reproduce_rankme_alpha.yaml but using hook-based pre-final-norm capture.
 
 model_name:
   - "EleutherAI/pythia-14m"
@@ -26,22 +25,18 @@ model_name:
   - "allenai/OLMo-2-0425-1B"
   - "allenai/OLMo-2-1124-7B"
 
-#            14m  14md 31m  31md 70m  70md 160m 160d 410m 410d 1b  1bd 1.4b 1.4d 2.8b 2.8d 6.9b 6.9d 12b 12bd OL1B OL7B
-batch_size: [ 256, 256, 256, 256, 256, 256, 256, 256, 128, 128, 64, 64,  64,  64,  32,  32,  16,  16,  8,   8,  64,  16]
+#            14m  14md 31m  31md 70m  70md 160m 160d 410m 410d 1b   1bd  1.4b 1.4d 2.8b 2.8d 6.9b 6.9d 12b  12bd OL1B OL7B
+batch_size: [1024,1024,1024,1024,1024,1024,1024,1024,1024,1024, 512, 512, 512, 512, 256, 256, 128, 128,  80,  80, 512, 200]
 
-dataset_name: native
+dataset_name: fineweb
 num_samples: 5000
-seq_len: 512
+max_length: 512
 min_length: 32
-max_checkpoints: 30
-packing: packed
-token_selection: all
+max_checkpoints: 50
+packing: padded
+token_selection: last
 collect_final_acts: true
 residual_hook_point: before_final_norm
-collect_A: true
-collect_G: true
-sample_labels: true
-label_samples: 1
-seed: 42
-max_layers_per_pass: 4
-storage_format: cov_svd+m
+collect_A: false
+collect_G: false
+storage_format: eigenvalues+mb

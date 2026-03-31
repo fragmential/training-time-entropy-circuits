@@ -35,23 +35,50 @@ import torch
 import numpy as np
 from typing import Optional
 
+def _resolve_hf_name(short_name: str) -> str:
+    """Resolve short model name to full HuggingFace name."""
+    if "/" in short_name:
+        return short_name
+    s = short_name.lower()
+    if "pythia" in s:
+        return f"EleutherAI/{short_name}"
+    if "olmo" in s:
+        return f"allenai/{short_name}"
+    return short_name
 
 class DataAccessor:
     """Format-agnostic reader for collected activation / covariance data.
 
     Args:
         data: Loaded .pt dict or path to a .pt file.
-        model: Optional nn.Module for model-dependent derivations (B).
+        model: Optional nn.Module for model-dependent derivations (B, norm).
         model_config: Optional ModelConfig for resolving hook names to layers.
+        model_name: Optional HF model name (str). Model is lazily loaded on first
+                    access that requires it. Ignored if model is already provided.
     """
 
-    def __init__(self, data, model=None, model_config=None):
+    def __init__(self, data, model=None, model_config=None, model_name=None):
+        if model_name is not None and "/" not in model_name:
+            model_name = _resolve_hf_name(model_name)
         if isinstance(data, str):
             data = torch.load(data, map_location="cpu", weights_only=False)
         self.data = data
         self.model = model
         self.model_config = model_config
+        self._model_name = model_name
         self._layer_cache: dict = {}
+        self._eigen_cache: dict = {}
+
+    def _ensure_model(self):
+        """Lazily load model from model_name if not already set."""
+        if self.model is not None:
+            return True
+        if self._model_name is None:
+            return False
+        from utils.model_registry import get_model_config, load_model
+        self.model_config = get_model_config(self._model_name)
+        self.model = load_model(self.model_config, self._model_name, revision=None)
+        return True
 
     # ------------------------------------------------------------------
     # Public access points
@@ -90,10 +117,10 @@ class DataAccessor:
     def _get_layer(self, hook_name: str):
         if hook_name in self._layer_cache:
             return self._layer_cache[hook_name]
-        if self.model is None or self.model_config is None:
-            return None
         m = re.match(r"blk(\d+)\.(up|down|gate)", hook_name)
         if not m:
+            return None
+        if not self._ensure_model():
             return None
         from utils.model_registry import get_mlp_projections
         block_idx = int(m.group(1))
@@ -105,26 +132,51 @@ class DataAccessor:
     # Internal: computation methods (used by FactorView properties)
     # ------------------------------------------------------------------
 
+    def _eigenspectrum_pair(self, hook_name: str, factor: str):
+        """Compute and cache (centered, uncentered) eigenvalue pair via get_eigenspectrum."""
+        cache_key = (hook_name, factor)
+        if cache_key not in self._eigen_cache:
+            from utils.powerlaw import get_eigenspectrum
+            entry = self._entry(hook_name)
+            centered, uncentered = None, None
+
+            # Try from cov (+mean for centered)
+            if factor in entry:
+                t = entry[factor]
+                if isinstance(t, torch.Tensor) and t.dim() == 2 and t.shape[0] == t.shape[1]:
+                    n = entry.get(f"n_{factor}", entry.get("n", 1))
+                    cov = (t / n).numpy()
+                    mu_t = self._mean(hook_name, factor)
+                    mu = mu_t.numpy() if mu_t is not None else None
+                    centered, uncentered = get_eigenspectrum(cov=cov, mu=mu)
+
+            # Fallback: raw activations (stored or derived)
+            if uncentered is None:
+                acts = self._activations(hook_name, factor)
+                if acts is not None:
+                    centered, uncentered = get_eigenspectrum(acts=acts.numpy())
+
+            self._eigen_cache[cache_key] = (
+                torch.from_numpy(centered) if centered is not None else None,
+                torch.from_numpy(uncentered) if uncentered is not None else None,
+            )
+        return self._eigen_cache[cache_key]
+
     def _eigenvalues(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
         if factor == "B":
             return self._B_eigenvalues(hook_name)
-
         entry = self._entry(hook_name)
-
         if f"{factor}_eigvals" in entry:
-            return entry[f"{factor}_eigvals"].float()
+            return entry[f"{factor}_eigvals"]
+        _, uncentered = self._eigenspectrum_pair(hook_name, factor)
+        return uncentered
 
-        if factor in entry:
-            t = entry[factor]
-            if isinstance(t, torch.Tensor):
-                if t.dim() == 2 and t.shape[0] == t.shape[1]:
-                    n = entry.get(f"n_{factor}", entry.get("n", 1))
-                    return torch.linalg.eigvalsh(t.float() / n).flip(0)
-                elif t.dim() == 2:
-                    from utils.powerlaw import get_eigenspectrum
-                    return torch.from_numpy(get_eigenspectrum(t.numpy())).float()
-
-        return None
+    def _eigenvalues_centered(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
+        entry = self._entry(hook_name)
+        if f"{factor}_eigvals_centered" in entry:
+            return entry[f"{factor}_eigvals_centered"]
+        centered, _ = self._eigenspectrum_pair(hook_name, factor)
+        return centered
 
     def _eigenvectors(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
         if factor == "B":
@@ -172,6 +224,10 @@ class DataAccessor:
         return None
 
     def _activations(self, hook_name: str, factor: str, apply_mask: bool = True) -> Optional[torch.Tensor]:
+        # Virtual hook: after_final_norm from before_final_norm + norm layer
+        if hook_name == "after_final_norm" and factor == "A" and hook_name not in self.data:
+            return self._post_norm_activations()
+
         entry = self._entry(hook_name)
 
         raw = None
@@ -198,6 +254,8 @@ class DataAccessor:
         return raw
 
     def _mean(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
+        if factor == "B":
+            return self._B_mean(hook_name)
         entry = self._entry(hook_name)
         return entry.get(f"{factor}_mean")
 
@@ -277,6 +335,78 @@ class DataAccessor:
             return None
         eigvals, eigvecs = torch.linalg.eigh(B_cov)
         return eigvecs[:, eigvals.argsort(descending=True)]
+
+    def _B_mean(self, hook_name: str) -> Optional[torch.Tensor]:
+        entry = self._entry(hook_name)
+        if "B_mean" in entry:
+            return entry["B_mean"]
+        mu = self._mean(hook_name, "A")
+        if mu is None:
+            return None
+        layer = self._get_layer(hook_name)
+        if layer is None:
+            return None
+        W = layer.weight.detach().float()
+        b = layer.bias.detach().float() if layer.bias is not None else None
+        B_mean = W @ mu.float()
+        if b is not None:
+            B_mean = B_mean + b
+        return B_mean
+
+    # ------------------------------------------------------------------
+    # Internal: norm derivation (before_final_norm → after_final_norm)
+    # ------------------------------------------------------------------
+
+    def _post_norm_activations(self) -> Optional[torch.Tensor]:
+        """Derive after_final_norm acts from before_final_norm raw acts + norm layer."""
+        acts = self._activations("before_final_norm", "A")
+        if acts is None:
+            return None
+        if not self._ensure_model():
+            return None
+        from utils.model_registry import get_final_layernorm
+        norm = get_final_layernorm(self.model, self.model_config).float()
+        with torch.no_grad():
+            return norm(acts.float()).cpu()
+
+    # ------------------------------------------------------------------
+    # Public: available hooks and factors
+    # ------------------------------------------------------------------
+
+    def available(self) -> dict:
+        """Return {hook_name: [factor_names]} for all obtainable data.
+
+        Includes stored hooks and derivable virtual hooks (e.g. after_final_norm
+        from before_final_norm, B from A + model weights).
+        """
+        result = {}
+        for hook_name in self.hook_names():
+            factors = []
+            for f in ("A", "G"):
+                if self._eigenvalues(hook_name, f) is not None:
+                    factors.append(f)
+            # B: check stored first, then derivability without triggering model load
+            entry = self._entry(hook_name)
+            if "B_eigvals" in entry or "B" in entry or "B_eigvecs" in entry:
+                factors.append("B")
+            elif re.match(r"blk\d+\.(up|down|gate)", hook_name):
+                # B derivable if we have A cov (or can compute it) and model
+                has_A_cov = ("A" in entry or "A_eigvecs" in entry)
+                has_model = self.model is not None or self._model_name is not None
+                if has_A_cov and has_model:
+                    factors.append("B")
+            if factors:
+                result[hook_name] = factors
+
+        # Virtual hook: after_final_norm from before_final_norm acts
+        if "after_final_norm" not in result and "before_final_norm" in result:
+            entry = self._entry("before_final_norm")
+            has_acts = "A" in entry and isinstance(entry["A"], torch.Tensor) and entry["A"].dim() == 2 and entry["A"].shape[0] != entry["A"].shape[1]
+            has_model = self.model is not None or self._model_name is not None
+            if has_acts and has_model:
+                result["after_final_norm"] = ["A"]
+
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -373,8 +503,13 @@ class FactorView:
 
     @property
     def eigvals(self) -> Optional[torch.Tensor]:
-        """Eigenvalues as 1D float tensor, descending order."""
+        """Eigenvalues (uncentered) as 1D float tensor, descending order."""
         return self._acc._eigenvalues(self._hook, self._factor)
+
+    @property
+    def eigvals_centered(self) -> Optional[torch.Tensor]:
+        """Centered eigenvalues (of Cov[x] = E[xxT] - E[x]E[x]T), descending."""
+        return self._acc._eigenvalues_centered(self._hook, self._factor)
 
     @property
     def eigvecs(self) -> Optional[torch.Tensor]:

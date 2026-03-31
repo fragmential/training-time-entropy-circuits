@@ -12,3 +12,4 @@ collected
 covariance_factors
 inferences
 slurm/logs/*
+results

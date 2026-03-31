@@ -261,6 +261,34 @@ def _resolve_residual_hook(model, model_config, hook_point):
 
 
 # ---------------------------------------------------------------------------
+# B derivation (+b modifier)
+# ---------------------------------------------------------------------------
+
+def _derive_B_factors(factors, model, model_config):
+    """Compute B (output) covariance from A (input) via DataAccessor.
+
+    Adds "B", "n_B", and "B_mean" entries to each MLP hook's factor dict.
+    Uses DataAccessor._B_covariance so derivation logic lives in one place.
+    """
+    import re
+    from utils.accessor import DataAccessor
+    acc = DataAccessor(factors, model=model, model_config=model_config)
+    for hook_name, data in factors.items():
+        if not re.match(r"blk\d+\.(up|down|gate)", hook_name):
+            continue
+        B_cov = acc._B_covariance(hook_name)
+        if B_cov is None:
+            continue
+        n = data.get("n_A", data.get("n", 1))
+        # Store as unnormalized accumulator (B_cov * n) to match A convention
+        data["B"] = (B_cov * n).to(data["A"].dtype)
+        data["n_B"] = n
+        B_mean = acc._B_mean(hook_name)
+        if B_mean is not None:
+            data["B_mean"] = B_mean
+
+
+# ---------------------------------------------------------------------------
 # Unified collection
 # ---------------------------------------------------------------------------
 
@@ -276,7 +304,10 @@ def _collect_for_checkpoint(
     collects_mlp = cfg.collect_A or cfg.collect_G
     needs_grad = cfg.collect_G or cfg.collect_final_grads
     storage_mode = "acts" if cfg.storage_format.split("+")[0] == "acts" else "cov"
-    collect_means = "+m" in cfg.storage_format
+    # +b implies +m (means needed for B derivation)
+    if "+b" in cfg.storage_format and "+m" not in cfg.storage_format:
+        print("  NOTE: +b implies +m — storing means for B derivation")
+    collect_means = "+m" in cfg.storage_format or "+b" in cfg.storage_format
 
     all_factors = {}
 
@@ -595,6 +626,9 @@ def main(cfg: CollectConfig):
                 model, model_config, cfg, texts, tokenizer, packed_ids,
                 blocks, device, boundary_token_ids,
             )
+
+            if "+b" in cfg.storage_format and cfg.storage_format.split("+")[0] == "eigenvalues":
+                _derive_B_factors(factors, model, model_config)
 
             out_path = os.path.join(output_dir, f"step{step_num}.pt")
             token_filter = {
