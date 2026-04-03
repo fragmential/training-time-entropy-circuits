@@ -24,10 +24,9 @@ Results structure:
     }}}
 
 Usage:
-    python scripts/compute_metrics.py --model_name pythia-14m-deduped
-    python scripts/compute_metrics.py --model_name pythia-14m-deduped --input_dir covariance_factors/fineweb/pythia-14m-deduped
-    python scripts/compute_metrics.py --model_name pythia-14m-deduped --recompute
-    python scripts/compute_metrics.py --model_name pythia-14m-deduped --num_workers 8
+    python scripts/compute_metrics.py inferences/full_limited pythia-14m-deduped
+    python scripts/compute_metrics.py full_limited pythia-70m-deduped
+    python scripts/compute_metrics.py fineweb pythia-14m-deduped --recompute
 """
 
 import heapq
@@ -35,6 +34,7 @@ import os
 import sys
 import re
 import numpy as np
+import torch
 from multiprocessing import Pool
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -57,11 +57,15 @@ def spectral_metrics(eigen) -> dict:
     if hasattr(eigen, "numpy"):
         eigen = eigen.numpy()
     eigen = np.maximum(eigen, 0)
+    trace = float(np.sum(eigen))
+    d = len(eigen)
     eigen = eigen / np.sum(eigen) # normalise into sum 1
     rm = powerlaw.rankme_metrics(eigen)
     alpha, ypred, fit_r2, fit_r2_100 = powerlaw.stringer_get_powerlaw(eigen, np.arange(11, 100))
     return {
         "eigenspectrum": eigen,
+        "trace": trace,
+        "avg_magnitude": trace / d,
         **rm,
         "alpha": alpha,
         "ypred": ypred,
@@ -246,29 +250,20 @@ def generalized_eigenvalues_GB(
     gen_eigvals = torch.linalg.eigvalsh(M).flip(0).clamp(min=0)
     return gen_eigvals.numpy()
 
-
-# ---------------------------------------------------------------------------
-# Per-file metric computation (called by workers)
-# ---------------------------------------------------------------------------
-
-def compute_metrics_for_file(args):
-    """Compute all metrics for a .pt file.
-
-    Returns (step, {hook_name: {factor: metrics, "kfac": {...}, "gen_GB": {...}}}).
-    """
-    import torch
-    step, path, model_name = args
-
-    data = torch.load(path, map_location="cpu", weights_only=False)
-
-    acc = DataAccessor(data, model_name=model_name)
-    avail = acc.available()
+def compute_metrics_for_checkpoint(accessor: DataAccessor):
+    avail = accessor.available()
     step_results = {}
+
+    # Pre-warm: request eigvecs upfront for factors that need generalized eigendecomp
+    for hook_name, factors in avail.items():
+        if "B" in factors:
+            accessor._ensure_eigh(hook_name, "G", need_vecs=True)
+            accessor._ensure_B_eigh(hook_name, need_vecs=True)
 
     for hook_name, factors in avail.items():
         hook_results = {}
-        hook = acc[hook_name]
-        entry = acc._entry(hook_name)
+        hook = accessor[hook_name]
+        entry = accessor._entry(hook_name)
 
         eA = eG = None  # cache for K-FAC / gen eigen (numpy arrays)
         for factor in factors:
@@ -319,7 +314,36 @@ def compute_metrics_for_file(args):
         if hook_results:
             step_results[hook_name] = hook_results
 
-    return step, step_results
+    return step_results
+
+
+
+# ---------------------------------------------------------------------------
+# Per-file metric computation (called by workers)
+# ---------------------------------------------------------------------------
+
+def _compute_metrics_for_file(args):
+    """Pool worker: compute metrics for a .pt file (no model loading)."""
+    step, path = args
+    data = torch.load(path, map_location="cpu", weights_only=False)
+    return step, compute_metrics_for_checkpoint(DataAccessor(data))
+
+
+def _needs_model_loading(data_path):
+    """Check if computing full metrics for this file would require model weights."""
+    data = torch.load(data_path, map_location="cpu", weights_only=False)
+    for hook_name, entry in data.items():
+        if isinstance(entry, dict) and re.match(r"blk\d+\.(up|down|gate)", hook_name):
+            has_A_cov = "A" in entry or "A_eigvecs" in entry
+            has_B = "B_eigvals" in entry or "B" in entry or "B_eigvecs" in entry
+            if has_A_cov and not has_B:
+                return True
+    if "before_final_norm" in data and "after_final_norm" not in data:
+        entry = data.get("before_final_norm", {})
+        t = entry.get("A")
+        if isinstance(t, torch.Tensor) and t.dim() == 2 and t.shape[0] != t.shape[1]:
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +368,63 @@ def _resolve_data_root(data_root: str, config_directory: str):
     return data_root, config_directory
 
 # ---------------------------------------------------------------------------
+# Sequential derive mode (prefetch/delete like collect.py)
+# ---------------------------------------------------------------------------
+
+def _compute_sequential_derive(to_compute, model_name, res_dict, results_path, keep_cached=False):
+    """Process checkpoints sequentially with selective weight loading + prefetch/delete."""
+    from concurrent.futures import ThreadPoolExecutor
+    from utils.model_registry import (
+        get_model_config, get_checkpoint_schedule,
+        prefetch_checkpoint, delete_cached_revision,
+    )
+    from utils.accessor import _resolve_hf_name
+
+    hf_name = _resolve_hf_name(model_name)
+    config = get_model_config(hf_name)
+    schedule = {s: (r, m) for s, r, m in get_checkpoint_schedule(config, None)}
+
+    sorted_items = sorted(to_compute, key=lambda x: x[0])
+    executor = ThreadPoolExecutor(max_workers=1)
+
+    for idx, (step, path) in enumerate(sorted_items):
+        # Prefetch next checkpoint
+        prefetch_future = None
+        if idx + 1 < len(sorted_items):
+            next_step = sorted_items[idx + 1][0]
+            if next_step in schedule:
+                nr, nm = schedule[next_step]
+                prefetch_future = executor.submit(prefetch_checkpoint, nm, nr)
+
+        data = torch.load(path, map_location="cpu", weights_only=False)
+        rev = data.get("__revision__")
+        hf_model = data.get("__hf_model__")
+        if rev is None and step in schedule:
+            rev, hf_model = schedule[step]
+
+        acc = DataAccessor(data, model_name=hf_name, revision=rev)
+        if hf_model:
+            acc._hf_repo = hf_model
+
+        step_results = compute_metrics_for_checkpoint(acc)
+        res_dict[step] = step_results
+        hooks = list(step_results.keys())
+        print(
+            f"  Step {step}: {len(hooks)} hook points "
+            f"({', '.join(hooks[:3])}{'...' if len(hooks) > 3 else ''})"
+        )
+
+        # Save incrementally
+        np.save(results_path, res_dict)
+
+        if prefetch_future is not None:
+            prefetch_future.result()
+        if not keep_cached and rev is not None and hf_model is not None:
+            delete_cached_revision(hf_model, rev)
+
+    executor.shutdown(wait=True)
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -352,6 +433,8 @@ def main(
     model_name: str,
     num_workers: int = None,
     recompute: bool = False,
+    derive: bool = True,
+    keep_cached: bool = False,
     data_root: str = "inferences",
     output_root: str = "results",
 ):
@@ -365,6 +448,8 @@ def main(
         model_name: Short model name (e.g. pythia-14m-deduped).
         num_workers: Number of parallel workers (default: cpu count).
         recompute: If True, recompute all steps even if results exist.
+        derive: If True (default), derive B and post-norm metrics when possible.
+                Uses sequential processing with prefetch/delete.
     """
 
     data_root, config_directory = _resolve_data_root(data_root, config_directory)
@@ -397,21 +482,31 @@ def main(
         print(f"All {len(step_files)} steps already have metrics in {results_path}")
         return
 
-    print(
-        f"Computing metrics for {len(to_compute)}/{len(step_files)} steps "
-        f"using {num_workers or os.cpu_count()} workers..."
-    )
+    # Auto-detect: does this data need model loading for full metrics?
+    sample_path = to_compute[0][1]
+    use_derive = derive and _needs_model_loading(sample_path)
 
-    to_compute = [(s, p, model_name) for s, p in to_compute]
-
-    with Pool(processes=num_workers) as pool:
-        for step, metrics in pool.imap_unordered(compute_metrics_for_file, to_compute):
-            res_dict[step] = metrics
-            hooks = list(metrics.keys())
-            print(
-                f"  Step {step}: {len(hooks)} hook points "
-                f"({', '.join(hooks[:3])}{'...' if len(hooks) > 3 else ''})"
-            )
+    if use_derive:
+        print(
+            f"Computing metrics for {len(to_compute)}/{len(step_files)} steps "
+            f"(sequential + selective weight loading)..."
+        )
+        _compute_sequential_derive(to_compute, model_name, res_dict, results_path, keep_cached)
+    else:
+        if num_workers is None:
+            num_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count()))
+        print(
+            f"Computing metrics for {len(to_compute)}/{len(step_files)} steps "
+            f"using {num_workers} workers..."
+        )
+        with Pool(processes=num_workers) as pool:
+            for step, metrics in pool.imap_unordered(_compute_metrics_for_file, to_compute):
+                res_dict[step] = metrics
+                hooks = list(metrics.keys())
+                print(
+                    f"  Step {step}: {len(hooks)} hook points "
+                    f"({', '.join(hooks[:3])}{'...' if len(hooks) > 3 else ''})"
+                )
 
     np.save(results_path, res_dict)
     print(f"Saved {len(res_dict)} results to {results_path}")

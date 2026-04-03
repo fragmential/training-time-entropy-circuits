@@ -134,6 +134,12 @@ class CollectConfig:
     cross_basis_refs: "list | None" = None
     output_dir: "str | None" = None
 
+    # --- Metrics ---
+    compute_metrics: bool = False  # compute spectral metrics inline while model is loaded
+
+    # --- Cache ---
+    keep_cached: bool = False  # don't delete HF checkpoints after processing
+
     # --- Sweep ---
     array_id: "int | None" = None
 
@@ -643,6 +649,29 @@ def main(cfg: CollectConfig):
                          cfg.storage_dtype, token_filter)
             tqdm.write(f"Step {step_num}: {len(factors)} hook points -> {out_path}")
 
+            if cfg.compute_metrics:
+                import numpy as np
+                from utils.accessor import DataAccessor
+                from scripts.compute_metrics import compute_metrics_for_checkpoint
+                saved_data = torch.load(out_path, map_location="cpu", weights_only=False)
+                model.cpu()
+                acc = DataAccessor(saved_data, model=model, model_config=model_config)
+                step_metrics = compute_metrics_for_checkpoint(acc)
+                model.to(device)
+                metrics_dir = os.path.join(cfg.output_dir.replace("inferences", "results", 1)
+                                           if cfg.output_dir else "results")
+                os.makedirs(metrics_dir, exist_ok=True)
+                metrics_path = os.path.join(metrics_dir, f"results_{short_name}.npy")
+                res_dict = {}
+                if os.path.exists(metrics_path):
+                    try:
+                        res_dict = np.load(metrics_path, allow_pickle=True).item()
+                    except (OSError, ValueError, TypeError):
+                        pass
+                res_dict[step_num] = step_metrics
+                np.save(metrics_path, res_dict)
+                tqdm.write(f"  Metrics: {len(step_metrics)} hooks -> {metrics_path}")
+
         except Exception as e:
             tqdm.write(f"Skipping step {step_num}: {e}")
             import traceback
@@ -654,7 +683,8 @@ def main(cfg: CollectConfig):
 
         if prefetch_future is not None:
             prefetch_future.result()
-        delete_cached_revision(step_model, revision)
+        if not cfg.keep_cached:
+            delete_cached_revision(step_model, revision)
 
     executor.shutdown(wait=True)
     print(f"Completed! Output saved to {output_dir}")

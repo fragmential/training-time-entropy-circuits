@@ -1,6 +1,8 @@
 """Model-specific logic for checkpoint discovery, model loading, tokenizer setup, and HF cache management."""
 import os
+import re
 from dataclasses import dataclass
+from types import SimpleNamespace
 import numpy as np
 
 
@@ -190,6 +192,121 @@ def get_block_layernorms(model, config, block_idx):
         return block.input_layernorm, block.post_attention_layernorm
     block = model.model.layers[block_idx]
     return block.input_layernorm, block.post_attention_layernorm
+
+
+# --- Selective weight loading ---
+
+# Hook name → state dict key mapping (architecture-dependent)
+_PYTHIA_PROJ_MAP = {"up": "dense_h_to_4h", "down": "dense_4h_to_h"}
+_OLMO_PROJ_MAP = {"gate": "gate_proj", "up": "up_proj", "down": "down_proj"}
+
+
+def _hook_to_sd_keys(config, hook_name):
+    """Map hook name (e.g. 'blk14.up') to state dict key prefix."""
+    m = re.match(r"blk(\d+)\.(up|down|gate)", hook_name)
+    if not m:
+        return None
+    idx, proj = m.group(1), m.group(2)
+    if config.family == "pythia":
+        return f"gpt_neox.layers.{idx}.mlp.{_PYTHIA_PROJ_MAP[proj]}"
+    return f"model.layers.{idx}.mlp.{_OLMO_PROJ_MAP[proj]}"
+
+
+def _norm_sd_prefix(config):
+    """State dict key prefix for the final layer norm."""
+    return "gpt_neox.final_layer_norm" if config.family == "pythia" else "model.norm"
+
+
+def _load_from_safetensors(snap_dir, keys):
+    """Load specific tensor keys from safetensors files in a snapshot directory."""
+    import json
+    from safetensors import safe_open
+
+    index_path = os.path.join(snap_dir, "model.safetensors.index.json")
+    if os.path.exists(index_path):
+        with open(index_path) as f:
+            weight_map = json.load(f)["weight_map"]
+        shards = {}
+        for k in keys:
+            if k in weight_map:
+                shards.setdefault(weight_map[k], []).append(k)
+    else:
+        shards = {"model.safetensors": list(keys)}
+
+    result = {}
+    for shard_name, shard_keys in shards.items():
+        with safe_open(os.path.join(snap_dir, shard_name), framework="pt") as f:
+            avail = set(f.keys())
+            for k in shard_keys:
+                if k in avail:
+                    result[k] = f.get_tensor(k)
+    return result
+
+
+class _RMSNorm:
+    """Minimal callable RMSNorm (no nn.Module overhead)."""
+    def __init__(self, weight, eps=1e-6):
+        self.weight = weight
+        self.eps = eps
+
+    def __call__(self, x):
+        return x * (x.float().pow(2).mean(-1, keepdim=True) + self.eps).rsqrt() * self.weight.float()
+
+    def float(self):
+        return _RMSNorm(self.weight.float(), self.eps)
+
+
+def load_selective_weights(config, hf_repo, revision, hook_names, need_norm=False):
+    """Load only the weight tensors needed for specific hooks from safetensors.
+
+    Only downloads the safetensors shards that contain the needed keys (not the full model).
+
+    Returns dict:
+        {hook_name: SimpleNamespace(weight=Tensor, bias=Tensor|None), ...}
+        If need_norm: "__norm__" key with a callable norm (supports .float()).
+    """
+    from huggingface_hub import snapshot_download
+
+    # Collect all state dict keys we need
+    all_keys = set()
+    hook_prefixes = {}  # hook_name -> sd_prefix
+    for h in hook_names:
+        prefix = _hook_to_sd_keys(config, h)
+        if prefix:
+            hook_prefixes[h] = prefix
+            all_keys.add(f"{prefix}.weight")
+            all_keys.add(f"{prefix}.bias")
+
+    norm_prefix = None
+    if need_norm:
+        norm_prefix = _norm_sd_prefix(config)
+        all_keys.add(f"{norm_prefix}.weight")
+        all_keys.add(f"{norm_prefix}.bias")
+
+    snap_dir = snapshot_download(hf_repo, revision=revision)
+    tensors = _load_from_safetensors(snap_dir, all_keys)
+
+    result = {}
+    for h, prefix in hook_prefixes.items():
+        w = tensors.get(f"{prefix}.weight")
+        if w is not None:
+            result[h] = SimpleNamespace(weight=w, bias=tensors.get(f"{prefix}.bias"))
+
+    if norm_prefix:
+        w = tensors.get(f"{norm_prefix}.weight")
+        if w is not None:
+            b = tensors.get(f"{norm_prefix}.bias")
+            if config.family == "pythia":
+                import torch.nn as nn
+                norm = nn.LayerNorm(w.shape[0])
+                norm.weight.data.copy_(w)
+                if b is not None:
+                    norm.bias.data.copy_(b)
+            else:
+                norm = _RMSNorm(w)
+            result["__norm__"] = norm
+
+    return result
 
 
 # --- HF cache management ---

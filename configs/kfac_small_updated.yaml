@@ -1,0 +1,36 @@
+output_dir: inferences/kfac_small
+# Reproduces Merullo et al. K-FAC analysis on OLMo-2 models.
+# Last checkpoint only, specific layers (23/24/25 for 7B, 14/15 for 1B),
+# gate+up+down projections, A+G covariance at 60% energy.
+
+model_name:
+  - "allenai/OLMo-2-0425-1B"
+  - "allenai/OLMo-2-1124-7B"
+
+#            OL1B OL7B
+batch_size: [  48,  16]
+
+# target_layers set per model: 7B uses layers 23,24,25; 1B uses layers 14,15
+target_layers:
+  allenai/OLMo-2-0425-1B: [0, 2, 4, 6, 9, 11, 13, 15]
+  allenai/OLMo-2-1124-7B: [23, 24, 25]
+
+dataset_name: olmo_mix
+max_bytes: 15_000_000
+seq_len: 512
+min_length: 32
+max_checkpoints: 30
+packing: packed
+token_selection: all
+collect_final_acts: true
+collect_final_grads: true
+residual_hook_point: before_final_norm
+collect_A: true
+collect_G: true
+sample_labels: true
+label_samples: 1
+seed: 42
+max_layers_per_pass: [4, 3]
+storage_format: cov_svd+m
+compute_metrics: True
+keep_cached: True

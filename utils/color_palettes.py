@@ -66,16 +66,19 @@ def make_alternate_versions_lightness(base_colors: list[str], n_versions: int):
     return versions
 
 
-def make_alternate_versions_hue_shift(base_colors, n_versions, shift=0.18):
+def make_alternate_versions_hue_shift(
+        base_colors, n_versions, shift=0.18,
+        light_base=1.0, light_downshift=0.0
+):
     versions = []
     for i in range(n_versions):
         hue_shift = shift * i   # was 0.08; much more obvious
         version = [
             adjust_color(
                 c,
-                lightness_mult=1.0,
-                saturation_mult=1.0,
-                hue_shift=hue_shift,
+                lightness_mult = light_base - i * light_downshift,
+                saturation_mult = 1.0,
+                hue_shift = hue_shift,
             )
             for c in base_colors
         ]

@@ -1,0 +1,40 @@
+
+1.
+log-det is now measured of A and G in kfac_metrics(),
+but not yet B or A,G,B centered. We should actually
+compute log-det of A and B and G separately (with the
+same method we do in kfac_metrics) and store them
+separately (also for residuals and stuff). Should make
+sure to then not recalculate it for K-FAC, but just
+reuse the A and G ones.
+
+2.
+Make a "whole layer k-fac log det". It doesn't really
+make sense as curvature, but basically you can do
+something like kfac but with the down_proj G and
+the up_proj A.
+
+4.
+Test on alternative datasets (memorization, quotes,
+maths), to obtain conditional statistics.
+
+5.
+histogram of eigenspectra, note: probably better to
+have axis show unnormalised. To get unnormalised,
+just multiply by trace.
+
+6.
+Add spectral statistics of the weights themselves.
+Note: this is ideally a different run and not stored in
+the others, otherwise it would just be a duplicate
+for each and every run, since it isn't data-dependent.
+
+Then we can reproduce
+https://arxiv.org/abs/2410.17770.
+But then I want to basically invert the roles. So
+we plot the maximum overlap between activation
+eigenvectors and matrix singular vectors but along the
+axis of the histogram of activations instead of weights
+
+7.
+Get OV data.

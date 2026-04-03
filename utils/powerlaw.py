@@ -93,6 +93,11 @@ def _eigh(C, k):
     v = np.clip(np.linalg.eigvalsh(C)[::-1], 0, None)
     return v[:k] if k else v
 
+def _eigh_full(C):
+    """Full eigendecomposition: returns (eigvals descending clipped, eigvecs column-sorted)."""
+    vals, vecs = np.linalg.eigh(C)
+    return np.ascontiguousarray(np.clip(vals[::-1], 0, None)), np.ascontiguousarray(vecs[:, ::-1])
+
 def _from_acts(acts, k):
     mu = acts.mean(0)
     n = acts.shape[0]

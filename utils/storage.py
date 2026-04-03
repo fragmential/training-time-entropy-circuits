@@ -206,20 +206,28 @@ def _prepare_cov(factors_dict: dict, store_means: bool = False, storage_dtype=No
 def _prepare_cov_svd(factors_dict: dict, store_means: bool = False, storage_dtype=None) -> dict:
     """Eigendecompose each covariance matrix. Store eigvecs + eigvals, optionally means.
 
-    Eigendecomposition runs in the accumulator's native dtype (fp64 if accumulated in fp64).
+    Uses canonical _eigh_full / get_eigenspectrum from powerlaw.py.
+    Also stores centered eigenvalues when means are available.
     """
+    from utils.powerlaw import _eigh_full, get_eigenspectrum
     result = {}
     for name, data in factors_dict.items():
         entry = {"n": data.get("n", 0)}
         for key in _FACTOR_KEYS:
             if key in data and data[key] is not None:
-                M = data[key].cpu()  # preserve accumulator dtype (fp64 or fp32)
+                M = data[key].cpu()
                 n = data.get(f"n_{key}", data.get("n", 1))
                 entry[f"n_{key}"] = n
-                eigvals, eigvecs = torch.linalg.eigh(M / n)
-                idx = eigvals.argsort(descending=True)
-                entry[f"{key}_eigvals"] = _cast_for(eigvals[idx], "eigvals", storage_dtype)
-                entry[f"{key}_eigvecs"] = _cast_for(eigvecs[:, idx], "eigvecs", storage_dtype)
+                cov = (M / n).numpy()
+                eigvals, eigvecs = _eigh_full(cov)
+                entry[f"{key}_eigvals"] = _cast_for(torch.from_numpy(eigvals), "eigvals", storage_dtype)
+                entry[f"{key}_eigvecs"] = _cast_for(torch.from_numpy(eigvecs), "eigvecs", storage_dtype)
+                # Centered eigenvalues if mean available
+                mean_key = f"{key}_mean"
+                if mean_key in data and data[mean_key] is not None:
+                    mu = data[mean_key].cpu().numpy()
+                    centered = get_eigenspectrum(cov=cov, mu=mu)[0]
+                    entry[f"{key}_eigvals_centered"] = _cast_for(torch.from_numpy(centered), "eigvals", storage_dtype)
             if store_means:
                 mean_key = f"{key}_mean"
                 if mean_key in data and data[mean_key] is not None:
@@ -445,9 +453,9 @@ def convert(input_path: str, to_format: str, output_path: str = None):
             continue
 
         new_entry = {"n": entry.get("n", 0)}
-        # Copy over cross-basis and counts
+        # Copy over cross-basis, counts, and means
         for k, v in entry.items():
-            if k.startswith("n_") or "cross_eigvals" in k:
+            if k.startswith("n_") or "cross_eigvals" in k or k.endswith("_mean"):
                 new_entry[k] = v
 
         for key in _FACTOR_KEYS:

@@ -77,6 +77,7 @@ class HookCollector:
         self._G_initialized = False
         self.G = None
         self.n_G = 0
+        self.G_sum = None   # (d,) running sum for gradient means
 
         # Register hooks
         self._handles = []
@@ -151,9 +152,13 @@ class HookCollector:
         d = g_f.size(1)
         if not self._G_initialized:
             self.G = torch.zeros(d, d, dtype=self._acc_dtype, device=g_f.device)
+            if self.collect_means:
+                self.G_sum = torch.zeros(d, dtype=torch.float32, device=g_f.device)
             self._G_initialized = True
         self.G.add_((g_f.T @ g_f).to(dtype=self._acc_dtype))
         self.n_G += g_f.size(0)
+        if self.collect_means:
+            self.G_sum.add_(g_f.float().sum(dim=0))
 
     # ------------------------------------------------------------------
     # Hook callbacks
@@ -199,6 +204,7 @@ class HookCollector:
             "A_mean": mean vector (d,) if collect_means and cov mode
             "G": gradient covariance (d,d) if collect_grad
             "n_G": gradient token count
+            "G_mean": mean gradient vector (d,) if collect_means and collect_grad
             "n": convenience alias for n_A
         """
         result = {}
@@ -219,6 +225,8 @@ class HookCollector:
         if self.collect_grad and self.G is not None:
             result["G"] = self.G.cpu()
             result["n_G"] = self.n_G
+            if self.collect_means and self.G_sum is not None:
+                result["G_mean"] = (self.G_sum / self.n_G).cpu()
 
         result["n"] = self.n_A
         return result
@@ -241,6 +249,8 @@ class HookCollector:
         self.n_A = 0
         if self.G is not None:
             self.G.zero_()
+        if self.G_sum is not None:
+            self.G_sum.zero_()
         self.n_G = 0
 
     def close(self):

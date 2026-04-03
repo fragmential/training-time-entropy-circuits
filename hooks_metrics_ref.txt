@@ -1,0 +1,51 @@
+HOOK POINTS (keys in .pt files)
+================================
+Residual stream:
+  identity_head         final residual (via head replacement, fast)
+  after_final_norm      final residual post-norm
+  before_final_norm     final residual pre-norm (raw)
+  post_attn_N           residual after attention block N
+  pre_block_N           residual before block N
+
+MLP layers (per block, factors A and/or G):
+  blk{N}.dense_h_to_4h   Pythia up
+  blk{N}.dense_4h_to_h   Pythia down
+  blk{N}.gate_proj       OLMo-2 gate
+  blk{N}.up_proj         OLMo-2 up
+  blk{N}.down_proj       OLMo-2 down
+
+FACTORS (sub-keys per hook)
+============================
+  A          input covariance E[xx^T]
+  G          gradient covariance E[gg^T]
+  B          output covariance (derived from A + weights)
+
+METRICS (computed by compute_metrics.py)
+=========================================
+Model agnostic hook points:
+  blk{N}.up             up-proj
+  blk{N}.gate           gate-proj
+  blk{N}.down           down-proj
+  before_final_norm     residual before final layernorm
+  after_final_norm      residual after final layernorm
+
+Per factor (A / G / B):
+  rankme          effective rank (entropy-based)
+  alpha           power-law exponent of eigenspectrum
+  r2, r2_100      fit quality (all / top-100 eigvals)
+  eigenspectrum   full eigenvalue array
+
+Variants:
+  {factor}_centered       mean-subtracted version
+  {factor}_cross_{label}  cross-basis projection eigvals
+
+K-FAC (needs both A and G):
+  kfac.trace              tr(G ⊗ A) = tr(G) * tr(A)
+  kfac.log_det            damped log-det (array over alphas)
+  kfac.log_det_A/G        per-factor contributions
+  kfac.log_det_alphas     damping values used [1e-4, 1e-5, 1e-6]
+  kfac.top_eigvals        Kronecker product top eigenvalues
+  kfac.rankme/alpha/r2    spectral metrics on top_eigvals
+
+Generalized (G vs B, when B available):
+  gen_GB.eigvals / rankme / alpha / r2
