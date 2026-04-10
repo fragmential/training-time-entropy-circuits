@@ -206,33 +206,47 @@ def _prepare_cov(factors_dict: dict, store_means: bool = False, storage_dtype=No
 def _prepare_cov_svd(factors_dict: dict, store_means: bool = False, storage_dtype=None) -> dict:
     """Eigendecompose each covariance matrix. Store eigvecs + eigvals, optionally means.
 
-    Uses canonical _eigh_full / get_eigenspectrum from powerlaw.py.
+    Uses torch.linalg.eigh on GPU when available, falls back to CPU.
     Also stores centered eigenvalues when means are available.
     """
-    from utils.powerlaw import _eigh_full, get_eigenspectrum
+    import time as _t
+    from utils.powerlaw import decomp_profiler
+    decomp_profiler.enable()
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    t_total = _t.time()
     result = {}
     for name, data in factors_dict.items():
         entry = {"n": data.get("n", 0)}
         for key in _FACTOR_KEYS:
             if key in data and data[key] is not None:
-                M = data[key].cpu()
+                M = data[key]
                 n = data.get(f"n_{key}", data.get("n", 1))
                 entry[f"n_{key}"] = n
-                cov = (M / n).numpy()
-                eigvals, eigvecs = _eigh_full(cov)
-                entry[f"{key}_eigvals"] = _cast_for(torch.from_numpy(eigvals), "eigvals", storage_dtype)
-                entry[f"{key}_eigvecs"] = _cast_for(torch.from_numpy(eigvecs), "eigvecs", storage_dtype)
+                cov = (M.float() / n).to(device)
+                t0 = _t.time()
+                vals, vecs = torch.linalg.eigh(cov)
+                decomp_profiler.log(f"torch.eigh(save:{name}.{key})", tuple(cov.shape), _t.time() - t0)
+                eigvals = vals.flip(0).clamp(min=0).cpu()
+                eigvecs = vecs.flip(1).cpu()
+                entry[f"{key}_eigvals"] = _cast_for(eigvals, "eigvals", storage_dtype)
+                entry[f"{key}_eigvecs"] = _cast_for(eigvecs, "eigvecs", storage_dtype)
                 # Centered eigenvalues if mean available
                 mean_key = f"{key}_mean"
                 if mean_key in data and data[mean_key] is not None:
-                    mu = data[mean_key].cpu().numpy()
-                    centered = get_eigenspectrum(cov=cov, mu=mu)[0]
-                    entry[f"{key}_eigvals_centered"] = _cast_for(torch.from_numpy(centered), "eigvals", storage_dtype)
+                    mu = data[mean_key].float().to(device)
+                    centered_cov = cov - torch.outer(mu, mu)
+                    t0 = _t.time()
+                    c = torch.linalg.eigvalsh(centered_cov).flip(0).clamp(min=0).cpu()
+                    decomp_profiler.log(f"torch.eigvalsh(save_centered:{name}.{key})", tuple(cov.shape), _t.time() - t0)
+                    entry[f"{key}_eigvals_centered"] = _cast_for(c, "eigvals", storage_dtype)
             if store_means:
                 mean_key = f"{key}_mean"
                 if mean_key in data and data[mean_key] is not None:
                     entry[mean_key] = _cast_for(data[mean_key].cpu(), "mean", storage_dtype)
         result[name] = entry
+    print(f"  cov_svd save ({device}): {_t.time()-t_total:.1f}s")
+    print(decomp_profiler.summary())
+    decomp_profiler.disable()
     return result
 
 

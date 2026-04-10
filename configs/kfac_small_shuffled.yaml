@@ -1,0 +1,35 @@
+output_dir: inferences/kfac_small_shuffled
+# Same as kfac_small_updated but using pre-built shuffled olmo-mix data.
+
+model_name:
+  - "allenai/OLMo-2-0425-1B"
+  - "allenai/OLMo-2-1124-7B"
+
+#            OL1B OL7B
+batch_size: [  48,  16]
+
+# target_layers set per model: 7B uses layers 23,24,25; 1B uses layers 14,15
+target_layers:
+  allenai/OLMo-2-0425-1B: [0, 5, 10, 15]
+  allenai/OLMo-2-1124-7B: [23, 24, 25]
+
+packed_data_path: data/mixes/olmo_mix_6M_512.pt
+max_tokens: 4_000_000
+seq_len: 512
+min_length: 32
+max_checkpoints: 20
+checkpoint_spacing: sqrt
+packing: packed
+token_selection: all
+collect_final_acts: true
+collect_final_grads: true
+residual_hook_point: both
+collect_A: true
+collect_G: true
+sample_labels: true
+label_samples: 1
+seed: 42
+max_layers_per_pass: [4, 3]
+storage_format: cov_svd+m
+compute_metrics: True
+keep_cached: True

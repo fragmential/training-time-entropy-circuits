@@ -1,4 +1,4 @@
-output_dir: inferences/rankme_trainset_packed_40M
+output_dir: inferences/rankme_trainset_packed_4MT
 # Residual activation collection with packed training data.
 # Uses before_final_norm hook (raw residual stream), packed sequences, all tokens.
 # "native" resolves to each model's training data (pile_deduped for Pythia, olmo_mix for OLMo).
@@ -30,13 +30,15 @@ model_name:
 #            14m  14md 31m  31md 70m  70md 160m 160d 410m 410d 1b   1bd  1.4b 1.4d 2.8b 2.8d 6.9b 6.9d 12b  12bd OL1B OL7B
 batch_size: [1024,1024,1024,1024,1024,1024,1024,1024,1024,1024, 500, 500, 512, 512, 256, 256, 128, 128,  80,  80, 460, 200]
 
+packed_data_path:
+  allenai/*: data/mixes/olmo_mix_6M_512.pt
+  EleutherAI/*: data/mixes/pile_6M_512.pt
+
 dataset_name: native
-max_bytes: 40_000_000
-# num_samples: 5000
+max_tokens: 4_000_000
 seq_len: 512
 min_length: 32
 max_checkpoints: 50
-checkpoint_spacing: sqrt
 packing: packed
 token_selection: all
 collect_final_acts: true
@@ -44,3 +46,4 @@ residual_hook_point: identity_head
 collect_A: false
 collect_G: false
 storage_format: eigenvalues+mb
+compute_metrics: True

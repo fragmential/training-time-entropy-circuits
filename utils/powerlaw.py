@@ -1,3 +1,4 @@
+import time
 import numpy as np
 from sklearn.linear_model import LinearRegression
 from tqdm import tqdm
@@ -5,6 +6,35 @@ from sklearn.decomposition import PCA
 from sklearn.metrics import r2_score
 import torch
 import matplotlib.pyplot as plt
+
+
+# Decomposition profiler — tracks every eigh/eigvalsh call
+class _DecompProfiler:
+    def __init__(self):
+        self.calls = []  # (label, shape, duration)
+        self.enabled = False
+
+    def enable(self):
+        self.enabled = True
+        self.calls = []
+
+    def disable(self):
+        self.enabled = False
+
+    def log(self, label, shape, duration):
+        if self.enabled:
+            self.calls.append((label, shape, duration))
+
+    def summary(self):
+        if not self.calls:
+            return "  no decompositions recorded"
+        total = sum(d for _, _, d in self.calls)
+        lines = [f"  {len(self.calls)} decompositions, {total:.1f}s total:"]
+        for label, shape, dur in self.calls:
+            lines.append(f"    {label} {shape}: {dur:.2f}s")
+        return "\n".join(lines)
+
+decomp_profiler = _DecompProfiler()
 
 
 def fit_powerlaw(arr, start, end):
@@ -90,12 +120,16 @@ def generate_activations_prelayer_batch(net,layer,images,pool_transform=None):
     return activations[0]
 
 def _eigh(C, k):
+    t = time.time()
     v = np.clip(np.linalg.eigvalsh(C)[::-1], 0, None)
+    decomp_profiler.log("np.eigvalsh", C.shape, time.time() - t)
     return v[:k] if k else v
 
 def _eigh_full(C):
     """Full eigendecomposition: returns (eigvals descending clipped, eigvecs column-sorted)."""
+    t = time.time()
     vals, vecs = np.linalg.eigh(C)
+    decomp_profiler.log("np.eigh", C.shape, time.time() - t)
     return np.ascontiguousarray(np.clip(vals[::-1], 0, None)), np.ascontiguousarray(vecs[:, ::-1])
 
 def _from_acts(acts, k):
@@ -148,7 +182,7 @@ def stringer_get_powerlaw_batch(net, layer, data_loader, trange, use_cuda=False,
             break
     return np.array(alpha_arr), np.array(R2_arr), np.array(R2_100_arr)
 
-def rankme_metrics(eigen, top_k = 2048):
+def rankme_metrics(eigen, top_k = 10000):
     """eigen: raw covariance eigenvalues (centered or uncentered, normalized or not - doesn't matter)"""
     eigen = np.clip(eigen, 0, None) # We've already done this a million times but it don't hurt to do it another
     if top_k is not None:

@@ -13,3 +13,4 @@ covariance_factors
 inferences
 slurm/logs/*
 results/*
+data/mixes

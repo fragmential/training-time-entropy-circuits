@@ -1,0 +1,14 @@
+#!/bin/bash
+#SBATCH --job-name=build_mixes
+#SBATCH --partition=staging
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --time=01:00:00
+#SBATCH --output=slurm/logs/build_mixes_%j.out
+#SBATCH --error=slurm/logs/build_mixes_%j.err
+
+export HF_HOME="/projects/prjs1815/hf_cache"
+cd ~/Tracing-representation-geometry-reproduction
+
+TOTAL_TOKENS="${1:-6000000}"
+uv run python scripts/build_shuffled_mix.py --dataset all --total_tokens "$TOTAL_TOKENS"

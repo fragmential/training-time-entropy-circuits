@@ -63,7 +63,7 @@ _RESIDUAL_HOOK_STORAGE_KEY = {"identity_head": "after_final_norm"}
 
 # Fields that may vary per model in a sweep (accept scalar, list, or dict).
 VECTORIZABLE_FIELDS = {"batch_size", "max_checkpoints", "max_layers_per_pass", "dataset_name",
-                       "accumulation_dtype", "activation_dtype"}
+                       "accumulation_dtype", "activation_dtype", "packed_data_path"}
 
 
 def _resolve_wildcard_dict(d: dict, model_name: str, default=None):
@@ -90,6 +90,7 @@ class CollectConfig:
     # --- Model ---
     model_name: "str | list[str]" = "EleutherAI/pythia-14m"
     max_checkpoints: "int | dict[str, int] | list[int]" = 50
+    checkpoint_spacing: str = "linear"  # "linear" or "log" for non-early checkpoint subsampling
     checkpoints: "list[int] | list[list[int]] | dict | str | None" = None
     target_layers: "list | dict[str, list] | None" = None
     max_layers_per_pass: "int | dict[str, int] | list[int]" = 4
@@ -109,11 +110,13 @@ class CollectConfig:
     skip_positions: int = 0
     boundary_token_ids: "list | None" = None
     max_bytes: "int | None" = None  # if set, replaces num_samples as data budget (e.g. 80_000_000)
+    max_tokens: "int | None" = None  # if set, limit packed data to this many tokens (rounds up to full chunks)
+    packed_data_path: "str | dict[str, str] | list[str] | None" = None  # path to pre-built .pt of shape (n_chunks, seq_len)
 
     # --- What to collect ---
     collect_final_acts: bool = True
     collect_final_grads: bool = False
-    residual_hook_point: str = "identity_head"
+    residual_hook_point: str = "identity_head"  # or "both" for before + after final norm
     collect_A: bool = False
     collect_G: bool = False
     sample_labels: bool = True
@@ -327,41 +330,54 @@ def _collect_for_checkpoint(
         # No covariance — single pass with no block groups
         block_groups = [None]
 
-    for blk_group in block_groups:
-        collectors = {}
+    # --- Set up residual collector(s) once (shared across block groups) ---
+    identity_head_state = None
+    residual_collector = None  # first collector (used for identity_head feeding)
+    residual_collectors = {}  # rkey -> HookCollector
+    residual_keys = set()
+    if cfg.residual_hook_point == "both":
+        hook_points = ["before_final_norm", "after_final_norm"]
+    else:
+        hook_points = [cfg.residual_hook_point]
 
-        # --- Set up residual collector ---
-        identity_head_state = None
-        residual_collector = None
-        residual_key = _RESIDUAL_HOOK_STORAGE_KEY.get(cfg.residual_hook_point, cfg.residual_hook_point)
-
-        if cfg.collect_final_acts or cfg.collect_final_grads:
-            module, capture = _resolve_residual_hook(model, model_config, cfg.residual_hook_point)
+    if cfg.collect_final_acts or cfg.collect_final_grads:
+        for hp in hook_points:
+            rkey = _RESIDUAL_HOOK_STORAGE_KEY.get(hp, hp)
+            module, capture = _resolve_residual_hook(model, model_config, hp)
             if module is not None:
-                # Hook-based residual capture
-                residual_collector = HookCollector(
+                rc = HookCollector(
                     module, capture=capture, mode=storage_mode,
                     collect_means=collect_means,
                     collect_grad=cfg.collect_final_grads,
                     accumulation_dtype=cfg.accumulation_dtype,
                     activation_dtype=cfg.activation_dtype,
                 )
-                collectors[residual_key] = residual_collector
+                residual_collectors[rkey] = rc
+                residual_keys.add(rkey)
+                if residual_collector is None:
+                    residual_collector = rc
             else:
-                # identity_head: replace head, feed output manually
                 if cfg.collect_final_grads:
                     raise ValueError(
                         "collect_final_grads requires a hook-based residual_hook_point "
                         "(e.g. after_final_norm or before_final_norm), not identity_head"
                     )
                 identity_head_state = setup_identity_head(model)
-                residual_collector = HookCollector(
+                rc = HookCollector(
                     module=None, mode=storage_mode,
                     collect_means=collect_means,
                     accumulation_dtype=cfg.accumulation_dtype,
                     activation_dtype=cfg.activation_dtype,
                 )
-                collectors[residual_key] = residual_collector
+                residual_collectors[rkey] = rc
+                residual_keys.add(rkey)
+                if residual_collector is None:
+                    residual_collector = rc
+
+    for blk_group in block_groups:
+        # Include residual collectors only in the first pass
+        first_pass = blk_group is block_groups[0] if block_groups else True
+        collectors = dict(residual_collectors) if first_pass else {}
 
         # --- Set up MLP collectors ---
         if blk_group is not None:
@@ -391,7 +407,12 @@ def _collect_for_checkpoint(
             cov_token_sel = token_sel
 
         # --- Run batches ---
-        desc = f"Cov blk {blk_group}" if blk_group is not None else "Collecting"
+        parts = []
+        if first_pass and residual_keys:
+            parts.append("+".join(sorted(residual_keys)))
+        if blk_group is not None:
+            parts.append(f"blk {blk_group}")
+        desc = " + ".join(parts) if parts else "Collecting"
         batches = _batch_iterator(
             texts, tokenizer, packed_ids, cfg.packing,
             cfg.batch_size, cfg.max_length, device,
@@ -426,7 +447,7 @@ def _collect_for_checkpoint(
 
             # Set masks on collectors
             for cname, collector in collectors.items():
-                if cname == residual_key:
+                if cname in residual_keys:
                     collector.set_token_mask(residual_mask)
                 else:
                     collector.set_token_mask(cov_mask)
@@ -473,14 +494,12 @@ def _collect_for_checkpoint(
 
         # --- Collect factors and clean up ---
         for cname, collector in collectors.items():
-            # Each key is unique per layer; residual key may repeat across block_groups,
-            # so only save it once (first block_group wins).
             if cname not in all_factors:
                 all_factors[cname] = collector.factors()
             collector.close()
 
-        # Restore identity head if used
-        if identity_head_state is not None:
+        # Restore identity head after first pass
+        if first_pass and identity_head_state is not None:
             restore_head(model, *identity_head_state)
             identity_head_state = None
 
@@ -535,7 +554,7 @@ def main(cfg: CollectConfig):
     # Checkpoint schedule — explicit checkpoints list takes priority over max_checkpoints
     if cfg.checkpoints is not None:
         cfg.max_checkpoints = None
-    schedule = get_checkpoint_schedule(model_config, cfg.max_checkpoints)
+    schedule = get_checkpoint_schedule(model_config, cfg.max_checkpoints, cfg.checkpoint_spacing)
     if cfg.checkpoints == "final":
         cfg.checkpoints = [schedule[-1][0]] if schedule else []
     if cfg.checkpoints is not None:
@@ -567,18 +586,26 @@ def main(cfg: CollectConfig):
     tokenizer = load_tokenizer(model_config, revision=first_revision)
 
     # Load data
-    loader_fn = get_loader(cfg.dataset_name)
-    texts = load_and_cache_texts(
-        loader_fn, cfg.num_samples, cfg.min_length, tokenizer,
-        cfg.dataset_name, cfg.dataset_content_key,
-        max_bytes=cfg.max_bytes,
-    )
-
-    # Pack sequences if needed
     packed_ids = None
-    if cfg.packing == "packed":
-        packed_ids = pack_sequences(texts, tokenizer, cfg.seq_len)
-        print(f"Packed data: {packed_ids.shape[0]} chunks of {cfg.seq_len} tokens")
+    texts = None
+    if cfg.packed_data_path and cfg.packing == "packed":
+        # Pre-built shuffled mix: load directly
+        packed_ids = torch.load(cfg.packed_data_path, map_location="cpu", weights_only=True)
+        if cfg.max_tokens:
+            n_chunks = (cfg.max_tokens + cfg.seq_len - 1) // cfg.seq_len  # round up
+            packed_ids = packed_ids[:n_chunks]
+        print(f"Loaded pre-built packed data: {packed_ids.shape[0]} chunks of {packed_ids.shape[1]} tokens"
+              f" from {cfg.packed_data_path}")
+    else:
+        loader_fn = get_loader(cfg.dataset_name)
+        texts = load_and_cache_texts(
+            loader_fn, cfg.num_samples, cfg.min_length, tokenizer,
+            cfg.dataset_name, cfg.dataset_content_key,
+            max_bytes=cfg.max_bytes,
+        )
+        if cfg.packing == "packed":
+            packed_ids = pack_sequences(texts, tokenizer, cfg.seq_len)
+            print(f"Packed data: {packed_ids.shape[0]} chunks of {cfg.seq_len} tokens")
 
     # Boundary tokens for packed + last-token mode
     boundary_token_ids = cfg.boundary_token_ids
@@ -654,10 +681,8 @@ def main(cfg: CollectConfig):
                 from utils.accessor import DataAccessor
                 from scripts.compute_metrics import compute_metrics_for_checkpoint
                 saved_data = torch.load(out_path, map_location="cpu", weights_only=False)
-                model.cpu()
                 acc = DataAccessor(saved_data, model=model, model_config=model_config)
-                step_metrics = compute_metrics_for_checkpoint(acc)
-                model.to(device)
+                step_metrics = compute_metrics_for_checkpoint(acc, verbose=True)
                 metrics_dir = os.path.join(cfg.output_dir.replace("inferences", "results", 1)
                                            if cfg.output_dir else "results")
                 os.makedirs(metrics_dir, exist_ok=True)

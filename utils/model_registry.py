@@ -60,25 +60,40 @@ def get_model_config(model_name: str) -> ModelConfig:
 
 # --- Checkpoint discovery ---
 
-def _pythia_checkpoints(config, max_checkpoints):
+def _subsample(items, max_n, spacing="linear"):
+    if not max_n or len(items) <= max_n:
+        return items
+    n = len(items)
+    if spacing == "log":
+        t = np.geomspace(1, n, max_n) - 1
+    elif spacing == "sqrt":
+        t = np.linspace(0, np.sqrt(n - 1), max_n) ** 2
+    else:
+        t = np.linspace(0, n - 1, max_n)
+    indices = np.unique(np.round(t).astype(int))
+    # If rounding lost slots, fill gaps with linear interpolation
+    while len(indices) < max_n and len(indices) < n:
+        gaps = np.diff(indices)
+        biggest = np.argmax(gaps)
+        mid = (indices[biggest] + indices[biggest + 1]) // 2
+        indices = np.sort(np.append(indices, mid))
+    return [items[i] for i in indices]
+
+
+def _pythia_checkpoints(config, max_checkpoints, spacing="linear"):
     early = [0, 8, 16, 32, 64, 128, 256, 512]
     later = list(np.arange(1000, 143_001, 1000))
-    if max_checkpoints and len(later) > max_checkpoints:
-        indices = np.linspace(0, len(later) - 1, max_checkpoints, dtype=int)
-        later = [later[i] for i in indices]
-    return [(s, f"step{s}", config.hf_repo) for s in early + later]
+    return [(s, f"step{s}", config.hf_repo) for s in early + _subsample(later, max_checkpoints, spacing)]
 
 
-def _olmo_checkpoints(config, max_checkpoints):
+def _olmo_checkpoints(config, max_checkpoints, spacing="linear"):
     if config.revisions_file is None:
         raise ValueError(f"OLMo model '{config.hf_repo}' has no revisions_file configured in model_registry.")
     checkpoint_map = _read_revisions_file(config.revisions_file)
     all_steps = sorted(checkpoint_map.keys())
     early = sorted(s for s in all_steps if s <= 10_000)
     later = sorted(s for s in all_steps if s > 10_000 and s % 10_000 == 0)
-    if max_checkpoints and len(later) > max_checkpoints:
-        indices = np.linspace(0, len(later) - 1, max_checkpoints, dtype=int)
-        later = [later[i] for i in indices]
+    later = _subsample(later, max_checkpoints, spacing)
     schedule = []
     for s in early + later:
         rev = checkpoint_map[s]
@@ -110,11 +125,11 @@ def _read_revisions_file(filepath: str) -> dict:
     return checkpoint_map
 
 
-def get_checkpoint_schedule(config, max_checkpoints=50):
+def get_checkpoint_schedule(config, max_checkpoints=50, checkpoint_spacing="linear"):
     """Return list of (step_num, revision_str, hf_model_name) tuples."""
     if config.family == "pythia":
-        return _pythia_checkpoints(config, max_checkpoints)
-    return _olmo_checkpoints(config, max_checkpoints)
+        return _pythia_checkpoints(config, max_checkpoints, checkpoint_spacing)
+    return _olmo_checkpoints(config, max_checkpoints, checkpoint_spacing)
 
 
 # --- Model loading ---

@@ -1,18 +1,16 @@
-
-1.
-log-det is now measured of A and G in kfac_metrics(),
-but not yet B or A,G,B centered. We should actually
-compute log-det of A and B and G separately (with the
-same method we do in kfac_metrics) and store them
-separately (also for residuals and stuff). Should make
-sure to then not recalculate it for K-FAC, but just
-reuse the A and G ones.
-
-2.
-Make a "whole layer k-fac log det". It doesn't really
-make sense as curvature, but basically you can do
-something like kfac but with the down_proj G and
-the up_proj A.
+3.
+Compute metrics / powerlaw / dataaccessor:
+- Bin into histogram inside kfac code (not abg because
+those can be computed after). default=1024 bins.
+Normalised to a density. Store log and not log. Also
+store something to convert back to counts as well (if
+this is needed, maybe it's not idk. or maybe it's
+better to store in counts if it's easier to normalise
+after the fact).
+- Add size of mean to the metrics (everywhere there is
+a mean (so like a/b/g))
+- Add dimension of data everywhere (kfac and abg) to
+the metrics for convenience.
 
 4.
 Test on alternative datasets (memorization, quotes,

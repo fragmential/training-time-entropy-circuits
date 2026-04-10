@@ -185,7 +185,7 @@ class HookCollector:
     def _bwd(self, module, grad_input, grad_output):
         if not self.active:
             return
-        go = grad_output[0]
+        go = grad_input[0] if self.capture == "input" else grad_output[0]
         if go is None:
             return
         g = go.detach()

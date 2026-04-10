@@ -153,7 +153,16 @@ class DataAccessor:
         Stores (centered_eigvals, uncentered_eigvals, eigvecs_or_None) in _eigh_cache.
         If need_vecs and we only have eigvals cached, recomputes with full eigh.
         """
+        # blkN.layer virtual hook: redirect A→up.A, G→down.G
+        orig_key = (hook_name, factor)
+        if hook_name.endswith(".layer"):
+            hook_name = hook_name[:-6] + (".up" if factor == "A" else ".down")
         cache_key = (hook_name, factor)
+        if orig_key != cache_key:
+            # Alias so callers can look up by either name
+            if cache_key in self._eigh_cache:
+                self._eigh_cache[orig_key] = self._eigh_cache[cache_key]
+                return
         cached = self._eigh_cache.get(cache_key)
         if cached is not None and (not need_vecs or cached[2] is not None):
             return
@@ -172,7 +181,9 @@ class DataAccessor:
                     V = entry[f"{factor}_eigvecs"].float()
                     S = entry[f"{factor}_eigvals"].float()
                     cov = V @ torch.diag(S) @ V.T
+                    import time as _t; _t0 = _t.time()
                     centered = torch.linalg.eigvalsh(cov - torch.outer(mu_t.float(), mu_t.float())).flip(0).clamp(min=0)
+                    from utils.powerlaw import decomp_profiler; decomp_profiler.log("torch.eigvalsh(recover_centered)", tuple(cov.shape), _t.time() - _t0)
             self._eigh_cache[cache_key] = (
                 centered,
                 entry[f"{factor}_eigvals"],
@@ -207,6 +218,8 @@ class DataAccessor:
                 centered, uncentered = _to_torch(c), _to_torch(u)
 
         self._eigh_cache[cache_key] = (centered, uncentered, eigvecs)
+        if orig_key != cache_key:
+            self._eigh_cache[orig_key] = self._eigh_cache[cache_key]
 
     def _eigenvalues(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
         if factor == "B":
@@ -229,7 +242,8 @@ class DataAccessor:
 
     def _covariance(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
         if factor == "B":
-            return self._B_covariance(hook_name)
+            c = self._B_covariance(hook_name)
+            return c.cpu() if c is not None else None
 
         entry = self._entry(hook_name)
 
@@ -336,6 +350,7 @@ class DataAccessor:
 
         W = layer.weight.detach().float()
         b = layer.bias.detach().float() if layer.bias is not None else None
+        A_cov = A_cov.to(W.device)
 
         B_cov = W @ A_cov @ W.T
         if b is not None:
@@ -370,17 +385,30 @@ class DataAccessor:
             return
 
         # Centered eigenvalues (B_cov - outer(B_mean, B_mean))
+        import time as _t
+        from utils.powerlaw import decomp_profiler
         centered = None
         B_mean = self._B_mean(hook_name)
         if B_mean is not None:
-            B_centered_cov = B_cov - torch.outer(B_mean.float(), B_mean.float())
-            centered = torch.linalg.eigvalsh(B_centered_cov).flip(0).clamp(min=0)
+            B_centered_cov = B_cov - torch.outer(B_mean.to(B_cov.device).float(), B_mean.to(B_cov.device).float())
+            _t0 = _t.time()
+            centered = torch.linalg.eigvalsh(B_centered_cov).flip(0).clamp(min=0).cpu()
+            decomp_profiler.log(f"torch.eigvalsh(B_centered:{hook_name})", tuple(B_cov.shape), _t.time() - _t0)
 
         if need_vecs:
+            _t0 = _t.time()
             vals, vecs = torch.linalg.eigh(B_cov)
-            self._eigh_cache[cache_key] = (centered, vals.flip(0).clamp(min=0), vecs.flip(1))
+            decomp_profiler.log(f"torch.eigh(B:{hook_name})", tuple(B_cov.shape), _t.time() - _t0)
+            self._eigh_cache[cache_key] = (
+                centered.cpu() if centered is not None else None,
+                vals.flip(0).clamp(min=0).cpu(), vecs.flip(1).cpu())
         else:
-            self._eigh_cache[cache_key] = (centered, torch.linalg.eigvalsh(B_cov).flip(0).clamp(min=0), None)
+            _t0 = _t.time()
+            eigvals = torch.linalg.eigvalsh(B_cov).flip(0).clamp(min=0)
+            decomp_profiler.log(f"torch.eigvalsh(B:{hook_name})", tuple(B_cov.shape), _t.time() - _t0)
+            self._eigh_cache[cache_key] = (
+                centered.cpu() if centered is not None else None,
+                eigvals.cpu(), None)
 
     def _B_eigenvalues(self, hook_name: str) -> Optional[torch.Tensor]:
         self._ensure_B_eigh(hook_name)
@@ -402,10 +430,10 @@ class DataAccessor:
             return None
         W = layer.weight.detach().float()
         b = layer.bias.detach().float() if layer.bias is not None else None
-        B_mean = W @ mu.float()
+        B_mean = W @ mu.to(W.device).float()
         if b is not None:
             B_mean = B_mean + b
-        return B_mean
+        return B_mean.cpu()
 
     # ------------------------------------------------------------------
     # Internal: norm derivation (before_final_norm → after_final_norm)
@@ -476,6 +504,11 @@ class DataAccessor:
                     factors.append("B")
             if factors:
                 result[hook_name] = factors
+
+        # Virtual hook: blkN.layer — whole-layer K-FAC (up.A × down.G)
+        for blk in {h.split(".")[0] for h in result if re.match(r"blk\d+\.", h)}:
+            if "A" in result.get(f"{blk}.up", []) and "G" in result.get(f"{blk}.down", []):
+                result[f"{blk}.layer"] = ["A", "G"]
 
         # Virtual hook: after_final_norm from before_final_norm acts
         if "after_final_norm" not in result and "before_final_norm" in result:

@@ -49,8 +49,8 @@ _STEP_RE = re.compile(r"step(\d+)\.pt$")
 # Spectral metrics from an eigenvalue array
 # ---------------------------------------------------------------------------
 
-def spectral_metrics(eigen) -> dict:
-    """Compute RankMe, alpha, R2 from an eigenspectrum (descending, non-negative).
+def spectral_metrics(eigen, damping=1e-6) -> dict:
+    """Compute RankMe, alpha, R2, log-det from an eigenspectrum (descending, non-negative).
 
     Accepts numpy array or torch.Tensor.
     """
@@ -59,15 +59,19 @@ def spectral_metrics(eigen) -> dict:
     eigen = np.maximum(eigen, 0)
     trace = float(np.sum(eigen))
     d = len(eigen)
+    eps = damping * trace / max(d, 1)
+    log_det = float(np.sum(np.log(eigen + eps)))
+
     eigen = eigen / np.sum(eigen) # normalise into sum 1
     rm = powerlaw.rankme_metrics(eigen)
-    alpha, ypred, fit_r2, fit_r2_100 = powerlaw.stringer_get_powerlaw(eigen, np.arange(11, 100))
+    alpha_fit, ypred, fit_r2, fit_r2_100 = powerlaw.stringer_get_powerlaw(eigen, np.arange(11, 100))
     return {
         "eigenspectrum": eigen,
         "trace": trace,
         "avg_magnitude": trace / d,
+        "log_det": log_det,
         **rm,
-        "alpha": alpha,
+        "alpha": alpha_fit,
         "ypred": ypred,
         "r2": fit_r2,
         "r2_100": fit_r2_100,
@@ -154,16 +158,14 @@ def kfac_metrics(
     eigvals_G: np.ndarray,
     top_k: int = 10000,
     sample_k: int = 1000,
-    log_det_alphas: tuple = (1e-4, 1e-5, 1e-6),
+    damping: float = 1e-6,
 ) -> dict:
     """K-FAC metrics from A and G eigenvalues.
 
     Returns:
         trace:          trace(G ⊗ A) = trace(G) * trace(A)
-        log_det:        array of len(log_det_alphas) damped log-determinants
-                        L(α) = d_A * logdet(G + ε_G I) + d_G * logdet(A + ε_A I)
-                        where ε_X = α * trace(X) / d_X
-        log_det_alphas: the alpha values used
+        log_det:        damped log-determinant: d_A * logdet(G + ε_G I) + d_G * logdet(A + ε_A I)
+                        where ε_X = damping * trace(X) / d_X
         top_eigvals:    top-k exact products λ_A^i * λ_G^j
         sampled_eigvals: sample_k products linearly spaced across full distribution
         + spectral metrics on top_eigvals (rankme, alpha, r2, r2_100)
@@ -174,15 +176,11 @@ def kfac_metrics(
     trace_G = float(eigvals_G.sum())
     trace = trace_A * trace_G
 
-    # Damped log-determinant at multiple alpha values
-    log_dets = []
-    for alpha in log_det_alphas:
-        eps_A = alpha * trace_A / max(d_in, 1)
-        eps_G = alpha * trace_G / max(d_out, 1)
-        ld_A = float(np.sum(np.log(eigvals_A + eps_A)))
-        ld_G = float(np.sum(np.log(eigvals_G + eps_G)))
-        log_dets.append((ld_A, ld_G, d_in * ld_G + d_out * ld_A))
-    log_det_A, log_det_G, log_det = [np.array(ld) for ld in zip(*log_dets)]
+    eps_A = damping * trace_A / max(d_in, 1)
+    eps_G = damping * trace_G / max(d_out, 1)
+    ld_A = float(np.sum(np.log(eigvals_A + eps_A)))
+    ld_G = float(np.sum(np.log(eigvals_G + eps_G)))
+    log_det = d_in * ld_G + d_out * ld_A
 
     k_top = min(top_k, d_in * d_out)
     top_eigvals = _top_k_outer_products(eigvals_A, eigvals_G, k_top)
@@ -199,9 +197,8 @@ def kfac_metrics(
         "trace_A": trace_A,
         "trace_G": trace_G,
         "log_det": log_det,
-        "log_det_A": log_det_A,
-        "log_det_G": log_det_G,
-        "log_det_alphas": np.array(log_det_alphas),
+        "log_det_A": ld_A,
+        "log_det_G": ld_G,
         "top_eigvals": top_eigvals,
         "sampled_eigvals": sampled_eigvals,
         **sm,
@@ -234,10 +231,11 @@ def generalized_eigenvalues_GB(
     """
     import torch
 
-    eG = torch.as_tensor(eigvals_G, dtype=torch.float32)
-    vG = torch.as_tensor(eigvecs_G, dtype=torch.float32)
-    eB = torch.as_tensor(eigvals_B, dtype=torch.float32)
-    vB = torch.as_tensor(eigvecs_B, dtype=torch.float32)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    eG = torch.as_tensor(eigvals_G, dtype=torch.float32, device=device)
+    vG = torch.as_tensor(eigvecs_G, dtype=torch.float32, device=device)
+    eB = torch.as_tensor(eigvals_B, dtype=torch.float32, device=device)
+    vB = torch.as_tensor(eigvecs_B, dtype=torch.float32, device=device)
 
     eps = max(eB.max().item() * eps_factor, 1e-10)
     lb_inv_sqrt = (eB + eps).rsqrt()          # (d,)
@@ -247,20 +245,34 @@ def generalized_eigenvalues_GB(
     C = lb_inv_sqrt.unsqueeze(1) * Q * lg_sqrt.unsqueeze(0)  # (d, d)
     M = C @ C.T                               # symmetric PSD
 
-    gen_eigvals = torch.linalg.eigvalsh(M).flip(0).clamp(min=0)
+    import time as _t; _t0 = _t.time()
+    gen_eigvals = torch.linalg.eigvalsh(M).flip(0).clamp(min=0).cpu()
+    from utils.powerlaw import decomp_profiler; decomp_profiler.log("torch.eigvalsh(gen_GB)", tuple(M.shape), _t.time() - _t0)
     return gen_eigvals.numpy()
 
-def compute_metrics_for_checkpoint(accessor: DataAccessor):
+def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False):
+    import time
+    from utils.powerlaw import decomp_profiler
+    if verbose:
+        decomp_profiler.enable()
     avail = accessor.available()
     step_results = {}
+    t0 = time.time()
 
     # Pre-warm: request eigvecs upfront for factors that need generalized eigendecomp
     for hook_name, factors in avail.items():
         if "B" in factors:
+            t = time.time()
             accessor._ensure_eigh(hook_name, "G", need_vecs=True)
             accessor._ensure_B_eigh(hook_name, need_vecs=True)
+            if verbose:
+                print(f"    prewarm {hook_name}: {time.time()-t:.1f}s")
+
+    if verbose:
+        print(f"    prewarm total: {time.time()-t0:.1f}s")
 
     for hook_name, factors in avail.items():
+        t_hook = time.time()
         hook_results = {}
         hook = accessor[hook_name]
         entry = accessor._entry(hook_name)
@@ -313,7 +325,13 @@ def compute_metrics_for_checkpoint(accessor: DataAccessor):
 
         if hook_results:
             step_results[hook_name] = hook_results
+            if verbose:
+                print(f"    {hook_name} ({', '.join(factors)}): {time.time()-t_hook:.1f}s")
 
+    if verbose:
+        print(f"    metrics total: {time.time()-t0:.1f}s ({len(step_results)} hooks)")
+        print(decomp_profiler.summary())
+        decomp_profiler.disable()
     return step_results
 
 
