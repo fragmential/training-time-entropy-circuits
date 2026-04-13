@@ -169,7 +169,7 @@ class DataAccessor:
 
         entry = self._entry(hook_name)
         centered, uncentered, eigvecs = None, None, None
-        _to_torch = lambda x: torch.from_numpy(x) if x is not None else None
+        dev = "cuda" if torch.cuda.is_available() else "cpu"
 
         # Stored eigvals (eigenvalues / cov_svd format)
         if f"{factor}_eigvals" in entry and (not need_vecs or f"{factor}_eigvecs" in entry):
@@ -178,12 +178,13 @@ class DataAccessor:
             if centered is None and f"{factor}_eigvecs" in entry:
                 mu_t = self._mean(hook_name, factor)
                 if mu_t is not None:
-                    V = entry[f"{factor}_eigvecs"].float()
-                    S = entry[f"{factor}_eigvals"].float()
-                    cov = V @ torch.diag(S) @ V.T
+                    V = entry[f"{factor}_eigvecs"].to(dev)
+                    S = entry[f"{factor}_eigvals"].to(dev)
+                    mu_d = mu_t.to(device=dev, dtype=V.dtype)
+                    cov = V @ torch.diag(S.to(V.dtype)) @ V.T
                     import time as _t; _t0 = _t.time()
-                    centered = torch.linalg.eigvalsh(cov - torch.outer(mu_t.float(), mu_t.float())).flip(0).clamp(min=0)
-                    from utils.powerlaw import decomp_profiler; decomp_profiler.log("torch.eigvalsh(recover_centered)", tuple(cov.shape), _t.time() - _t0)
+                    centered = torch.linalg.eigvalsh(cov - torch.outer(mu_d, mu_d)).flip(0).clamp(min=0).cpu()
+                    from utils.powerlaw import decomp_profiler; decomp_profiler.log(f"torch.eigvalsh(recover_centered)[{dev}]", tuple(cov.shape), _t.time() - _t0)
             self._eigh_cache[cache_key] = (
                 centered,
                 entry[f"{factor}_eigvals"],
@@ -197,25 +198,27 @@ class DataAccessor:
             if isinstance(t, torch.Tensor) and t.dim() == 2 and t.shape[0] == t.shape[1]:
                 from utils.powerlaw import get_eigenspectrum, _eigh_full
                 n = entry.get(f"n_{factor}", entry.get("n", 1))
-                cov = (t / n).numpy()
+                cov = (t.to(dev) / n)
                 mu_t = self._mean(hook_name, factor)
-                mu = mu_t.numpy() if mu_t is not None else None
+                mu = mu_t.to(device=dev, dtype=cov.dtype) if mu_t is not None else None
                 if need_vecs:
-                    unc_np, vecs_np = _eigh_full(cov)
-                    uncentered, eigvecs = _to_torch(unc_np), _to_torch(vecs_np)
+                    uncentered, eigvecs = _eigh_full(cov)
+                    uncentered, eigvecs = uncentered.cpu(), eigvecs.cpu()
                     # Centered eigvals from the same cov - one extra eigvalsh, not full eigh
-                    centered = _to_torch(get_eigenspectrum(cov=cov, mu=mu)[0]) if mu is not None else None
+                    centered = get_eigenspectrum(cov=cov, mu=mu)[0].cpu() if mu is not None else None
                 else:
                     c, u = get_eigenspectrum(cov=cov, mu=mu)
-                    centered, uncentered = _to_torch(c), _to_torch(u)
+                    centered = c.cpu() if c is not None else None
+                    uncentered = u.cpu()
 
         # Fallback: raw activations
         if uncentered is None:
             acts = self._activations(hook_name, factor)
             if acts is not None:
                 from utils.powerlaw import get_eigenspectrum
-                c, u = get_eigenspectrum(acts=acts.numpy())
-                centered, uncentered = _to_torch(c), _to_torch(u)
+                c, u = get_eigenspectrum(acts=acts.to(dev))
+                centered = c.cpu() if c is not None else None
+                uncentered = u.cpu()
 
         self._eigh_cache[cache_key] = (centered, uncentered, eigvecs)
         if orig_key != cache_key:
@@ -360,7 +363,7 @@ class DataAccessor:
                     f"Cannot derive B for '{hook_name}': layer has a bias but no A_mean is stored. "
                     f"Re-collect with a storage format that includes the '+m' modifier (e.g. cov_svd+m)."
                 )
-            Wmu = W @ mu.float()
+            Wmu = W @ mu.to(device=W.device, dtype=W.dtype)
             B_cov = B_cov + torch.outer(Wmu, b) + torch.outer(b, Wmu) + torch.outer(b, b)
 
         return B_cov

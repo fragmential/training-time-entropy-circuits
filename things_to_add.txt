@@ -1,3 +1,4 @@
+[DONE]
 3.
 Compute metrics / powerlaw / dataaccessor:
 - Bin into histogram inside kfac code (not abg because
@@ -11,17 +12,13 @@ after the fact).
 a mean (so like a/b/g))
 - Add dimension of data everywhere (kfac and abg) to
 the metrics for convenience.
+[/DONE]
 
 4.
 Test on alternative datasets (memorization, quotes,
 maths), to obtain conditional statistics.
 
 5.
-histogram of eigenspectra, note: probably better to
-have axis show unnormalised. To get unnormalised,
-just multiply by trace.
-
-6.
 Add spectral statistics of the weights themselves.
 Note: this is ideally a different run and not stored in
 the others, otherwise it would just be a duplicate
@@ -34,5 +31,5 @@ we plot the maximum overlap between activation
 eigenvectors and matrix singular vectors but along the
 axis of the histogram of activations instead of weights
 
-7.
+6.
 Get OV data.

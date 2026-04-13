@@ -50,12 +50,14 @@ class HookCollector:
         collect_means: bool = False,
         accumulation_dtype: str = "fp64",
         activation_dtype: str = "fp32",
+        grad_capture: str = None,
     ):
         assert mode in ("cov", "acts"), f"Unknown mode: {mode}"
         assert capture in ("input", "output"), f"Unknown capture: {capture}"
 
         self.mode = mode
         self.capture = capture
+        self.grad_capture = grad_capture if grad_capture is not None else capture
         self.collect_grad = collect_grad
         self.collect_means = collect_means
         self.active = True
@@ -185,7 +187,7 @@ class HookCollector:
     def _bwd(self, module, grad_input, grad_output):
         if not self.active:
             return
-        go = grad_input[0] if self.capture == "input" else grad_output[0]
+        go = grad_input[0] if self.grad_capture == "input" else grad_output[0]
         if go is None:
             return
         g = go.detach()

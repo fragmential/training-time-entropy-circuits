@@ -90,7 +90,7 @@ class CollectConfig:
     # --- Model ---
     model_name: "str | list[str]" = "EleutherAI/pythia-14m"
     max_checkpoints: "int | dict[str, int] | list[int]" = 50
-    checkpoint_spacing: str = "linear"  # "linear" or "log" for non-early checkpoint subsampling
+    checkpoint_spacing: str = "linear"  # "linear" or "log" or "sqrt" for non-early checkpoint subsampling
     checkpoints: "list[int] | list[list[int]] | dict | str | None" = None
     target_layers: "list | dict[str, list] | None" = None
     max_layers_per_pass: "int | dict[str, int] | list[int]" = 4
@@ -142,6 +142,9 @@ class CollectConfig:
 
     # --- Cache ---
     keep_cached: bool = False  # don't delete HF checkpoints after processing
+
+    # --- Continue ---
+    continue_from: "str | None" = None  # path to a previous run's output_dir to continue from
 
     # --- Sweep ---
     array_id: "int | None" = None
@@ -395,6 +398,7 @@ def _collect_for_checkpoint(
                         collect_means=collect_means,
                         accumulation_dtype=cfg.accumulation_dtype,
                         activation_dtype=cfg.activation_dtype,
+                        grad_capture="output",
                     )
 
         # --- Token mask function ---
@@ -510,6 +514,93 @@ def _collect_for_checkpoint(
 
 
 # ---------------------------------------------------------------------------
+# Continue-run helpers
+# ---------------------------------------------------------------------------
+
+
+def _reconstruct_raw_factors(existing_data: dict) -> dict:
+    """Reconstruct raw accumulator dicts from a saved .pt file so they can be merged.
+
+    Reads __format__ from the file itself to determine how to decode it.
+    """
+    fmt_str = existing_data.get("__format__", "cov")
+    base_format = fmt_str.split("+")[0]
+    raw = {}
+    for hook_name, entry in existing_data.items():
+        if hook_name.startswith("__"):
+            continue
+        raw_entry = {}
+        for fk in ("A", "G"):
+            n_key = f"n_{fk}"
+            if n_key not in entry:
+                continue
+            n = entry[n_key]
+            if base_format == "acts":
+                if fk in entry:
+                    raw_entry[fk] = entry[fk]  # (N, d) — will concat
+            elif base_format == "cov":
+                if fk in entry:
+                    raw_entry[fk] = entry[fk].double()  # raw unnormalized cov
+            elif base_format in ("cov_svd", "acts_svd"):
+                vec_key, val_key = f"{fk}_eigvecs", f"{fk}_eigvals"
+                if val_key not in entry:
+                    continue
+                if vec_key not in entry:
+                    raise ValueError(
+                        f"Cannot continue {hook_name}.{fk}: eigvecs missing "
+                        f"(eigenvalues-only format cannot be merged)"
+                    )
+                V = entry[vec_key].double()    # (d, k)
+                lam = entry[val_key].double()  # (k,)
+                raw_entry[fk] = (V * lam) @ V.T * n  # unnormalized cov (d, d)
+            else:
+                raise ValueError(
+                    f"Cannot continue with storage format '{base_format}': "
+                    f"eigenvalues-only format has no eigvecs to reconstruct from"
+                )
+            raw_entry[n_key] = n
+            mean_key = f"{fk}_mean"
+            if mean_key in entry:
+                raw_entry[mean_key] = entry[mean_key].float()  # normalized mean (d,)
+        raw[hook_name] = raw_entry
+    return raw
+
+
+def _merge_with_existing(existing_raw: dict, new_factors: dict) -> dict:
+    """Add existing raw accumulators into new_factors (in-place). Returns new_factors."""
+    for hook_name, old in existing_raw.items():
+        if hook_name not in new_factors:
+            continue
+        new = new_factors[hook_name]
+        for fk in ("A", "G"):
+            n_key = f"n_{fk}"
+            if fk not in old or n_key not in old:
+                continue
+            old_n = old[n_key]
+            new_n = new.get(n_key, 0)
+            merged_n = old_n + new_n
+            if fk in new:
+                if old[fk].dim() == 2 and old[fk].shape[0] != old[fk].shape[1]:
+                    # Acts mode: concat along token dim
+                    new[fk] = torch.cat([old[fk], new[fk]], dim=0)
+                else:
+                    # Cov mode: add unnormalized accumulators
+                    new[fk] = old[fk].to(dtype=new[fk].dtype) + new[fk]
+            else:
+                new[fk] = old[fk]
+            # Merge means (weighted average of normalized means)
+            mean_key = f"{fk}_mean"
+            if mean_key in old:
+                if mean_key in new and new_n > 0:
+                    new[mean_key] = (old[mean_key] * old_n + new[mean_key] * new_n) / merged_n
+                else:
+                    new[mean_key] = old[mean_key]
+            new[n_key] = merged_n
+        new["n"] = new.get("n_A", 0)
+    return new_factors
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -613,6 +704,54 @@ def main(cfg: CollectConfig):
         if tokenizer.eos_token_id is not None:
             boundary_token_ids = [tokenizer.eos_token_id]
 
+    # Continue-from: determine how much data the previous run already processed and skip it
+    n_chunks_done = 0  # for packed: chunks already accumulated in existing files
+    if cfg.continue_from:
+        continue_model_dir = os.path.join(cfg.continue_from, short_name)
+        # Find any existing checkpoint to read metadata from
+        ref_data = None
+        for step_num, _, _ in to_process:
+            candidate = os.path.join(continue_model_dir, f"step{step_num}.pt")
+            if os.path.exists(candidate):
+                ref_data = torch.load(candidate, map_location="cpu", weights_only=False)
+                break
+        if ref_data is None:
+            raise ValueError(
+                f"continue_from={cfg.continue_from!r} but no existing checkpoint files found "
+                f"in {continue_model_dir} for the steps we need to process."
+            )
+        old_fmt = ref_data.get("__format__", "cov")
+        if old_fmt != cfg.storage_format:
+            raise ValueError(f"storage_format must match continued data (existing={old_fmt!r}, new={cfg.storage_format!r})")
+
+        if cfg.packing == "padded":
+            # n_A == n_sequences for last-token padded collection
+            n_done = next(
+                v["n_A"] for k, v in ref_data.items()
+                if not k.startswith("__") and "n_A" in v
+            )
+            print(f"  continue_from: existing run has {n_done} sequences; skipping to texts[{n_done}:]")
+            texts = texts[n_done:]
+            if len(texts) == 0:
+                raise ValueError(f"No new texts to process — existing run already covers all {n_done} sequences.")
+        else:
+            # Packed: need __n_chunks__ stored by a previous continue-aware run
+            n_chunks_done = ref_data.get("__n_chunks__")
+            if n_chunks_done is None:
+                raise ValueError(
+                    "continue_from: existing .pt has no __n_chunks__ metadata. "
+                    "The original run must have been collected with this version of collect.py."
+                )
+            if packed_ids is not None:
+                total_avail = len(packed_ids)
+                if n_chunks_done >= total_avail:
+                    raise ValueError(
+                        f"Not enough chunks to continue: existing run used {n_chunks_done} chunks "
+                        f"but total data only has {total_avail} chunks."
+                    )
+                packed_ids = packed_ids[n_chunks_done:]
+                print(f"  continue_from: skipping {n_chunks_done} chunks → {len(packed_ids)} new chunks remaining")
+
     # Main loop
     device = "cuda" if torch.cuda.is_available() else "cpu"
     executor = ThreadPoolExecutor(max_workers=1)
@@ -636,6 +775,7 @@ def main(cfg: CollectConfig):
         else:
             prefetch_future = None
 
+        model = None
         try:
             model = load_model(model_config, step_model, revision)
             model.to(device)
@@ -663,6 +803,16 @@ def main(cfg: CollectConfig):
             if "+b" in cfg.storage_format and cfg.storage_format.split("+")[0] == "eigenvalues":
                 _derive_B_factors(factors, model, model_config)
 
+            # Merge with existing data if continuing a previous run
+            if cfg.continue_from:
+                exist_path = os.path.join(cfg.continue_from, short_name, f"step{step_num}.pt")
+                if os.path.exists(exist_path):
+                    existing_data = torch.load(exist_path, map_location="cpu", weights_only=False)
+                    existing_raw = _reconstruct_raw_factors(existing_data)
+                    factors = _merge_with_existing(existing_raw, factors)
+                else:
+                    tqdm.write(f"  WARNING: no existing file to merge at {exist_path}")
+
             out_path = os.path.join(output_dir, f"step{step_num}.pt")
             token_filter = {
                 "token_selection": cfg.token_selection,
@@ -672,8 +822,12 @@ def main(cfg: CollectConfig):
             if cfg.answer_only:
                 token_filter["answer_only"] = True
                 token_filter["answer_start_key"] = cfg.answer_start_key
+            # For packed runs: record total chunks so future continuations know where to start
+            save_n_chunks = None
+            if cfg.packing == "packed" and packed_ids is not None:
+                save_n_chunks = n_chunks_done + len(packed_ids)
             save_factors(factors, out_path, cfg.storage_format, cfg.cross_basis_refs,
-                         cfg.storage_dtype, token_filter)
+                         cfg.storage_dtype, token_filter, n_chunks=save_n_chunks)
             tqdm.write(f"Step {step_num}: {len(factors)} hook points -> {out_path}")
 
             if cfg.compute_metrics:

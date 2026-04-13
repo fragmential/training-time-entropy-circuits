@@ -49,10 +49,11 @@ _STEP_RE = re.compile(r"step(\d+)\.pt$")
 # Spectral metrics from an eigenvalue array
 # ---------------------------------------------------------------------------
 
-def spectral_metrics(eigen, damping=1e-6) -> dict:
+def spectral_metrics(eigen, damping=1e-6, mean=None) -> dict:
     """Compute RankMe, alpha, R2, log-det from an eigenspectrum (descending, non-negative).
 
     Accepts numpy array or torch.Tensor.
+    If `mean` is given, also records `mean_norm` = ||μ||₂.
     """
     if hasattr(eigen, "numpy"):
         eigen = eigen.numpy()
@@ -65,7 +66,8 @@ def spectral_metrics(eigen, damping=1e-6) -> dict:
     eigen = eigen / np.sum(eigen) # normalise into sum 1
     rm = powerlaw.rankme_metrics(eigen)
     alpha_fit, ypred, fit_r2, fit_r2_100 = powerlaw.stringer_get_powerlaw(eigen, np.arange(11, 100))
-    return {
+    out = {
+        "d": d,
         "eigenspectrum": eigen,
         "trace": trace,
         "avg_magnitude": trace / d,
@@ -76,6 +78,11 @@ def spectral_metrics(eigen, damping=1e-6) -> dict:
         "r2": fit_r2,
         "r2_100": fit_r2_100,
     }
+    if mean is not None:
+        if hasattr(mean, "numpy"):
+            mean = mean.numpy()
+        out["mean_norm"] = float(np.linalg.norm(mean))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +145,49 @@ def _sample_outer_products_linspace(a: np.ndarray, b: np.ndarray, k: int) -> np.
     return np.sort(sampled)[::-1]
 
 
+def _histogram_outer_product(a: np.ndarray, b: np.ndarray, bins: int = 1024,
+                             chunk_limit: int = 2_000_000) -> dict:
+    """Histogram the full K-FAC outer product a ⊗ b in linear and log-spaced bins.
+
+    Computes in chunks so the full outer product is never materialised.
+    Returns density-normalised histograms (integral = 1) plus the edges and
+    n_total = |a|*|b| so counts can be recovered as `density * n_total * diff(edges)`.
+    """
+    a = np.asarray(a, dtype=np.float64)
+    b = np.asarray(b, dtype=np.float64)
+    m, n = len(a), len(b)
+    total = m * n
+
+    max_val = float(a[0] * b[0])  # inputs are sorted descending
+    lin_edges = np.linspace(0, max_val, bins + 1)
+
+    a_pos = a[a > 0]
+    b_pos = b[b > 0]
+    has_log = len(a_pos) > 0 and len(b_pos) > 0 and max_val > 0
+    log_edges = (np.logspace(np.log10(float(a_pos.min() * b_pos.min())),
+                             np.log10(max_val), bins + 1)
+                 if has_log else None)
+
+    lin_counts = np.zeros(bins, dtype=np.int64)
+    log_counts = np.zeros(bins, dtype=np.int64) if has_log else None
+    chunk_rows = max(1, chunk_limit // max(n, 1))
+    for i in range(0, m, chunk_rows):
+        chunk = np.outer(a[i:i + chunk_rows], b).ravel()
+        lin_counts += np.histogram(chunk, bins=lin_edges)[0]
+        if has_log:
+            log_counts += np.histogram(chunk, bins=log_edges)[0]
+
+    out = {
+        "histogram": lin_counts / (total * np.diff(lin_edges)),
+        "histogram_edges": lin_edges,
+        "n_total": total,
+    }
+    if has_log:
+        out["loghistogram"] = log_counts / (total * np.diff(log_edges))
+        out["loghistogram_edges"] = log_edges
+    return out
+
+
 def _check_negative_eigenvalues(eigvals: np.ndarray, label: str):
     """Warn if negative eigenvalues are large relative to the matrix scale."""
     min_eig = float(eigvals[-1])
@@ -156,7 +206,7 @@ def _check_negative_eigenvalues(eigvals: np.ndarray, label: str):
 def kfac_metrics(
     eigvals_A: np.ndarray,
     eigvals_G: np.ndarray,
-    top_k: int = 10000,
+    top_k: int = 20000,
     sample_k: int = 1000,
     damping: float = 1e-6,
 ) -> dict:
@@ -192,7 +242,10 @@ def kfac_metrics(
 
     sm = spectral_metrics(top_eigvals) if len(top_eigvals) >= 11 else {}
 
+    hist = _histogram_outer_product(eigvals_A, eigvals_G, bins=1024)
+
     return {
+        **sm,
         "trace": trace,
         "trace_A": trace_A,
         "trace_G": trace_G,
@@ -201,7 +254,10 @@ def kfac_metrics(
         "log_det_G": ld_G,
         "top_eigvals": top_eigvals,
         "sampled_eigvals": sampled_eigvals,
-        **sm,
+        "d": d_in * d_out,
+        "d_A": d_in,
+        "d_G": d_out,
+        **hist,
     }
 
 
@@ -287,7 +343,7 @@ def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False
                 eigvals = eigvals.numpy()
             _check_negative_eigenvalues(eigvals, f"{hook_name}.{factor}")
             eigvals = np.maximum(eigvals, 0)
-            hook_results[factor] = spectral_metrics(eigvals)
+            hook_results[factor] = spectral_metrics(eigvals, mean=fv.mean)
             if factor == "A":
                 eA = eigvals
             elif factor == "G":

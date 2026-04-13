@@ -4,17 +4,24 @@ output_dir: inferences/kfac_small_shuffled
 model_name:
   - "allenai/OLMo-2-0425-1B"
   - "allenai/OLMo-2-1124-7B"
+  - "EleutherAI/pythia-1b-deduped"
+  - "EleutherAI/pythia-6.9b-deduped"
 
-#            OL1B OL7B
-batch_size: [  48,  16]
+#            OL1B OL7B Py1b Py6.9b
+batch_size: [  48,  32,  128,  56]
 
 # target_layers set per model: 7B uses layers 23,24,25; 1B uses layers 14,15
 target_layers:
   allenai/OLMo-2-0425-1B: [0, 5, 10, 15]
-  allenai/OLMo-2-1124-7B: [23, 24, 25]
+  allenai/OLMo-2-1124-7B: [0, 10, 21, 31]
+  EleutherAI/pythia-1b-deduped: [0, 5, 10, 15]
+  EleutherAI/pythia-6.9b-deduped: [0, 10, 21, 31]
 
-packed_data_path: data/mixes/olmo_mix_6M_512.pt
-max_tokens: 4_000_000
+packed_data_path:
+  allenai/*: data/mixes/olmo_mix_30M_512.pt
+  EleutherAI/*: data/mixes/pile_30M_512.pt
+
+max_tokens: 6_000_000
 seq_len: 512
 min_length: 32
 max_checkpoints: 20
@@ -29,7 +36,7 @@ collect_G: true
 sample_labels: true
 label_samples: 1
 seed: 42
-max_layers_per_pass: [4, 3]
+max_layers_per_pass: [4, 4, 4, 4]
 storage_format: cov_svd+m
 compute_metrics: True
-keep_cached: True
+keep_cached: False

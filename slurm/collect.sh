@@ -11,24 +11,24 @@ MODELS=(
     "EleutherAI/pythia-14m-deduped"
     "EleutherAI/pythia-31m"
     "EleutherAI/pythia-31m-deduped"
-    # "EleutherAI/pythia-70m"
-    # "EleutherAI/pythia-70m-deduped"
-    # "EleutherAI/pythia-160m"
-    # "EleutherAI/pythia-160m-deduped"
-    # "EleutherAI/pythia-410m"
-    # "EleutherAI/pythia-410m-deduped"
-    # "EleutherAI/pythia-1b"
+    "EleutherAI/pythia-70m"
+    "EleutherAI/pythia-70m-deduped"
+    "EleutherAI/pythia-160m"
+    "EleutherAI/pythia-160m-deduped"
+    "EleutherAI/pythia-410m"
+    "EleutherAI/pythia-410m-deduped"
+    "EleutherAI/pythia-1b"
     "EleutherAI/pythia-1b-deduped"
-    # "EleutherAI/pythia-1.4b"
-    # "EleutherAI/pythia-1.4b-deduped"
-    # "EleutherAI/pythia-2.8b"
-    # "EleutherAI/pythia-2.8b-deduped"
-    # "EleutherAI/pythia-6.9b"
-    # "EleutherAI/pythia-6.9b-deduped"
-    # "EleutherAI/pythia-12b"
-    # "EleutherAI/pythia-12b-deduped"
+    "EleutherAI/pythia-1.4b"
+    "EleutherAI/pythia-1.4b-deduped"
+    "EleutherAI/pythia-2.8b"
+    "EleutherAI/pythia-2.8b-deduped"
+    "EleutherAI/pythia-6.9b"
+    "EleutherAI/pythia-6.9b-deduped"
+    "EleutherAI/pythia-12b"
+    "EleutherAI/pythia-12b-deduped"
     "allenai/OLMo-2-0425-1B"
-    # "allenai/OLMo-2-1124-7B"
+    "allenai/OLMo-2-1124-7B"
 )
 
 # Override model list from CLI: --models "pythia-14m pythia-70m" (exact short-name match)
@@ -64,7 +64,7 @@ sbatch --array=0-$((${#MODELS[@]} - 1)) "$@" <<EOF
 #SBATCH --job-name=collect
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
-#SBATCH --time=06:00:00
+#SBATCH --time=16:00:00
 #SBATCH --output=slurm/logs/collect_%A_%a.out
 #SBATCH --error=slurm/logs/collect_%A_%a.err
 

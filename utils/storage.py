@@ -92,6 +92,7 @@ def save_factors(
     cross_basis_refs: Optional[list] = None,
     storage_dtype: "str | dict | None" = None,
     token_filter: Optional[dict] = None,
+    n_chunks: Optional[int] = None,
 ):
     """Save collected factors in the specified storage format.
 
@@ -128,6 +129,8 @@ def save_factors(
 
     if token_filter:
         result["__token_filter__"] = token_filter
+    if n_chunks is not None:
+        result["__n_chunks__"] = n_chunks
     result["__format__"] = storage_format
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     torch.save(result, save_path)
@@ -250,7 +253,7 @@ def _prepare_cov_svd(factors_dict: dict, store_means: bool = False, storage_dtyp
     return result
 
 
-def _prepare_eigenvalues(factors_dict: dict, store_means: bool = False, storage_dtype: str = "bf16") -> dict:
+def _prepare_eigenvalues(factors_dict: dict, store_means: bool = False, storage_dtype=None) -> dict:
     """Compute eigenvalues only. No basis stored."""
     result = {}
     for name, data in factors_dict.items():
@@ -260,14 +263,15 @@ def _prepare_eigenvalues(factors_dict: dict, store_means: bool = False, storage_
                 M = data[key].cpu()  # preserve accumulator dtype
                 n = data.get(f"n_{key}", data.get("n", 1))
                 entry[f"n_{key}"] = n
-                cov = (M / n).numpy()
+                dev = "cuda" if torch.cuda.is_available() else "cpu"
+                cov = (M.to(dev) / n)
                 mean_key = f"{key}_mean"
-                mu = data[mean_key].cpu().numpy() if mean_key in data and data[mean_key] is not None else None
+                mu = data[mean_key].to(device=dev, dtype=cov.dtype) if mean_key in data and data[mean_key] is not None else None
                 from utils.powerlaw import get_eigenspectrum
                 centered, uncentered = get_eigenspectrum(cov=cov, mu=mu)
-                entry[f"{key}_eigvals"] = _cast_for(torch.from_numpy(uncentered), "eigvals", storage_dtype)
+                entry[f"{key}_eigvals"] = _cast_for(uncentered.cpu(), "eigvals", storage_dtype)
                 if centered is not None:
-                    entry[f"{key}_eigvals_centered"] = _cast_for(torch.from_numpy(centered), "eigvals", storage_dtype)
+                    entry[f"{key}_eigvals_centered"] = _cast_for(centered.cpu(), "eigvals", storage_dtype)
             if store_means:
                 mean_key = f"{key}_mean"
                 if mean_key in data and data[mean_key] is not None:

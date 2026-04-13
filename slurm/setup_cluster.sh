@@ -9,12 +9,3 @@ cd "${PROJECT_DIR}"
 
 # Install deps via uv (creates .venv automatically)
 uv sync
-
-# Create directories
-mkdir -p "${HF_CACHE}"
-mkdir -p results
-mkdir -p slurm/logs
-
-echo "Setup complete. To submit jobs:"
-echo "  sbatch slurm/run_pythia.job"
-echo "  sbatch slurm/run_olmo.job"

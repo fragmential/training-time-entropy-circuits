@@ -6,6 +6,7 @@ __pycache__
 cache
 activations
 memorization_kfac*
+*reference*
 local_experiments
 chat_contexts
 collected
@@ -14,3 +15,4 @@ inferences
 slurm/logs/*
 results/*
 data/mixes
+analysis/transcriptions

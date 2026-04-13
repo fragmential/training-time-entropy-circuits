@@ -1,0 +1,41 @@
+Pythia (GPTNeoX) — 2 MLP projections (h->4h, 4h->h)
+
+| Model | Layers | Hidden | Inter | Heads | H.dim |
+|-------|--------|--------|-------|-------|-------|
+| 14m   | 6      | 128    | 512   | 4     | 32    |
+| 31m   | 6      | 256    | 1024  | 8     | 32    |
+| 70m   | 6      | 512    | 2048  | 8     | 64    |
+| 160m  | 12     | 768    | 3072  | 12    | 64    |
+| 410m  | 24     | 1024   | 4096  | 16    | 64    |
+| 1b    | 16     | 2048   | 8192  | 8     | 256   |
+| 1.4b  | 24     | 2048   | 8192  | 16    | 128   |
+| 2.8b  | 32     | 2560   | 10240 | 32    | 80    |
+| 6.9b  | 32     | 4096   | 16384 | 32    | 128   |
+| 12b   | 36     | 5120   | 20480 | 40    | 128   |
+
+OLMo-2 (LLaMA-style) — 3 MLP projections (gate, up, down)
+
+| Model | Layers | Hidden | Inter | Heads | H.dim |
+|-------|--------|--------|-------|-------|-------|
+| 1B    | 16     | 2048   | 8192  | 16    | 128   |
+| 7B    | 32     | 4096   | 11008 | 32    | 128   |
+
+
+Storage (fp32 cov, per checkpoint)
+  MLP   = A+G per projection = 2*(d^2+inter^2) [Pythia], 3*(d^2+inter^2) [OLMo]
+  Stream = A+G at one residual hookpoint = 2*d^2
+
+| Model   | MLP/block | Stream  | 4mlp+2str | x30      |
+|---------|-----------|---------|-----------|----------|
+| 14m     | 2.1 MB    | 0.1 MB  | 8.6 MB    | 258 MB   |
+| 31m     | 8.5 MB    | 0.5 MB  | 35 MB     | 1.0 GB   |
+| 70m     | 34 MB     | 2 MB    | 140 MB    | 4.1 GB   |
+| 160m    | 76.5 MB   | 4.5 MB  | 315 MB    | 9.2 GB   |
+| 410m    | 136 MB    | 8 MB    | 560 MB    | 16.4 GB  |
+| 1b      | 544 MB    | 32 MB   | 2.2 GB    | 65.6 GB  |
+| 1.4b    | 544 MB    | 32 MB   | 2.2 GB    | 65.6 GB  |
+| 2.8b    | 850 MB    | 50 MB   | 3.4 GB    | 102.5 GB |
+| 6.9b    | 2176 MB   | 128 MB  | 8.8 GB    | 262.5 GB |
+| 12b     | 3400 MB   | 200 MB  | 13.7 GB   | 410 GB   |
+| OLMo 1B | 816 MB    | 32 MB   | 3.3 GB    | 97.5 GB  |
+| OLMo 7B | 1579 MB   | 128 MB  | 6.4 GB    | 192.5 GB |

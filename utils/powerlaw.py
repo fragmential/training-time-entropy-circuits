@@ -108,29 +108,20 @@ def generate_activations_prelayer(net,layer,data_loader,use_cuda=False,dim_thres
     activations_np = np.vstack(activations)     # assuming first dimension is num_examples: batches x batch_size x <feat_dims> --> num_examples x <feat_dims>
     return activations_np
 
-def generate_activations_prelayer_batch(net,layer,images,pool_transform=None):
-    activations = []
-    def hook_fn(m, i, o):
-        activations.append(i[0])
-    handle = layer.register_forward_hook(hook_fn)
-    if pool_transform is not None:
-        images = pool_transform(images)
-    output = net(images)
-    handle.remove()
-    return activations[0]
-
 def _eigh(C, k):
+    """Eigenvalues only. C is a torch tensor; result is torch on the same device."""
     t = time.time()
-    v = np.clip(np.linalg.eigvalsh(C)[::-1], 0, None)
-    decomp_profiler.log("np.eigvalsh", C.shape, time.time() - t)
+    v = torch.linalg.eigvalsh(C).flip(0).clamp(min=0)
+    decomp_profiler.log(f"torch.eigvalsh[{C.device}]", tuple(C.shape), time.time() - t)
     return v[:k] if k else v
 
 def _eigh_full(C):
-    """Full eigendecomposition: returns (eigvals descending clipped, eigvecs column-sorted)."""
+    """Full eigendecomposition. C is a torch tensor; results are torch on the same device.
+    Returns (eigvals descending clipped, eigvecs column-sorted)."""
     t = time.time()
-    vals, vecs = np.linalg.eigh(C)
-    decomp_profiler.log("np.eigh", C.shape, time.time() - t)
-    return np.ascontiguousarray(np.clip(vals[::-1], 0, None)), np.ascontiguousarray(vecs[:, ::-1])
+    vals, vecs = torch.linalg.eigh(C)
+    decomp_profiler.log(f"torch.eigh[{C.device}]", tuple(C.shape), time.time() - t)
+    return vals.flip(0).clamp(min=0).contiguous(), vecs.flip(1).contiguous()
 
 def _from_acts(acts, k):
     mu = acts.mean(0)
@@ -138,10 +129,11 @@ def _from_acts(acts, k):
     return _eigh((acts - mu).T @ (acts - mu) / n, k), _eigh(acts.T @ acts / n, k)
 
 def _from_cov(cov, mu, k):
-    return _eigh(cov - np.outer(mu, mu), k) if mu is not None else None, _eigh(cov, k)
+    return _eigh(cov - torch.outer(mu, mu), k) if mu is not None else None, _eigh(cov, k)
 
 def get_eigenspectrum(acts=None, cov=None, mu=None, topk=None):
-    """Returns (centered, uncentered). centered is None if mu unavailable."""
+    """Returns (centered, uncentered) as torch tensors. centered is None if mu unavailable.
+    Inputs must be torch tensors on the desired compute device."""
     return _from_acts(acts, topk) if acts is not None else _from_cov(cov, mu, topk)
 
 
@@ -154,35 +146,7 @@ def plot_eigenspectrum(eigenspectrum):
     plt.loglog(np.arange(1,1+max_range),ypred[:max_range], label='powerlaw fit')
     plt.title(rf'$\alpha$ = {alpha:.3f}, r2= {fit_R2:.3f}, r2_100= {fit_R2_100:.3f}')
 
-def stringer_get_powerlaw_batch(net, layer, data_loader, trange, use_cuda=False, test_run=False):
-    alpha_arr = []
-    R2_arr = []
-    R2_100_arr = []
-    if use_cuda:
-        net = net.cuda()
-    net.eval()
-    for i, (images, labels) in enumerate(tqdm(data_loader)):
-        # ignore last batch if incomplete
-        # print(i,len(data_loader),len(images),data_loader.batch_size)
-        if i == len(data_loader) - 1 and len(images) < data_loader.batch_size:
-            break
-        trange_orig = trange.copy()
-        if use_cuda:
-            images = images.cuda()
-        with torch.no_grad():
-            feats = generate_activations_prelayer_batch(net=net, layer=layer, images=images)
-        feats_np = feats.cpu().numpy()
-        feats_eig, _ = get_eigenspectrum(acts=feats_np)
-        # print(trange.min(),trange.max(),feats_eig.shape)
-        alpha_batch, _, R2_batch, R2_100_batch = stringer_get_powerlaw(ss=feats_eig, trange=trange_orig)
-        alpha_arr.append(alpha_batch)
-        R2_arr.append(R2_batch)
-        R2_100_arr.append(R2_100_batch)
-        if i == 2 and test_run:
-            break
-    return np.array(alpha_arr), np.array(R2_arr), np.array(R2_100_arr)
-
-def rankme_metrics(eigen, top_k = 10000):
+def rankme_metrics(eigen, top_k = 20000):
     """eigen: raw covariance eigenvalues (centered or uncentered, normalized or not - doesn't matter)"""
     eigen = np.clip(eigen, 0, None) # We've already done this a million times but it don't hurt to do it another
     if top_k is not None:
