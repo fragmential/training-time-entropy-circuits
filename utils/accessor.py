@@ -70,7 +70,7 @@ class DataAccessor:
         self._hf_repo = data.get("__hf_model__")  # actual repo (may differ from model_name for early-training)
         self._selective_weights: Optional[dict] = None
         self._layer_cache: dict = {}
-        self._eigh_cache: dict = {}  # (hook, factor) -> (centered_eigvals, uncentered_eigvals, eigvecs_or_None)
+        self._eigh_cache: dict = {}  # (hook, factor) -> (centered_eigvals, uncentered_eigvals, eigvecs_or_None, centered_eigvecs_or_None)
 
     def _ensure_weights(self):
         """Ensure model weights are available (full model or selective loading)."""
@@ -147,12 +147,14 @@ class DataAccessor:
     # Internal: computation methods (used by FactorView properties)
     # ------------------------------------------------------------------
 
-    def _ensure_eigh(self, hook_name: str, factor: str, need_vecs: bool = False):
+    def _ensure_eigh(self, hook_name: str, factor: str, need_vecs: bool = False, need_centered_vecs: bool = False):
         """Ensure eigendecomposition is cached for (hook, factor).
 
-        Stores (centered_eigvals, uncentered_eigvals, eigvecs_or_None) in _eigh_cache.
+        Stores (centered_eigvals, uncentered_eigvals, eigvecs_or_None, centered_eigvecs_or_None) in _eigh_cache.
         If need_vecs and we only have eigvals cached, recomputes with full eigh.
         """
+        if need_centered_vecs:
+            need_vecs = True
         # blkN.layer virtual hook: redirect A→up.A, G→down.G
         orig_key = (hook_name, factor)
         if hook_name.endswith(".layer"):
@@ -164,36 +166,52 @@ class DataAccessor:
                 self._eigh_cache[orig_key] = self._eigh_cache[cache_key]
                 return
         cached = self._eigh_cache.get(cache_key)
-        if cached is not None and (not need_vecs or cached[2] is not None):
-            return
+        if cached is not None:
+            if not need_vecs or cached[2] is not None:
+                if not need_centered_vecs or cached[3] is not None:
+                    return
 
         entry = self._entry(hook_name)
-        centered, uncentered, eigvecs = None, None, None
+        centered, uncentered, eigvecs, centered_eigvecs = None, None, None, None
         dev = "cuda" if torch.cuda.is_available() else "cpu"
+
+        # Carry forward any previously cached values
+        if cached is not None:
+            centered, uncentered, eigvecs, centered_eigvecs = cached
 
         # Stored eigvals (eigenvalues / cov_svd format)
         if f"{factor}_eigvals" in entry and (not need_vecs or f"{factor}_eigvecs" in entry):
-            centered = entry.get(f"{factor}_eigvals_centered")
-            # Recover centered from stored eigvecs + mean if not pre-stored
-            if centered is None and f"{factor}_eigvecs" in entry:
+            if uncentered is None:
+                uncentered = entry[f"{factor}_eigvals"]
+            if eigvecs is None:
+                eigvecs = entry.get(f"{factor}_eigvecs")
+            stored_centered = entry.get(f"{factor}_eigvals_centered")
+            if stored_centered is not None and centered is None:
+                centered = stored_centered
+            # Recover centered eigvals/eigvecs from stored eigvecs + mean if needed
+            if (centered is None or need_centered_vecs) and f"{factor}_eigvecs" in entry:
                 mu_t = self._mean(hook_name, factor)
                 if mu_t is not None:
                     V = entry[f"{factor}_eigvecs"].to(dev)
                     S = entry[f"{factor}_eigvals"].to(dev)
                     mu_d = mu_t.to(device=dev, dtype=V.dtype)
-                    cov = V @ torch.diag(S.to(V.dtype)) @ V.T
+                    cov_centered = V @ torch.diag(S.to(V.dtype)) @ V.T - torch.outer(mu_d, mu_d)
                     import time as _t; _t0 = _t.time()
-                    centered = torch.linalg.eigvalsh(cov - torch.outer(mu_d, mu_d)).flip(0).clamp(min=0).cpu()
-                    from utils.powerlaw import decomp_profiler; decomp_profiler.log(f"torch.eigvalsh(recover_centered)[{dev}]", tuple(cov.shape), _t.time() - _t0)
-            self._eigh_cache[cache_key] = (
-                centered,
-                entry[f"{factor}_eigvals"],
-                entry.get(f"{factor}_eigvecs"),
-            )
+                    if need_centered_vecs and centered_eigvecs is None:
+                        c_vals, c_vecs = torch.linalg.eigh(cov_centered)
+                        centered = c_vals.flip(0).clamp(min=0).cpu()
+                        centered_eigvecs = c_vecs.flip(1).cpu()
+                        from utils.powerlaw import decomp_profiler; decomp_profiler.log(f"torch.eigh(recover_centered)[{dev}]", tuple(cov_centered.shape), _t.time() - _t0)
+                    elif centered is None:
+                        centered = torch.linalg.eigvalsh(cov_centered).flip(0).clamp(min=0).cpu()
+                        from utils.powerlaw import decomp_profiler; decomp_profiler.log(f"torch.eigvalsh(recover_centered)[{dev}]", tuple(cov_centered.shape), _t.time() - _t0)
+            self._eigh_cache[cache_key] = (centered, uncentered, eigvecs, centered_eigvecs)
+            if orig_key != cache_key:
+                self._eigh_cache[orig_key] = self._eigh_cache[cache_key]
             return
 
         # Compute from cov
-        if factor in entry:
+        if uncentered is None and factor in entry:
             t = entry[factor]
             if isinstance(t, torch.Tensor) and t.dim() == 2 and t.shape[0] == t.shape[1]:
                 from utils.powerlaw import get_eigenspectrum, _eigh_full
@@ -204,8 +222,13 @@ class DataAccessor:
                 if need_vecs:
                     uncentered, eigvecs = _eigh_full(cov)
                     uncentered, eigvecs = uncentered.cpu(), eigvecs.cpu()
-                    # Centered eigvals from the same cov - one extra eigvalsh, not full eigh
-                    centered = get_eigenspectrum(cov=cov, mu=mu)[0].cpu() if mu is not None else None
+                    if mu is not None:
+                        if need_centered_vecs:
+                            c_vals, c_vecs = _eigh_full(cov - torch.outer(mu, mu))
+                            centered = c_vals.cpu()
+                            centered_eigvecs = c_vecs.cpu()
+                        else:
+                            centered = get_eigenspectrum(cov=cov, mu=mu)[0].cpu()
                 else:
                     c, u = get_eigenspectrum(cov=cov, mu=mu)
                     centered = c.cpu() if c is not None else None
@@ -220,7 +243,7 @@ class DataAccessor:
                 centered = c.cpu() if c is not None else None
                 uncentered = u.cpu()
 
-        self._eigh_cache[cache_key] = (centered, uncentered, eigvecs)
+        self._eigh_cache[cache_key] = (centered, uncentered, eigvecs, centered_eigvecs)
         if orig_key != cache_key:
             self._eigh_cache[orig_key] = self._eigh_cache[cache_key]
 
@@ -242,6 +265,13 @@ class DataAccessor:
             return self._B_eigenvectors(hook_name)
         self._ensure_eigh(hook_name, factor, need_vecs=True)
         return self._eigh_cache[(hook_name, factor)][2]
+
+    def _eigenvectors_centered(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
+        if factor == "B":
+            self._ensure_B_eigh(hook_name, need_centered_vecs=True)
+            return self._eigh_cache[(hook_name, "B")][3]
+        self._ensure_eigh(hook_name, factor, need_centered_vecs=True)
+        return self._eigh_cache[(hook_name, factor)][3]
 
     def _covariance(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
         if factor == "B":
@@ -332,16 +362,17 @@ class DataAccessor:
 
     def _B_covariance(self, hook_name: str) -> Optional[torch.Tensor]:
         entry = self._entry(hook_name)
+        dev = "cuda" if torch.cuda.is_available() else "cpu"
 
         if "B" in entry:
             t = entry["B"]
             if t.dim() == 2 and t.shape[0] == t.shape[1]:
                 n = entry.get("n_B", entry.get("n", 1))
-                return t.float() / n
+                return (t.to(dev).float() / n)
 
         if "B_eigvecs" in entry and "B_eigvals" in entry:
-            V = entry["B_eigvecs"].float()
-            S = entry["B_eigvals"].float()
+            V = entry["B_eigvecs"].to(dev).float()
+            S = entry["B_eigvals"].to(dev).float()
             return V @ torch.diag(S) @ V.T
 
         A_cov = self._covariance(hook_name, "A")
@@ -351,9 +382,9 @@ class DataAccessor:
         if layer is None:
             return None
 
-        W = layer.weight.detach().float()
-        b = layer.bias.detach().float() if layer.bias is not None else None
-        A_cov = A_cov.to(W.device)
+        W = layer.weight.detach().to(dev).float()
+        b = layer.bias.detach().to(dev).float() if layer.bias is not None else None
+        A_cov = A_cov.to(dev)
 
         B_cov = W @ A_cov @ W.T
         if b is not None:
@@ -363,40 +394,50 @@ class DataAccessor:
                     f"Cannot derive B for '{hook_name}': layer has a bias but no A_mean is stored. "
                     f"Re-collect with a storage format that includes the '+m' modifier (e.g. cov_svd+m)."
                 )
-            Wmu = W @ mu.to(device=W.device, dtype=W.dtype)
+            Wmu = W @ mu.to(device=dev, dtype=W.dtype)
             B_cov = B_cov + torch.outer(Wmu, b) + torch.outer(b, Wmu) + torch.outer(b, b)
 
         return B_cov
 
-    def _ensure_B_eigh(self, hook_name: str, need_vecs: bool = False):
+    def _ensure_B_eigh(self, hook_name: str, need_vecs: bool = False, need_centered_vecs: bool = False):
         """Ensure B eigendecomposition is cached."""
+        if need_centered_vecs:
+            need_vecs = True
         cache_key = (hook_name, "B")
         cached = self._eigh_cache.get(cache_key)
-        if cached is not None and (not need_vecs or cached[2] is not None):
-            return
+        if cached is not None:
+            if not need_vecs or cached[2] is not None:
+                if not need_centered_vecs or cached[3] is not None:
+                    return
 
         entry = self._entry(hook_name)
         # Stored (sufficient if we have eigvecs or don't need them)
         if "B_eigvals" in entry and (not need_vecs or "B_eigvecs" in entry):
-            self._eigh_cache[cache_key] = (None, entry["B_eigvals"], entry.get("B_eigvecs"))
+            self._eigh_cache[cache_key] = (None, entry["B_eigvals"], entry.get("B_eigvecs"), None)
             return
 
         # Compute from B covariance
         B_cov = self._B_covariance(hook_name)
         if B_cov is None:
-            self._eigh_cache[cache_key] = (None, None, None)
+            self._eigh_cache[cache_key] = (None, None, None, None)
             return
 
-        # Centered eigenvalues (B_cov - outer(B_mean, B_mean))
+        # Centered eigenvalues/eigenvectors (B_cov - outer(B_mean, B_mean))
         import time as _t
         from utils.powerlaw import decomp_profiler
-        centered = None
+        centered, centered_eigvecs = None, None
         B_mean = self._B_mean(hook_name)
         if B_mean is not None:
             B_centered_cov = B_cov - torch.outer(B_mean.to(B_cov.device).float(), B_mean.to(B_cov.device).float())
             _t0 = _t.time()
-            centered = torch.linalg.eigvalsh(B_centered_cov).flip(0).clamp(min=0).cpu()
-            decomp_profiler.log(f"torch.eigvalsh(B_centered:{hook_name})", tuple(B_cov.shape), _t.time() - _t0)
+            if need_centered_vecs:
+                c_vals, c_vecs = torch.linalg.eigh(B_centered_cov)
+                centered = c_vals.flip(0).clamp(min=0).cpu()
+                centered_eigvecs = c_vecs.flip(1).cpu()
+                decomp_profiler.log(f"torch.eigh(B_centered:{hook_name})", tuple(B_cov.shape), _t.time() - _t0)
+            else:
+                centered = torch.linalg.eigvalsh(B_centered_cov).flip(0).clamp(min=0).cpu()
+                decomp_profiler.log(f"torch.eigvalsh(B_centered:{hook_name})", tuple(B_cov.shape), _t.time() - _t0)
 
         if need_vecs:
             _t0 = _t.time()
@@ -404,14 +445,15 @@ class DataAccessor:
             decomp_profiler.log(f"torch.eigh(B:{hook_name})", tuple(B_cov.shape), _t.time() - _t0)
             self._eigh_cache[cache_key] = (
                 centered.cpu() if centered is not None else None,
-                vals.flip(0).clamp(min=0).cpu(), vecs.flip(1).cpu())
+                vals.flip(0).clamp(min=0).cpu(), vecs.flip(1).cpu(),
+                centered_eigvecs)
         else:
             _t0 = _t.time()
             eigvals = torch.linalg.eigvalsh(B_cov).flip(0).clamp(min=0)
             decomp_profiler.log(f"torch.eigvalsh(B:{hook_name})", tuple(B_cov.shape), _t.time() - _t0)
             self._eigh_cache[cache_key] = (
                 centered.cpu() if centered is not None else None,
-                eigvals.cpu(), None)
+                eigvals.cpu(), None, centered_eigvecs)
 
     def _B_eigenvalues(self, hook_name: str) -> Optional[torch.Tensor]:
         self._ensure_B_eigh(hook_name)
@@ -632,6 +674,11 @@ class FactorView:
         return self._acc._eigenvectors(self._hook, self._factor)
 
     @property
+    def eigvecs_centered(self) -> Optional[torch.Tensor]:
+        """Centered eigenvectors (of Cov[x] = E[xxT] - E[x]E[x]T), columns (d, k), descending."""
+        return self._acc._eigenvectors_centered(self._hook, self._factor)
+
+    @property
     def cov(self) -> Optional[torch.Tensor]:
         """Normalized covariance E[xx^T] as (d, d) float tensor."""
         return self._acc._covariance(self._hook, self._factor)
@@ -656,6 +703,15 @@ class FactorView:
         """(eigvals: Tensor, eigvecs: Tensor) — sorted descending."""
         ev = self.eigvals
         V = self.eigvecs
+        if ev is None or V is None:
+            return None
+        return ev, V
+
+    @property
+    def eigh_centered(self) -> Optional[tuple]:
+        """(eigvals_centered: Tensor, eigvecs_centered: Tensor) — sorted descending."""
+        ev = self.eigvals_centered
+        V = self.eigvecs_centered
         if ev is None or V is None:
             return None
         return ev, V

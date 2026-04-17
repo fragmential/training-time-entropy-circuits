@@ -1,8 +1,0 @@
-=== Running model: allenai/OLMo-2-0425-1B with 1b_revisions.txt (array task 0) ===
-Opening checkpoint file: 1b_revisions.txt
-Found 195 checkpoints
-Subsampled to 50 checkpoints
-Filtered and cached 2000 sequences to data/cache/filtered_texts_fineweb_2000.json
-Processing 0 remaining checkpoints...
-Completed! Results saved to results/results_OLMo-2-0425-1B.npy
-=== Done: allenai/OLMo-2-0425-1B ===

@@ -1,6 +1,0 @@
-=== Test run: allenai/OLMo-2-0425-1B ===
-Opening checkpoint file: 1b_revisions.txt
-Found 195 checkpoints
-Loaded 100 cached sequences from data/cache/filtered_texts_fineweb_100.json
-Processing 192 remaining checkpoints...
-Running model allenai/OLMo-2-0425-1B/stage1-step0-tokens0B

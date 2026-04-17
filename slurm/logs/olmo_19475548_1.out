@@ -1,5 +1,0 @@
-=== Running model: allenai/OLMo-2-1124-7B with 7b_revisions.txt (array task 1) ===
-Opening checkpoint file: 7b_revisions.txt
-Found 928 checkpoints
-Subsampled to 50 checkpoints
-=== Done: allenai/OLMo-2-1124-7B ===

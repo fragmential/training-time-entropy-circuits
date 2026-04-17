@@ -84,6 +84,107 @@ def spectral_metrics(eigen, damping=1e-6, mean=None) -> dict:
         out["mean_norm"] = float(np.linalg.norm(mean))
     return out
 
+# ---------------------------------------------------------------------------
+# Mean alignment metrics
+# ---------------------------------------------------------------------------
+
+def mean_metrics(eigvecs: np.ndarray, eigvals: np.ndarray, mean: np.ndarray, damping: float = 1e-6) -> dict:
+    """Metrics characterizing how the mean direction relates to a covariance eigenbasis.
+
+    Args:
+        eigvecs: (d, d) eigenvectors as columns, matching np.linalg.eigh convention.
+                 Should correspond to the *centered* covariance for meaningful interpretation.
+        eigvals: (d,) eigenvalues, assumed sorted descending. Non-negative.
+        mean:    (d,) mean vector μ.
+        damping: relative damping for Mahalanobis (added to eigvals as damping * mean(eigvals)).
+
+    Returns dict with:
+        mean_norm:           ||μ||₂
+        max_overlap:         max_j |<μ̂, v_j>|         (which single eigvec μ aligns best with)
+        max_overlap_idx:     argmax of the above
+        pr:                  participation ratio of |<μ̂, v_j>|² over j ∈ [1, d]
+        rayleigh:            μ̂ᵀ Σ μ̂                  (variance along the mean direction)
+        rayleigh_normed:     μ̂ᵀ Σ μ̂ / λ_max          ∈ [0, 1]
+        mahalanobis:         μ̂ᵀ Σ⁻¹ μ̂ (damped)       (low → mean lies in high-var subspace)
+        pr_weighted:         participation ratio of energy-weighted profile λ_j |<μ̂, v_j>|²
+        centroid_idx:        Σ_j j · p_j              (where in the spectrum μ lives, unweighted)
+        centroid_idx_weighted: Σ_j j · p̃_j           (same, energy-weighted)
+        profile:             (d,) array p_j = |<μ̂, v_j>|²       (sums to 1)
+        profile_weighted:    (d,) array p̃_j ∝ λ_j p_j           (sums to 1)
+    """
+    if hasattr(eigvecs, "numpy"):
+        eigvecs = eigvecs.numpy()
+    if hasattr(eigvals, "numpy"):
+        eigvals = eigvals.numpy()
+    if hasattr(mean, "numpy"):
+        mean = mean.numpy()
+
+    eigvals = np.maximum(eigvals, 0).astype(np.float64)
+    mean = mean.astype(np.float64)
+    d = len(eigvals)
+
+    mean_norm = float(np.linalg.norm(mean))
+    if mean_norm == 0.0:
+        # degenerate: μ = 0, every alignment metric is undefined
+        return {
+            "mean_norm": 0.0,
+            "max_overlap": 0.0, "max_overlap_idx": -1,
+            "pr": float("nan"), "rayleigh": 0.0, "rayleigh_normed": 0.0,
+            "mahalanobis": 0.0, "pr_weighted": float("nan"),
+            "centroid_idx": float("nan"), "centroid_idx_weighted": float("nan"),
+            "profile": np.zeros(d), "profile_weighted": np.zeros(d),
+        }
+    mu_hat = mean / mean_norm
+
+    # Projection profile: p_j = |<μ̂, v_j>|², sums to 1 since {v_j} is orthonormal
+    coeffs = eigvecs.T @ mu_hat              # (d,) — coordinates of μ̂ in eigenbasis
+    profile = coeffs ** 2
+    profile = profile / profile.sum()        # numerical safety; should already sum to 1
+
+    # Max overlap
+    max_idx = int(np.argmax(profile))
+    max_overlap = float(np.sqrt(profile[max_idx]))   # |<μ̂, v_j>|, not squared
+
+    # Participation ratio (unweighted)
+    pr = float(1.0 / np.sum(profile ** 2))
+
+    # Rayleigh quotient: variance of the data along the mean direction
+    rayleigh = float(np.sum(eigvals * profile))
+    lam_max = float(eigvals[0]) if eigvals[0] > 0 else 1.0
+    rayleigh_normed = rayleigh / lam_max
+
+    # Mahalanobis: μ̂ᵀ Σ⁻¹ μ̂, damped
+    eps = damping * float(eigvals.mean())
+    mahalanobis = float(np.sum(profile / (eigvals + eps)))
+
+    # Energy-weighted profile
+    weighted = eigvals * profile
+    w_sum = weighted.sum()
+    if w_sum > 0:
+        profile_weighted = weighted / w_sum
+        pr_weighted = float(1.0 / np.sum(profile_weighted ** 2))
+    else:
+        profile_weighted = np.zeros(d)
+        pr_weighted = float("nan")
+
+    idx = np.arange(d)
+    centroid_idx = float(np.sum(idx * profile))
+    centroid_idx_weighted = float(np.sum(idx * profile_weighted)) if w_sum > 0 else float("nan")
+
+    return {
+        "mean_norm": mean_norm,
+        "max_overlap": max_overlap,
+        "max_overlap_idx": max_idx,
+        "pr": pr,
+        "rayleigh": rayleigh,
+        "rayleigh_normed": rayleigh_normed,
+        "mahalanobis": mahalanobis,
+        "pr_weighted": pr_weighted,
+        "centroid_idx": centroid_idx,
+        "centroid_idx_weighted": centroid_idx_weighted,
+        "profile": profile,
+        "profile_weighted": profile_weighted,
+    }
 
 # ---------------------------------------------------------------------------
 # K-FAC metrics
@@ -306,21 +407,29 @@ def generalized_eigenvalues_GB(
     from utils.powerlaw import decomp_profiler; decomp_profiler.log("torch.eigvalsh(gen_GB)", tuple(M.shape), _t.time() - _t0)
     return gen_eigvals.numpy()
 
-def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False):
+def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False, gpu_lock=None):
     import time
+    from contextlib import nullcontext
     from utils.powerlaw import decomp_profiler
     if verbose:
         decomp_profiler.enable()
     avail = accessor.available()
     step_results = {}
     t0 = time.time()
+    gpu_ctx = gpu_lock or nullcontext()
+    gpu_wait = 0.0
 
-    # Pre-warm: request eigvecs upfront for factors that need generalized eigendecomp
-    for hook_name, factors in avail.items():
-        if "B" in factors:
+    # Pre-warm ALL eigendecompositions under GPU lock so the rest is pure numpy
+    with gpu_ctx as ctx:
+        gpu_wait += getattr(ctx, "waited", 0.0)
+        for hook_name, factors in avail.items():
             t = time.time()
-            accessor._ensure_eigh(hook_name, "G", need_vecs=True)
-            accessor._ensure_B_eigh(hook_name, need_vecs=True)
+            has_B = "B" in factors
+            for factor in factors:
+                accessor._ensure_eigh(hook_name, factor,
+                                      need_vecs=True, need_centered_vecs=True)
+            if has_B:
+                accessor._ensure_B_eigh(hook_name, need_vecs=True, need_centered_vecs=True)
             if verbose:
                 print(f"    prewarm {hook_name}: {time.time()-t:.1f}s")
 
@@ -357,6 +466,10 @@ def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False
                 centered = np.maximum(centered, 0)
                 hook_results[f"{factor}_centered"] = spectral_metrics(centered)
 
+            # Mean overlaps
+            if fv.mean is not None and fv.eigh_centered is not None:
+                hook_results[f"{factor}_mean_metrics"] = mean_metrics(fv.eigvecs_centered, fv.eigvals_centered, fv.mean)
+
             # Cross-basis eigenvalues stored alongside
             for ek, ev in entry.items():
                 if ek.startswith(f"{factor}_cross_eigvals_") and isinstance(ev, torch.Tensor):
@@ -375,7 +488,9 @@ def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False
             if g_eigh is not None and b_eigh is not None:
                 eG_arr, vG = g_eigh
                 eB_arr, vB = b_eigh
-                gen_eigvals = generalized_eigenvalues_GB(eG_arr, vG, eB_arr, vB)
+                with gpu_ctx as ctx:
+                    gpu_wait += getattr(ctx, "waited", 0.0)
+                    gen_eigvals = generalized_eigenvalues_GB(eG_arr, vG, eB_arr, vB)
                 gen_sm = spectral_metrics(gen_eigvals) if len(gen_eigvals) >= 11 else {}
                 hook_results["gen_GB"] = {"eigvals": gen_eigvals, **gen_sm}
 
@@ -388,6 +503,8 @@ def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False
         print(f"    metrics total: {time.time()-t0:.1f}s ({len(step_results)} hooks)")
         print(decomp_profiler.summary())
         decomp_profiler.disable()
+    if gpu_wait > 0:
+        step_results["__gpu_wait__"] = gpu_wait
     return step_results
 
 
@@ -445,9 +562,18 @@ def _resolve_data_root(data_root: str, config_directory: str):
 # Sequential derive mode (prefetch/delete like collect.py)
 # ---------------------------------------------------------------------------
 
-def _compute_sequential_derive(to_compute, model_name, res_dict, results_path, keep_cached=False):
-    """Process checkpoints sequentially with selective weight loading + prefetch/delete."""
-    from concurrent.futures import ThreadPoolExecutor
+def _compute_derive(to_compute, model_name, res_dict, results_path,
+                     keep_cached=False, num_workers=2):
+    """Process checkpoints with selective weight loading, threaded for parallelism.
+
+    GPU operations (eigendecomposition, B derivation) are serialized via gpu_lock.
+    CPU-heavy work (spectral metrics, K-FAC metrics) runs in parallel across threads.
+    Disk usage bounded: at most num_workers + 2 checkpoints on disk at any time.
+    """
+    import gc
+    import queue
+    import threading
+    import traceback
     from utils.model_registry import (
         get_model_config, get_checkpoint_schedule,
         prefetch_checkpoint, delete_cached_revision,
@@ -458,45 +584,131 @@ def _compute_sequential_derive(to_compute, model_name, res_dict, results_path, k
     config = get_model_config(hf_name)
     schedule = {s: (r, m) for s, r, m in get_checkpoint_schedule(config, None)}
 
-    sorted_items = sorted(to_compute, key=lambda x: x[0])
-    executor = ThreadPoolExecutor(max_workers=1)
+    # Resolve metadata for all items upfront (from schedule; avoid loading full files)
+    items = []
+    for step, path in sorted(to_compute, key=lambda x: x[0]):
+        if step in schedule:
+            rev, step_model = schedule[step]
+        else:
+            # Fall back to loading the file only if not in schedule
+            meta = torch.load(path, map_location="cpu", weights_only=False)
+            rev = meta.get("__revision__")
+            step_model = meta.get("__hf_model__") or config.hf_repo
+        if step_model is None:
+            step_model = config.hf_repo
+        items.append((step, path, rev, step_model))
 
-    for idx, (step, path) in enumerate(sorted_items):
-        # Prefetch next checkpoint
-        prefetch_future = None
-        if idx + 1 < len(sorted_items):
-            next_step = sorted_items[idx + 1][0]
-            if next_step in schedule:
-                nr, nm = schedule[next_step]
-                prefetch_future = executor.submit(prefetch_checkpoint, nm, nr)
+    gpu_lock = threading.Lock()
+    results_lock = threading.Lock()
+    disk_sem = threading.Semaphore(num_workers + 2)
+    work_queue = queue.Queue()
 
-        data = torch.load(path, map_location="cpu", weights_only=False)
-        rev = data.get("__revision__")
-        hf_model = data.get("__hf_model__")
-        if rev is None and step in schedule:
-            rev, hf_model = schedule[step]
+    # Per-thread timing stats
+    stats_lock = threading.Lock()
+    worker_stats = []  # list of (total_time, gpu_wait, download_wait, n_checkpoints)
 
-        acc = DataAccessor(data, model_name=hf_name, revision=rev)
-        if hf_model:
-            acc._hf_repo = hf_model
+    # Timed lock/queue helpers
+    class _TimedLock:
+        """Wraps a lock to track cumulative wait time."""
+        def __init__(self, lock):
+            self._lock = lock
+            self._local = threading.local()
+        def __enter__(self):
+            import time
+            t0 = time.monotonic()
+            self._lock.acquire()
+            self._local.waited = time.monotonic() - t0
+            return self
+        def __exit__(self, *args):
+            self._lock.release()
+        @property
+        def waited(self):
+            return getattr(self._local, "waited", 0.0)
 
-        step_results = compute_metrics_for_checkpoint(acc)
-        res_dict[step] = step_results
-        hooks = list(step_results.keys())
-        print(
-            f"  Step {step}: {len(hooks)} hook points "
-            f"({', '.join(hooks[:3])}{'...' if len(hooks) > 3 else ''})"
-        )
+    timed_gpu = _TimedLock(gpu_lock)
 
-        # Save incrementally
-        np.save(results_path, res_dict)
+    # Producer: download checkpoints, respecting disk budget
+    def producer():
+        for item in items:
+            disk_sem.acquire()
+            prefetch_checkpoint(item[3], item[2])
+            work_queue.put(item)
+        for _ in range(num_workers):
+            work_queue.put(None)
 
-        if prefetch_future is not None:
-            prefetch_future.result()
-        if not keep_cached and rev is not None and hf_model is not None:
-            delete_cached_revision(hf_model, rev)
+    # Consumer: process checkpoints from queue
+    def worker():
+        import time
+        total_gpu_wait = 0.0
+        total_dl_wait = 0.0
+        n_done = 0
+        t_start = time.monotonic()
 
-    executor.shutdown(wait=True)
+        while True:
+            t0 = time.monotonic()
+            item = work_queue.get()
+            dl_wait = time.monotonic() - t0
+            if item is None:
+                break
+            total_dl_wait += dl_wait
+            step, path, rev, step_model = item
+            try:
+                data = torch.load(path, map_location="cpu", weights_only=False)
+                acc = DataAccessor(data, model_name=hf_name, revision=rev)
+                acc._hf_repo = step_model
+
+                step_results = compute_metrics_for_checkpoint(
+                    acc, gpu_lock=timed_gpu)
+                total_gpu_wait += step_results.pop("__gpu_wait__", 0.0)
+
+                with results_lock:
+                    res_dict[step] = step_results
+                    np.save(results_path, res_dict)
+
+                n_done += 1
+                hooks = list(step_results.keys())
+                print(
+                    f"  Step {step}: {len(hooks)} hook points "
+                    f"({', '.join(hooks[:3])}{'...' if len(hooks) > 3 else ''})"
+                )
+            except Exception as e:
+                print(f"Skipping step {step}: {e}")
+                traceback.print_exc()
+            finally:
+                acc = data = None
+                gc.collect()
+                torch.cuda.empty_cache()
+                if not keep_cached:
+                    with gpu_lock:
+                        delete_cached_revision(step_model, rev)
+                disk_sem.release()
+
+        total_time = time.monotonic() - t_start
+        with stats_lock:
+            worker_stats.append((total_time, total_gpu_wait, total_dl_wait, n_done))
+
+    producer_thread = threading.Thread(target=producer)
+    producer_thread.start()
+
+    threads = [threading.Thread(target=worker) for _ in range(num_workers)]
+    for w in threads:
+        w.start()
+
+    producer_thread.join()
+    for w in threads:
+        w.join()
+
+    # Print timing summary
+    total_wall = sum(s[0] for s in worker_stats)
+    total_gpu = sum(s[1] for s in worker_stats)
+    total_dl = sum(s[2] for s in worker_stats)
+    total_ckpts = sum(s[3] for s in worker_stats)
+    if total_wall > 0:
+        print(f"\n  Timing ({num_workers} workers, {total_ckpts} checkpoints):")
+        print(f"    GPU wait:      {total_gpu:7.1f}s  ({100*total_gpu/total_wall:.1f}% of worker time)")
+        print(f"    Download wait: {total_dl:7.1f}s  ({100*total_dl/total_wall:.1f}% of worker time)")
+        print(f"    Compute:       {total_wall-total_gpu-total_dl:7.1f}s  ({100*(total_wall-total_gpu-total_dl)/total_wall:.1f}% of worker time)")
+        print(f"    Total worker:  {total_wall:7.1f}s  (wall: {max(s[0] for s in worker_stats):.1f}s)")
 
 # ---------------------------------------------------------------------------
 # Main
@@ -561,11 +773,16 @@ def main(
     use_derive = derive and _needs_model_loading(sample_path)
 
     if use_derive:
+        if num_workers is None:
+            cpus = int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count()))
+            num_workers = max(1, cpus // 2)
+        derive_workers = min(num_workers, len(to_compute))
         print(
             f"Computing metrics for {len(to_compute)}/{len(step_files)} steps "
-            f"(sequential + selective weight loading)..."
+            f"({derive_workers} threads + selective weight loading + GPU lock)..."
         )
-        _compute_sequential_derive(to_compute, model_name, res_dict, results_path, keep_cached)
+        _compute_derive(to_compute, model_name, res_dict, results_path,
+                         keep_cached, num_workers=derive_workers)
     else:
         if num_workers is None:
             num_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count()))

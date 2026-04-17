@@ -73,7 +73,6 @@ class HookCollector:
         self.n_A = 0
         self.A_sum = None   # (d,) running sum for means
         self._acts_list = [] if mode == "acts" else None
-        self._mask_list = [] if mode == "acts" else None
 
         # Gradient storage (lazy-initialized)
         self._G_initialized = False
@@ -107,14 +106,6 @@ class HookCollector:
             return tensor[self._token_mask].to(dtype=self._act_dtype)
         # Fallback: all except last position
         return tensor[:, :-1].reshape(-1, tensor.size(-1)).to(dtype=self._act_dtype)
-
-    def _accumulate_acts(self, x_3d: torch.Tensor):
-        """Acts mode: save ALL tokens (no mask applied). Track mask separately."""
-        x_flat = x_3d.reshape(-1, x_3d.shape[-1]).to(dtype=self._act_dtype)
-        self._acts_list.append(x_flat.cpu())
-        if self._token_mask is not None:
-            self._mask_list.append(self._token_mask.reshape(-1).cpu())
-        self.n_A += x_flat.shape[0]
 
     # ------------------------------------------------------------------
     # Accumulation (public — also used for identity_head manual feeding)
@@ -170,19 +161,13 @@ class HookCollector:
         if not self.active:
             return
         x = inp[0].detach()
-        if self.mode == "acts" and x.dim() == 3:
-            self._accumulate_acts(x)
-        else:
-            self.accumulate(self._apply_mask(x))
+        self.accumulate(self._apply_mask(x))
 
     def _fwd_post(self, module, inp, output):
         if not self.active:
             return
         out = output.detach()
-        if self.mode == "acts" and out.dim() == 3:
-            self._accumulate_acts(out)
-        else:
-            self.accumulate(self._apply_mask(out))
+        self.accumulate(self._apply_mask(out))
 
     def _bwd(self, module, grad_input, grad_output):
         if not self.active:
@@ -219,8 +204,6 @@ class HookCollector:
         else:
             if self._acts_list:
                 result["A"] = torch.cat(self._acts_list, dim=0)
-                if self._mask_list:
-                    result["A_mask"] = torch.cat(self._mask_list, dim=0)
 
         result["n_A"] = self.n_A
 
@@ -246,8 +229,6 @@ class HookCollector:
                 self.A_sum.zero_()
         else:
             self._acts_list = []
-            if self._mask_list is not None:
-                self._mask_list = []
         self.n_A = 0
         if self.G is not None:
             self.G.zero_()
@@ -262,7 +243,6 @@ class HookCollector:
         self._handles.clear()
         self._token_mask = None
         self._acts_list = None
-        self._mask_list = None
 
 
 # ---------------------------------------------------------------------------

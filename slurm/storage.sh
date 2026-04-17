@@ -52,6 +52,7 @@ sbatch --array=0-$((N-1)) <<EOF
 
 MODEL_DIRS=(${DIRS_STR})
 MODEL_DIR="\${MODEL_DIRS[\$SLURM_ARRAY_TASK_ID]}"
+export HF_HOME="/projects/prjs1815/hf_cache"
 
 cd "\$HOME/Tracing-representation-geometry-reproduction" || exit 1
 export OMP_NUM_THREADS=1

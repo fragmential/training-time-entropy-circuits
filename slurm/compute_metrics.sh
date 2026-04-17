@@ -1,25 +1,26 @@
 #!/bin/bash
 # Usage:
-#   ./slurm/compute_metrics.sh <config_dir | path/to/config_dir> [model_name] [extra args...]
+#   ./slurm/compute_metrics.sh <config_dir | path/to/config_dir> [model_name ...] [extra args...]
 #
 # Examples:
 #   ./slurm/compute_metrics.sh rankme_alpha_packed
 #   ./slurm/compute_metrics.sh rankme_alpha_packed --recompute
 #   ./slurm/compute_metrics.sh rankme_alpha_packed pythia-1b-deduped
+#   ./slurm/compute_metrics.sh rankme_alpha_packed pythia-1b-deduped pythia-6.9b-deduped
 #   ./slurm/compute_metrics.sh activations/rankme_alpha_packed
 #   ./slurm/compute_metrics.sh /home/data/activations/custom_runs pythia-31m-deduped --recompute
 
 set -euo pipefail
 
-INPUT="${1:?Usage: $0 <config_dir | path/to/config_dir> [model_name] [extra args...]}"
+INPUT="${1:?Usage: $0 <config_dir | path/to/config_dir> [model_name ...] [extra args...]}"
 shift
 
-# If the next argument does not start with -, treat it as model_name.
-MODEL_NAME=""
-if [[ $# -gt 0 && "$1" != -* ]]; then
-    MODEL_NAME="$1"
+# Consume all non-flag arguments as model names.
+MODEL_NAMES=()
+while [[ $# -gt 0 && "$1" != -* ]]; do
+    MODEL_NAMES+=("$1")
     shift
-fi
+done
 
 EXTRA_ARGS=("$@")
 
@@ -31,8 +32,8 @@ SCAN_DIR="$CONFIG_DIR"
 
 # Build model list.
 MODELS=()
-if [[ -n "$MODEL_NAME" ]]; then
-    MODELS=("$MODEL_NAME")
+if [[ ${#MODEL_NAMES[@]} -gt 0 ]]; then
+    MODELS=("${MODEL_NAMES[@]}")
 else
     for D in "$SCAN_DIR"/*; do
         [[ -d "$D" ]] || continue
@@ -62,6 +63,7 @@ sbatch --array=0-$((${#MODELS[@]} - 1)) <<EOF
 
 MODELS=(${MODELS_STR})
 MODEL_NAME="\${MODELS[\$SLURM_ARRAY_TASK_ID]}"
+export HF_HOME="/projects/prjs1815/hf_cache"
 
 cd "\$HOME/Tracing-representation-geometry-reproduction" || exit 1
 

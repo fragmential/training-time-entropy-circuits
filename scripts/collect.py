@@ -489,12 +489,8 @@ def _collect_for_checkpoint(
 
                 # For identity_head: manually feed model output to collector
                 if identity_head_state is not None and residual_collector is not None:
-                    acts = outputs.logits.detach()
-                    if residual_collector.mode == "acts" and acts.dim() == 3:
-                        residual_collector._accumulate_acts(acts)
-                    else:
-                        acts_masked = residual_collector._apply_mask(acts)
-                        residual_collector.accumulate(acts_masked)
+                    acts_masked = residual_collector._apply_mask(outputs.logits.detach())
+                    residual_collector.accumulate(acts_masked)
 
         # --- Collect factors and clean up ---
         for cname, collector in collectors.items():

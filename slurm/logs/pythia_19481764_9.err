@@ -1,5 +1,0 @@
-Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
-Checkpoints:   0%|          | 0/58 [00:00<?, ?it/s]
-Fetching 13 files:   0%|          | 0/13 [00:00<?, ?it/s][A
-Fetching 13 files:   8%|▊         | 1/13 [00:00<00:02,  4.65it/s][A
-Fetching 13 files:  38%|███▊      | 5/13 [00:09<00:16,  2.07s/it][A[2026-02-14T00:57:57.047] error: *** JOB 19481775 ON gcn150 CANCELLED AT 2026-02-14T00:57:57 DUE to SIGNAL Terminated ***

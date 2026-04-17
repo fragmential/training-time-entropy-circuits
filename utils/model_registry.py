@@ -154,6 +154,8 @@ def load_tokenizer(config, revision=None):
     if revision:
         kwargs["revision"] = revision
     tok = AutoTokenizer.from_pretrained(config.hf_repo, **kwargs)
+    if config.pad_token_from_eos and tok.eos_token is None and revision:
+        tok = AutoTokenizer.from_pretrained(config.hf_repo, **{k: v for k, v in kwargs.items() if k != "revision"})
     if config.pad_token_from_eos and tok.pad_token is None:
         tok.pad_token = tok.eos_token
     return tok
@@ -232,29 +234,62 @@ def _norm_sd_prefix(config):
     return "gpt_neox.final_layer_norm" if config.family == "pythia" else "model.norm"
 
 
-def _load_from_safetensors(snap_dir, keys):
-    """Load specific tensor keys from safetensors files in a snapshot directory."""
-    import json
-    from safetensors import safe_open
+def _load_selective_tensors(snap_dir, keys):
+    """Load specific tensor keys from model files in a snapshot directory.
 
+    Tries safetensors first, falls back to pytorch .bin format.
+    """
+    import json
+
+    # --- Try safetensors ---
     index_path = os.path.join(snap_dir, "model.safetensors.index.json")
-    if os.path.exists(index_path):
-        with open(index_path) as f:
+    single_st = os.path.join(snap_dir, "model.safetensors")
+    if os.path.exists(index_path) or os.path.exists(single_st):
+        from safetensors import safe_open
+        if os.path.exists(index_path):
+            with open(index_path) as f:
+                weight_map = json.load(f)["weight_map"]
+            shards = {}
+            for k in keys:
+                if k in weight_map:
+                    shards.setdefault(weight_map[k], []).append(k)
+        else:
+            shards = {"model.safetensors": list(keys)}
+
+        result = {}
+        for shard_name, shard_keys in shards.items():
+            with safe_open(os.path.join(snap_dir, shard_name), framework="pt") as f:
+                avail = set(f.keys())
+                for k in shard_keys:
+                    if k in avail:
+                        result[k] = f.get_tensor(k)
+        return result
+
+    # --- Fallback: pytorch .bin ---
+    import torch
+    bin_index = os.path.join(snap_dir, "pytorch_model.bin.index.json")
+    if os.path.exists(bin_index):
+        with open(bin_index) as f:
             weight_map = json.load(f)["weight_map"]
         shards = {}
         for k in keys:
             if k in weight_map:
                 shards.setdefault(weight_map[k], []).append(k)
     else:
-        shards = {"model.safetensors": list(keys)}
+        shards = {"pytorch_model.bin": list(keys)}
 
     result = {}
     for shard_name, shard_keys in shards.items():
-        with safe_open(os.path.join(snap_dir, shard_name), framework="pt") as f:
-            avail = set(f.keys())
-            for k in shard_keys:
-                if k in avail:
-                    result[k] = f.get_tensor(k)
+        path = os.path.join(snap_dir, shard_name)
+        if not os.path.exists(path):
+            continue
+        try:
+            state = torch.load(path, map_location="cpu", weights_only=True)
+        except RuntimeError:
+            state = torch.load(path, map_location="cpu", weights_only=False)
+        for k in shard_keys:
+            if k in state:
+                result[k] = state[k]
     return result
 
 
@@ -269,6 +304,25 @@ class _RMSNorm:
 
     def float(self):
         return _RMSNorm(self.weight.float(), self.eps)
+
+
+def _get_cached_snap_dir(hf_repo, revision):
+    """Return snapshot directory path if already cached locally, else None."""
+    hf_home = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
+    model_dir = os.path.join(hf_home, "hub", f"models--{hf_repo.replace('/', '--')}")
+    # revision might already be a commit hash
+    snap_dir = os.path.join(model_dir, "snapshots", revision)
+    if os.path.isdir(snap_dir):
+        return snap_dir
+    # revision is a branch/tag — resolve via refs
+    ref_path = os.path.join(model_dir, "refs", revision)
+    if os.path.isfile(ref_path):
+        with open(ref_path) as f:
+            commit_hash = f.read().strip()
+        snap_dir = os.path.join(model_dir, "snapshots", commit_hash)
+        if os.path.isdir(snap_dir):
+            return snap_dir
+    return None
 
 
 def load_selective_weights(config, hf_repo, revision, hook_names, need_norm=False):
@@ -299,7 +353,7 @@ def load_selective_weights(config, hf_repo, revision, hook_names, need_norm=Fals
         all_keys.add(f"{norm_prefix}.bias")
 
     snap_dir = snapshot_download(hf_repo, revision=revision)
-    tensors = _load_from_safetensors(snap_dir, all_keys)
+    tensors = _load_selective_tensors(snap_dir, all_keys)
 
     result = {}
     for h, prefix in hook_prefixes.items():
