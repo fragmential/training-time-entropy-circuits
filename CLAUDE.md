@@ -50,12 +50,10 @@ inferences/           # Symlink → /projects/prjs1815/inferences (collected dat
   rankme_alpha_packed/# output from rankme_alpha_packed.yaml
   ...                 # one subdir per config (output_dir set in each config)
 
-activations/          # Legacy collected data (.npy and old .pt formats)
 slurm/
-  run_collect.sh      # SLURM array job wrapper for collect.py
+  collect.sh      # SLURM array job wrapper for collect.py
   compute_metrics.sh  # SLURM array job wrapper for compute_metrics.py
   storage.sh          # SLURM array job wrapper for storage CLI
-  run_*.job           # Legacy job scripts
 
 analysis/             # Plotting scripts
 ```
