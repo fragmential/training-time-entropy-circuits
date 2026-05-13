@@ -5,8 +5,8 @@ PYTHIA_TOKENS_PER_STEP = 2_097_152
 
 # Maps OLMo model keywords to their revision files (match most specific first)
 OLMO_REVISION_FILES = {
-    '7B': '7b_revisions.txt',
-    '1B': '1b_revisions.txt',
+    '7B': 'data/7b_revisions.txt',
+    '1B': 'data/1b_revisions.txt',
 }
 
 def _parse_olmo_revisions(filepath: str) -> dict:

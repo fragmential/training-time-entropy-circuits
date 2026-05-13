@@ -8,9 +8,8 @@ Tracks how LLM representations evolve during pretraining through spectral method
 ```
 scripts/
   collect.py            # Main collection: residual activations + MLP covariance factors
-  compute_metrics.py    # Unified metrics: RankMe, alpha, K-FAC log-det
+  compute_metrics.py    # Unified metrics: RankMe, alpha, K-FAC log-det (includes metric functions)
   activation_ratio.py   # Band analysis on stored eigenvectors + activations
-  verify.py             # Verification tests (self-consistency + server comparison)
   estimate_vram.py      # GPU VRAM estimator (forward peak; backward is typically 2-3x higher)
   convert_npy.py        # Convert legacy .npy activation files to .pt format
 
@@ -32,16 +31,15 @@ kfac_scripts/           # Legacy K-FAC pipeline (kept for reference)
 utils/
   model_registry.py   # ModelConfig, checkpoint discovery, model loading, architecture helpers
   hooks.py            # HookCollector — single unified hook class for all collection modes
-  storage.py          # Storage formats (acts/cov/cov_svd/eigenvalues/acts_svd) + CLI tool
-  accessor.py         # DataAccessor — format-agnostic chainable reader for stored data
+  accessor.py         # DataAccessor (read), save_factors (write), storage formats,
+                      #   eigendecomp helpers, convert/project/info CLI, decomp_profiler
   data_utils.py       # Packing, padding, token mask computation, load_and_cache_texts
-  powerlaw.py         # Eigenspectrum, RankMe, alpha fitting
   checkpoint_info.py  # Step-to-token count lookups
 
-data/                 # Dataset loaders (HuggingFace streaming)
-  fineweb_loader.py, pile_loader.py, olmomix_loader.py,
-  dolmino_loader.py, tulu_sft_loader.py, wikitext_loader.py,
-  lam_loader.py, sciq_loader.py
+data/                 # Dataset loaders and revision files
+  loaders.py          # Consolidated loader registry (all datasets)
+  __init__.py          # Re-exports from loaders.py
+  1b_revisions.txt, 7b_revisions.txt  # OLMo-2 checkpoint revision lists
 
 memorization_kfac (reference repo)/  # Merullo et al. released code (unmodified)
 
@@ -54,6 +52,8 @@ slurm/
   collect.sh      # SLURM array job wrapper for collect.py
   compute_metrics.sh  # SLURM array job wrapper for compute_metrics.py
   storage.sh          # SLURM array job wrapper for storage CLI
+
+tests/                # Test suite (replaced scripts/verify.py)
 
 analysis/             # Plotting scripts
 ```
@@ -122,11 +122,11 @@ Configs use a `CollectConfig` dataclass (in `scripts/collect.py`). Key fields:
 
 ### Storage CLI
 ```bash
-python -m utils.storage info step0.pt
-python -m utils.storage convert --input <dir_or_file> --to cov_svd
-python -m utils.storage project --input <dir_or_file> --onto both   # same-layer G↔B cross-basis
-python -m utils.storage project --input <dir_or_file> --onto-file ref.pt  # cross-checkpoint
-python -m utils.storage set-filter --input <dir> --token-selection last
+python -m utils.accessor info step0.pt
+python -m utils.accessor convert --input <dir_or_file> --to cov_svd
+python -m utils.accessor project --input <dir_or_file> --onto both   # same-layer G↔B cross-basis
+python -m utils.accessor project --input <dir_or_file> --onto-file ref.pt  # cross-checkpoint
+python -m utils.accessor set-filter --input <dir> --token-selection last
 ```
 
 ### DataAccessor
@@ -149,14 +149,11 @@ python scripts/compute_metrics.py --model_name pythia-14m \
 ./slurm/compute_metrics.sh inferences/full_limited/
 ```
 
-## Verification
+## Testing
 
 ```bash
-# Self-consistency tests (CPU, no existing data needed)
-python scripts/verify.py --mode self_consistency
-
-# Compare against existing computed data (on server)
-python scripts/verify.py --mode server
+# Run the test suite (replaced scripts/verify.py)
+pytest tests/
 ```
 
 ## On the SLURM cluster

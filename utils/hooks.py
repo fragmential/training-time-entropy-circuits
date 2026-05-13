@@ -51,12 +51,14 @@ class HookCollector:
         accumulation_dtype: str = "fp64",
         activation_dtype: str = "fp32",
         grad_capture: str = None,
+        token_selection: str = None,
     ):
         assert mode in ("cov", "acts"), f"Unknown mode: {mode}"
         assert capture in ("input", "output"), f"Unknown capture: {capture}"
 
         self.mode = mode
         self.capture = capture
+        self.token_selection = token_selection
         self.grad_capture = grad_capture if grad_capture is not None else capture
         self.collect_grad = collect_grad
         self.collect_means = collect_means

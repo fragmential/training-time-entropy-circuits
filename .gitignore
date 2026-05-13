@@ -18,3 +18,4 @@ results/*
 data/mixes
 analysis/transcriptions
 analysis/figures
+tests/snapshots/*

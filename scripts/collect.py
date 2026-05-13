@@ -49,7 +49,7 @@ from utils.model_registry import (
     delete_cached_revision,
 )
 from utils.hooks import HookCollector, setup_identity_head, restore_head
-from utils.storage import save_factors
+from utils.accessor import save_factors
 from utils.data_utils import (
     load_and_cache_texts,
     pack_sequences,
@@ -354,6 +354,7 @@ def _collect_for_checkpoint(
                     collect_grad=cfg.collect_final_grads,
                     accumulation_dtype=cfg.accumulation_dtype,
                     activation_dtype=cfg.activation_dtype,
+                    token_selection=cfg.token_selection,
                 )
                 residual_collectors[rkey] = rc
                 residual_keys.add(rkey)
@@ -371,6 +372,7 @@ def _collect_for_checkpoint(
                     collect_means=collect_means,
                     accumulation_dtype=cfg.accumulation_dtype,
                     activation_dtype=cfg.activation_dtype,
+                    token_selection=cfg.token_selection,
                 )
                 residual_collectors[rkey] = rc
                 residual_keys.add(rkey)
@@ -399,16 +401,10 @@ def _collect_for_checkpoint(
                         accumulation_dtype=cfg.accumulation_dtype,
                         activation_dtype=cfg.activation_dtype,
                         grad_capture="output",
+                        token_selection="all",
                     )
 
-        # --- Token mask function ---
-        token_sel = cfg.token_selection
-        if collects_mlp:
-            # For covariance collection, always use all tokens for MLP hooks
-            # Residual collector uses the config's token_selection
-            cov_token_sel = "all"
-        else:
-            cov_token_sel = token_sel
+        # Token selection stored per-collector (residual=cfg.token_selection, MLP="all")
 
         # --- Run batches ---
         parts = []
@@ -435,26 +431,18 @@ def _collect_for_checkpoint(
             bar_kwargs.update(leave=True, bar_format="{desc}: {n}/{total} [{elapsed}<{remaining}, {rate_fmt}]")
 
         for input_ids, attention_mask in tqdm(batches, **bar_kwargs):
-            # Compute masks
-            residual_mask = compute_token_mask(
-                input_ids, attention_mask=attention_mask,
-                token_selection=token_sel,
-                skip_positions=cfg.skip_positions,
-                boundary_token_ids=boundary_token_ids,
-            )
-            cov_mask = compute_token_mask(
-                input_ids, attention_mask=attention_mask,
-                token_selection=cov_token_sel,
-                skip_positions=cfg.skip_positions,
-                boundary_token_ids=boundary_token_ids,
-            ) if collects_mlp and cov_token_sel != token_sel else residual_mask
-
-            # Set masks on collectors
-            for cname, collector in collectors.items():
-                if cname in residual_keys:
-                    collector.set_token_mask(residual_mask)
-                else:
-                    collector.set_token_mask(cov_mask)
+            # Compute one mask per unique token_selection, cache by selection value
+            _mask_cache = {}
+            for collector in collectors.values():
+                sel = collector.token_selection or cfg.token_selection
+                if sel not in _mask_cache:
+                    _mask_cache[sel] = compute_token_mask(
+                        input_ids, attention_mask=attention_mask,
+                        token_selection=sel,
+                        skip_positions=cfg.skip_positions,
+                        boundary_token_ids=boundary_token_ids,
+                    )
+                collector.set_token_mask(_mask_cache[sel])
 
             # Forward (+ backward) pass
             fwd_kwargs = {"input_ids": input_ids}

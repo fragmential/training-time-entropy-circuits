@@ -1,5 +1,5 @@
 #!/bin/bash
-# SLURM wrapper for python -m utils.storage — one job per model subdir (or single job if --input points to a model dir).
+# SLURM wrapper for python -m utils.accessor — one job per model subdir (or single job if --input points to a model dir).
 # Usage: ./slurm/storage.sh <command> [flags...] --input <path>
 # Examples:
 #   ./slurm/storage.sh convert --to cov_svd --input inferences/full_limited
@@ -57,5 +57,5 @@ export HF_HOME="/projects/prjs1815/hf_cache"
 cd "\$HOME/Tracing-representation-geometry-reproduction" || exit 1
 export OMP_NUM_THREADS=1
 echo "Processing: \$MODEL_DIR"
-time uv run python -m utils.storage${QUOTED_ARGS} --input "\$MODEL_DIR" --workers 16
+time uv run python -m utils.accessor${QUOTED_ARGS} --input "\$MODEL_DIR" --workers 16
 EOF

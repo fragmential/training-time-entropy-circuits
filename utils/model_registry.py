@@ -22,11 +22,11 @@ class ModelConfig:
 # Per-model overrides for fields that differ within a family.
 _OLMO_OVERRIDES = {
     "allenai/OLMo-2-0425-1B": {
-        "revisions_file": "1b_revisions.txt",
+        "revisions_file": "data/1b_revisions.txt",
         "early_training_model": "allenai/OLMo-2-0425-1B-early-training",
     },
     "allenai/OLMo-2-1124-7B": {
-        "revisions_file": "7b_revisions.txt",
+        "revisions_file": "data/7b_revisions.txt",
     },
 }
 

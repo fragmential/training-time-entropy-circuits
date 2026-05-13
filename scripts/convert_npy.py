@@ -32,7 +32,7 @@ def convert_npy_file(npy_path: str, to_format: str = "acts", hook_name: str = "a
 
     Returns the output .pt path.
     """
-    from utils.storage import save_factors
+    from utils.accessor import save_factors
 
     acts = np.load(npy_path)
     acts_tensor = torch.from_numpy(acts)

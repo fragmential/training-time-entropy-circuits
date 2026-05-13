@@ -39,8 +39,99 @@ from multiprocessing import Pool
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from utils import powerlaw
 from utils.accessor import DataAccessor
+
+
+# ---------------------------------------------------------------------------
+# Metric functions (moved from utils/powerlaw.py)
+# ---------------------------------------------------------------------------
+
+def fit_powerlaw(arr: torch.Tensor, start: int, end: int):
+    """Fit power law in log-log space via least squares."""
+    x_range = torch.arange(start, end + 1, dtype=torch.long)
+    y_range = arr[x_range - 1]  # eigenval_{start} is at index (start-1)
+    log_x = torch.log(x_range.to(y_range.dtype)).unsqueeze(1)  # (n, 1)
+    log_y = torch.log(y_range).unsqueeze(1)                     # (n, 1)
+    # Solve [log_x, 1] @ [slope; intercept] = log_y
+    A = torch.cat([log_x, torch.ones_like(log_x)], dim=1)      # (n, 2)
+    result = torch.linalg.lstsq(A, log_y)
+    coeffs = result.solution.flatten()  # [slope, intercept]
+    slope, intercept = coeffs[0], coeffs[1]
+    y_pred = torch.exp(slope * log_x + intercept)
+    return -slope.item(), x_range, y_pred
+
+
+def robust_fit_powerlaw(arr: torch.Tensor, start: int, end: int, verbose: bool = False) -> float:
+    window = int((end - start) / 10)
+    slopes = torch.tensor([fit_powerlaw(arr, idx, idx + window)[0] for idx in range(start, end + 1)])
+    robust_slope = float(slopes.median())
+    if verbose:
+        print(robust_slope)
+        import matplotlib.pyplot as plt
+        arr_np = arr.numpy()
+        x_range_plt = np.arange(start, end + 1).astype(int)
+        y_pred_full = np.exp(
+            -robust_slope * np.log(x_range_plt) + np.log(arr_np[start - 1]) + robust_slope * np.log(start))
+        plt.loglog(np.arange(1, 1 + len(arr_np)), arr_np)
+        plt.loglog(x_range_plt, y_pred_full)
+        plt.show()
+    return robust_slope
+
+def stringer_get_powerlaw(ss: torch.Tensor, trange: torch.Tensor, top_k: int = 2048):
+    # COPIED FROM Stringer+Pachitariu 2018b github repo, ported to torch
+    # (https://github.com/MouseLand/stringer-pachitariu-et-al-2018b/blob/master/python/utils.py)
+    ''' fit exponent to variance curve'''
+    if top_k is not None:
+        ss = ss[:top_k]
+    ss = ss[ss > 0]
+    logss = torch.log(torch.abs(ss))
+    y = logss[trange].unsqueeze(1)
+    trange = trange + 1
+    nt = trange.numel()
+    x = torch.cat((-torch.log(trange.float()).unsqueeze(1), torch.ones(nt, 1)), dim=1)
+    w = (1.0 / trange.float()).unsqueeze(1)
+    b = torch.linalg.solve(x.T @ (x * w), (w * x).T @ y).flatten()
+
+    allrange = torch.arange(0, ss.numel(), dtype=torch.long) + 1
+    x = torch.cat((-torch.log(allrange.float()).unsqueeze(1), torch.ones(ss.numel(), 1)), dim=1)
+    ypred = torch.exp((x * b).sum(dim=1))
+    alpha = b[0]
+    max_range = 500 if len(ss) >= 512 else len(
+        ss) - 10  # subtracting 10 here arbitrarily because we want to avoid the last tail!
+
+    # Inline R2: 1 - SS_res / SS_tot
+    def _r2(y_true, y_pred_slice):
+        ss_res = ((y_true - y_pred_slice) ** 2).sum()
+        ss_tot = ((y_true - y_true.mean()) ** 2).sum()
+        if ss_tot == 0:
+            return None
+        return float(1.0 - ss_res / ss_tot)
+
+    t0 = trange[0]
+    fit_R2 = _r2(logss[t0:max_range], torch.log(torch.abs(ypred))[t0:max_range])
+    try:
+        fit_R2_100 = _r2(logss[t0:100], torch.log(torch.abs(ypred))[t0:100])
+    except:
+        fit_R2_100 = None
+    return alpha, ypred, fit_R2, fit_R2_100
+
+def rankme_metrics(eigen: torch.Tensor, top_k: int = 20000) -> dict:
+    eigen = torch.clamp(eigen, min=0) # We've already done this a million times but it don't hurt to do it another
+    if top_k is not None:
+        eigen = eigen[:top_k]       # Truncate up to top_k
+    eps = 1e-7
+
+    def entropy(p):
+        return -torch.sum(p * torch.log(torch.clamp(p, min=eps)))
+
+    sv = torch.sqrt(eigen)
+    p_sv = sv / sv.sum()          # true RankMe weights (∝ σᵢ)
+    p_ev = eigen / eigen.sum()    # matrix entropy weights (∝ λᵢ)
+
+    h_ev, h_sv = entropy(p_ev), entropy(p_sv)
+    return {'matrix_entropy': float(h_ev), 'sv_entropy': float(h_sv),
+            'rankme': float(torch.exp(h_ev)),       # RankMe per melody, arna and kumar
+            'true_rankme': float(torch.exp(h_sv))}  # true RankMe per the RankMe paper
 
 _STEP_RE = re.compile(r"step(\d+)\.pt$")
 
@@ -49,23 +140,21 @@ _STEP_RE = re.compile(r"step(\d+)\.pt$")
 # Spectral metrics from an eigenvalue array
 # ---------------------------------------------------------------------------
 
-def spectral_metrics(eigen, damping=1e-6, mean=None) -> dict:
+def spectral_metrics(eigen: torch.Tensor, damping: float = 1e-6, mean: torch.Tensor = None) -> dict:
     """Compute RankMe, alpha, R2, log-det from an eigenspectrum (descending, non-negative).
 
-    Accepts numpy array or torch.Tensor.
+    eigen must be a torch.Tensor (descending, non-negative).
     If `mean` is given, also records `mean_norm` = ||μ||₂.
     """
-    if hasattr(eigen, "numpy"):
-        eigen = eigen.numpy()
-    eigen = np.maximum(eigen, 0)
-    trace = float(np.sum(eigen))
+    eigen = eigen.clamp(min=0)
+    trace = float(eigen.sum())
     d = len(eigen)
     eps = damping * trace / max(d, 1)
-    log_det = float(np.sum(np.log(eigen + eps)))
+    log_det = float(torch.sum(torch.log(eigen + eps)))
 
-    eigen = eigen / np.sum(eigen) # normalise into sum 1
-    rm = powerlaw.rankme_metrics(eigen)
-    alpha_fit, ypred, fit_r2, fit_r2_100 = powerlaw.stringer_get_powerlaw(eigen, np.arange(11, 100))
+    eigen = eigen / eigen.sum()  # normalise into sum 1
+    rm = rankme_metrics(eigen)
+    alpha_fit, ypred, fit_r2, fit_r2_100 = stringer_get_powerlaw(eigen, torch.arange(11, 100))
     out = {
         "d": d,
         "eigenspectrum": eigen,
@@ -73,29 +162,27 @@ def spectral_metrics(eigen, damping=1e-6, mean=None) -> dict:
         "avg_magnitude": trace / d,
         "log_det": log_det,
         **rm,
-        "alpha": alpha_fit,
+        "alpha": float(alpha_fit),
         "ypred": ypred,
         "r2": fit_r2,
         "r2_100": fit_r2_100,
     }
     if mean is not None:
-        if hasattr(mean, "numpy"):
-            mean = mean.numpy()
-        out["mean_norm"] = float(np.linalg.norm(mean))
+        out["mean_norm"] = float(torch.linalg.norm(mean))
     return out
 
 # ---------------------------------------------------------------------------
 # Mean alignment metrics
 # ---------------------------------------------------------------------------
 
-def mean_metrics(eigvecs: np.ndarray, eigvals: np.ndarray, mean: np.ndarray, damping: float = 1e-6) -> dict:
+def mean_metrics(eigvecs: torch.Tensor, eigvals: torch.Tensor, mean: torch.Tensor, damping: float = 1e-6) -> dict:
     """Metrics characterizing how the mean direction relates to a covariance eigenbasis.
 
     Args:
-        eigvecs: (d, d) eigenvectors as columns, matching np.linalg.eigh convention.
+        eigvecs: (d, d) torch tensor, eigenvectors as columns, matching eigh convention.
                  Should correspond to the *centered* covariance for meaningful interpretation.
-        eigvals: (d,) eigenvalues, assumed sorted descending. Non-negative.
-        mean:    (d,) mean vector μ.
+        eigvals: (d,) torch tensor, eigenvalues, assumed sorted descending. Non-negative.
+        mean:    (d,) torch tensor, mean vector μ.
         damping: relative damping for Mahalanobis (added to eigvals as damping * mean(eigvals)).
 
     Returns dict with:
@@ -109,21 +196,14 @@ def mean_metrics(eigvecs: np.ndarray, eigvals: np.ndarray, mean: np.ndarray, dam
         pr_weighted:         participation ratio of energy-weighted profile λ_j |<μ̂, v_j>|²
         centroid_idx:        Σ_j j · p_j              (where in the spectrum μ lives, unweighted)
         centroid_idx_weighted: Σ_j j · p̃_j           (same, energy-weighted)
-        profile:             (d,) array p_j = |<μ̂, v_j>|²       (sums to 1)
-        profile_weighted:    (d,) array p̃_j ∝ λ_j p_j           (sums to 1)
+        profile:             (d,) torch tensor p_j = |<μ̂, v_j>|²       (sums to 1)
+        profile_weighted:    (d,) torch tensor p̃_j ∝ λ_j p_j           (sums to 1)
     """
-    if hasattr(eigvecs, "numpy"):
-        eigvecs = eigvecs.numpy()
-    if hasattr(eigvals, "numpy"):
-        eigvals = eigvals.numpy()
-    if hasattr(mean, "numpy"):
-        mean = mean.numpy()
-
-    eigvals = np.maximum(eigvals, 0).astype(np.float64)
-    mean = mean.astype(np.float64)
+    eigvals = eigvals.clamp(min=0).to(torch.float64)
+    mean = mean.to(torch.float64)
     d = len(eigvals)
 
-    mean_norm = float(np.linalg.norm(mean))
+    mean_norm = float(torch.linalg.norm(mean))
     if mean_norm == 0.0:
         # degenerate: μ = 0, every alignment metric is undefined
         return {
@@ -132,44 +212,44 @@ def mean_metrics(eigvecs: np.ndarray, eigvals: np.ndarray, mean: np.ndarray, dam
             "pr": float("nan"), "rayleigh": 0.0, "rayleigh_normed": 0.0,
             "mahalanobis": 0.0, "pr_weighted": float("nan"),
             "centroid_idx": float("nan"), "centroid_idx_weighted": float("nan"),
-            "profile": np.zeros(d), "profile_weighted": np.zeros(d),
+            "profile": torch.zeros(d), "profile_weighted": torch.zeros(d),
         }
     mu_hat = mean / mean_norm
 
     # Projection profile: p_j = |<μ̂, v_j>|², sums to 1 since {v_j} is orthonormal
-    coeffs = eigvecs.T @ mu_hat              # (d,) — coordinates of μ̂ in eigenbasis
+    coeffs = eigvecs.to(torch.float64).T @ mu_hat  # (d,) — coordinates of μ̂ in eigenbasis
     profile = coeffs ** 2
     profile = profile / profile.sum()        # numerical safety; should already sum to 1
 
     # Max overlap
-    max_idx = int(np.argmax(profile))
-    max_overlap = float(np.sqrt(profile[max_idx]))   # |<μ̂, v_j>|, not squared
+    max_idx = int(torch.argmax(profile))
+    max_overlap = float(torch.sqrt(profile[max_idx]))   # |<μ̂, v_j>|, not squared
 
     # Participation ratio (unweighted)
-    pr = float(1.0 / np.sum(profile ** 2))
+    pr = float(1.0 / torch.sum(profile ** 2))
 
     # Rayleigh quotient: variance of the data along the mean direction
-    rayleigh = float(np.sum(eigvals * profile))
+    rayleigh = float(torch.sum(eigvals * profile))
     lam_max = float(eigvals[0]) if eigvals[0] > 0 else 1.0
     rayleigh_normed = rayleigh / lam_max
 
     # Mahalanobis: μ̂ᵀ Σ⁻¹ μ̂, damped
     eps = damping * float(eigvals.mean())
-    mahalanobis = float(np.sum(profile / (eigvals + eps)))
+    mahalanobis = float(torch.sum(profile / (eigvals + eps)))
 
     # Energy-weighted profile
     weighted = eigvals * profile
-    w_sum = weighted.sum()
+    w_sum = float(weighted.sum())
     if w_sum > 0:
         profile_weighted = weighted / w_sum
-        pr_weighted = float(1.0 / np.sum(profile_weighted ** 2))
+        pr_weighted = float(1.0 / torch.sum(profile_weighted ** 2))
     else:
-        profile_weighted = np.zeros(d)
+        profile_weighted = torch.zeros(d)
         pr_weighted = float("nan")
 
-    idx = np.arange(d)
-    centroid_idx = float(np.sum(idx * profile))
-    centroid_idx_weighted = float(np.sum(idx * profile_weighted)) if w_sum > 0 else float("nan")
+    idx = torch.arange(d, dtype=torch.float64)
+    centroid_idx = float(torch.sum(idx * profile))
+    centroid_idx_weighted = float(torch.sum(idx * profile_weighted)) if w_sum > 0 else float("nan")
 
     return {
         "mean_norm": mean_norm,
@@ -199,9 +279,9 @@ def _top_k_outer_products(a: np.ndarray, b: np.ndarray, k: int) -> np.ndarray:
     if m * n <= 2_000_000:
         prods = np.outer(a, b).ravel()
         if len(prods) <= k:
-            return np.sort(prods)[::-1]
+            return np.sort(prods)[::-1].copy()
         idx = np.argpartition(prods, -k)[-k:]
-        return np.sort(prods[idx])[::-1]
+        return np.sort(prods[idx])[::-1].copy()
 
     # Priority queue: O(k log(min(m,n)))
     heap = [(-(a[0] * b[0]), 0, 0)]
@@ -231,11 +311,11 @@ def _sample_outer_products_linspace(a: np.ndarray, b: np.ndarray, k: int) -> np.
     if total <= k:
         prods = np.outer(a, b).ravel()
         prods.sort()
-        return prods[::-1]
+        return prods[::-1].copy()
     if total <= 2_000_000:
         prods = np.outer(a, b).ravel()
         prods.sort()
-        prods = prods[::-1]
+        prods = prods[::-1].copy()
         idx = np.round(np.linspace(0, len(prods) - 1, k)).astype(int)
         return prods[idx]
     # Approximate: map rank -> (i, j) via sorted row-major order
@@ -243,7 +323,7 @@ def _sample_outer_products_linspace(a: np.ndarray, b: np.ndarray, k: int) -> np.
     i_idx = np.minimum(rank_idx // n, m - 1)
     j_idx = np.minimum(rank_idx % n, n - 1)
     sampled = a[i_idx] * b[j_idx]
-    return np.sort(sampled)[::-1]
+    return np.sort(sampled)[::-1].copy()
 
 
 def _histogram_outer_product(a: np.ndarray, b: np.ndarray, bins: int = 1024,
@@ -289,8 +369,7 @@ def _histogram_outer_product(a: np.ndarray, b: np.ndarray, bins: int = 1024,
     return out
 
 
-def _check_negative_eigenvalues(eigvals: np.ndarray, label: str):
-    """Warn if negative eigenvalues are large relative to the matrix scale."""
+def _check_negative_eigenvalues(eigvals: torch.Tensor, label: str):
     min_eig = float(eigvals[-1])
     if min_eig >= 0:
         return
@@ -305,13 +384,13 @@ def _check_negative_eigenvalues(eigvals: np.ndarray, label: str):
 
 
 def kfac_metrics(
-    eigvals_A: np.ndarray,
-    eigvals_G: np.ndarray,
+    eigvals_A: torch.Tensor,
+    eigvals_G: torch.Tensor,
     top_k: int = 20000,
     sample_k: int = 1000,
     damping: float = 1e-6,
 ) -> dict:
-    """K-FAC metrics from A and G eigenvalues.
+    """K-FAC metrics from A and G eigenvalues (torch tensors).
 
     Returns:
         trace:          trace(G ⊗ A) = trace(G) * trace(A)
@@ -321,6 +400,10 @@ def kfac_metrics(
         sampled_eigvals: sample_k products linearly spaced across full distribution
         + spectral metrics on top_eigvals (rankme, alpha, r2, r2_100)
     """
+    # Convert to numpy for numpy-only helper functions
+    eA_np = eigvals_A.numpy()
+    eG_np = eigvals_G.numpy()
+
     d_in, d_out = len(eigvals_A), len(eigvals_G)
 
     trace_A = float(eigvals_A.sum())
@@ -329,21 +412,19 @@ def kfac_metrics(
 
     eps_A = damping * trace_A / max(d_in, 1)
     eps_G = damping * trace_G / max(d_out, 1)
-    ld_A = float(np.sum(np.log(eigvals_A + eps_A)))
-    ld_G = float(np.sum(np.log(eigvals_G + eps_G)))
+    ld_A = float(torch.sum(torch.log(eigvals_A + eps_A)))
+    ld_G = float(torch.sum(torch.log(eigvals_G + eps_G)))
     log_det = d_in * ld_G + d_out * ld_A
 
     k_top = min(top_k, d_in * d_out)
-    top_eigvals = _top_k_outer_products(eigvals_A, eigvals_G, k_top)
-    top_eigvals = np.maximum(top_eigvals, 0)
+    top_eigvals = torch.from_numpy(_top_k_outer_products(eA_np, eG_np, k_top)).clamp(min=0)
 
     k_samp = min(sample_k, d_in * d_out)
-    sampled_eigvals = _sample_outer_products_linspace(eigvals_A, eigvals_G, k_samp)
-    sampled_eigvals = np.maximum(sampled_eigvals, 0)
+    sampled_eigvals = torch.from_numpy(_sample_outer_products_linspace(eA_np, eG_np, k_samp)).clamp(min=0)
 
     sm = spectral_metrics(top_eigvals) if len(top_eigvals) >= 11 else {}
 
-    hist = _histogram_outer_product(eigvals_A, eigvals_G, bins=1024)
+    hist = _histogram_outer_product(eA_np, eG_np, bins=1024)
 
     return {
         **sm,
@@ -367,12 +448,12 @@ def kfac_metrics(
 # ---------------------------------------------------------------------------
 
 def generalized_eigenvalues_GB(
-    eigvals_G: np.ndarray,
-    eigvecs_G,
-    eigvals_B: np.ndarray,
-    eigvecs_B,
+    eigvals_G: torch.Tensor,
+    eigvecs_G: torch.Tensor,
+    eigvals_B: torch.Tensor,
+    eigvecs_B: torch.Tensor,
     eps_factor: float = 1e-6,
-) -> np.ndarray:
+) -> torch.Tensor:
     """Generalized eigenvalues of G w.r.t. B: solve Gv = λBv.
 
     Both G and B must be in the same space (d_out × d_out).
@@ -386,13 +467,11 @@ def generalized_eigenvalues_GB(
         M = Λ_B^{-1/2} Q Λ_G Q^T Λ_B^{-1/2}  (= C C^T where C = Λ_B^{-1/2} Q Λ_G^{1/2})
     eigenvalues of M = generalized eigenvalues of G w.r.t. B.
     """
-    import torch
-
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    eG = torch.as_tensor(eigvals_G, dtype=torch.float32, device=device)
-    vG = torch.as_tensor(eigvecs_G, dtype=torch.float32, device=device)
-    eB = torch.as_tensor(eigvals_B, dtype=torch.float32, device=device)
-    vB = torch.as_tensor(eigvecs_B, dtype=torch.float32, device=device)
+    eG = eigvals_G.to(dtype=torch.float32, device=device)
+    vG = eigvecs_G.to(dtype=torch.float32, device=device)
+    eB = eigvals_B.to(dtype=torch.float32, device=device)
+    vB = eigvecs_B.to(dtype=torch.float32, device=device)
 
     eps = max(eB.max().item() * eps_factor, 1e-10)
     lb_inv_sqrt = (eB + eps).rsqrt()          # (d,)
@@ -402,15 +481,14 @@ def generalized_eigenvalues_GB(
     C = lb_inv_sqrt.unsqueeze(1) * Q * lg_sqrt.unsqueeze(0)  # (d, d)
     M = C @ C.T                               # symmetric PSD
 
-    import time as _t; _t0 = _t.time()
-    gen_eigvals = torch.linalg.eigvalsh(M).flip(0).clamp(min=0).cpu()
-    from utils.powerlaw import decomp_profiler; decomp_profiler.log("torch.eigvalsh(gen_GB)", tuple(M.shape), _t.time() - _t0)
-    return gen_eigvals.numpy()
+    from utils.accessor import eigvalsh_descending
+    gen_eigvals = eigvalsh_descending(M).cpu()
+    return gen_eigvals
 
 def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False, gpu_lock=None):
     import time
     from contextlib import nullcontext
-    from utils.powerlaw import decomp_profiler
+    from utils.accessor import decomp_profiler
     if verbose:
         decomp_profiler.enable()
     avail = accessor.available()
@@ -442,16 +520,14 @@ def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False
         hook = accessor[hook_name]
         entry = accessor._entry(hook_name)
 
-        eA = eG = None  # cache for K-FAC / gen eigen (numpy arrays)
+        eA = eG = None  # cache for K-FAC / gen eigen (torch tensors)
         for factor in factors:
             fv = hook._factor(factor)
             eigvals = fv.eigvals
             if eigvals is None:
                 continue
-            if hasattr(eigvals, "numpy"):
-                eigvals = eigvals.numpy()
             _check_negative_eigenvalues(eigvals, f"{hook_name}.{factor}")
-            eigvals = np.maximum(eigvals, 0)
+            eigvals = eigvals.clamp(min=0)
             hook_results[factor] = spectral_metrics(eigvals, mean=fv.mean)
             if factor == "A":
                 eA = eigvals
@@ -461,9 +537,7 @@ def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False
             # Centered eigenvalues
             centered = fv.eigvals_centered
             if centered is not None:
-                if hasattr(centered, "numpy"):
-                    centered = centered.numpy()
-                centered = np.maximum(centered, 0)
+                centered = centered.clamp(min=0)
                 hook_results[f"{factor}_centered"] = spectral_metrics(centered)
 
             # Mean overlaps
@@ -474,7 +548,7 @@ def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False
             for ek, ev in entry.items():
                 if ek.startswith(f"{factor}_cross_eigvals_") and isinstance(ev, torch.Tensor):
                     cross_label = ek[len(f"{factor}_cross_eigvals_"):]
-                    cross_eigvals = np.maximum(ev.numpy(), 0)
+                    cross_eigvals = torch.clamp(ev, min=0)
                     hook_results[f"{factor}_cross_{cross_label}"] = spectral_metrics(cross_eigvals)
 
         # --- K-FAC metrics (needs both A and G eigenvalues) ---
