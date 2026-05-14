@@ -29,8 +29,8 @@ A post-processing step, completely decoupled from collection. It:
 
 ### 3. Post-hoc Storage Operations
 
-Format conversion, cross-basis projection, and metadata editing on already-collected `.pt` files, via the `python -m utils.accessor` CLI:
-- `convert`: acts -> cov -> cov_svd -> eigenvalues (progressive lossy chain)
+Format conversion, cross-basis projection, and metadata editing on already-collected `.pt` files, via `DataAccessor` and the `python -m utils.accessor` CLI:
+- `convert`: implemented as `DataAccessor(input).save(..., format=...)`
 - `project`: cross-basis eigenvalue projections (same-layer G<->B or cross-checkpoint)
 - `set-filter`: edit token selection metadata
 - `info`: inspect file contents

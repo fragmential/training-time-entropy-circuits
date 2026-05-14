@@ -133,6 +133,7 @@ acc["blk3.up"].A.eigvals        # 1D tensor, descending
 acc["blk3.up"].G.cov            # (d,d) normalized covariance
 acc.after_final_norm.A.eigvals  # final residual stream
 acc.blocks[3].up.A.eigh         # (eigvals, eigvecs) tuple
+acc.save("step143000_eig.pt", format="eigenvalues")  # conversion through the same interface
 ```
 
 ## Compute metrics

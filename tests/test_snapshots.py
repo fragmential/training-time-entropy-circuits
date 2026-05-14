@@ -11,7 +11,7 @@ Snapshots are stored in tests/snapshots/ as .pt files.
 
 These tests exercise every component that the refactor touches:
     - powerlaw: eigendecomposition, power-law fitting, RankMe
-    - storage: save_factors in each format, convert chain
+    - storage: DataAccessor.save in each format, conversion chain
     - accessor: derivation chains (cov_svd → eigvals, cov → eigvals, centered eigvals)
     - compute_metrics: spectral_metrics, mean_metrics, kfac_metrics, generalized_eigenvalues_GB
     - hooks: covariance and acts accumulation
@@ -139,7 +139,7 @@ def test_snapshot_storage_cov_svd(request, tmp_path):
 
 def test_snapshot_storage_convert_chain(request, tmp_path):
     _fixed_seed()
-    from utils.accessor import DataAccessor, convert
+    from utils.accessor import DataAccessor
     d, N = 32, 200
     X = torch.randn(N, d, dtype=torch.float64)
     factors = {"hook0": {"A": X.T @ X, "n_A": N, "n": N}}
@@ -147,9 +147,9 @@ def test_snapshot_storage_convert_chain(request, tmp_path):
     cov_path = str(tmp_path / "cov.pt")
     DataAccessor(factors).save(cov_path, format="cov")
     svd_path = str(tmp_path / "svd.pt")
-    convert(cov_path, "cov_svd", svd_path)
+    DataAccessor(cov_path).save(svd_path, format="cov_svd")
     eig_path = str(tmp_path / "eig.pt")
-    convert(svd_path, "eigenvalues", eig_path)
+    DataAccessor(svd_path).save(eig_path, format="eigenvalues")
 
     eig_data = torch.load(eig_path, map_location="cpu", weights_only=False)
     _compare_or_update("storage_convert_chain", {

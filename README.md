@@ -72,8 +72,7 @@ configs/                  # YAML configs (one per experiment)
 utils/
 ├── model_registry.py     # Model loading, checkpoint discovery
 ├── hooks.py              # HookCollector (unified hook class)
-├── storage.py            # Storage formats + CLI tool
-├── accessor.py           # DataAccessor (format-agnostic reader)
+├── accessor.py           # DataAccessor (read/write/convert/project/info interface)
 ├── data_utils.py         # Packing, padding, token masks
 └── powerlaw.py           # Eigenspectrum and metric utilities
 
@@ -101,7 +100,7 @@ slurm/                    # SLURM job scripts and wrappers
 - **Data modes**: packed or padded; `max_bytes` budget for consistent data volume across model families
 - **Storage formats**: `acts`, `acts_svd`, `cov`, `cov_svd`, `eigenvalues` (with `+m` modifier for means)
 - **Cross-basis projections**: same-layer G↔B/A and cross-checkpoint via storage CLI
-- **DataAccessor**: chainable property API — `acc["blk3.up"].A.eigvals`, `acc.blocks[3].up.G.cov`
+- **DataAccessor**: chainable property API plus `.save()` conversion — `acc["blk3.up"].A.eigvals`, `DataAccessor(path).save(out, format="cov_svd")`
 
 ## Key Metrics
 

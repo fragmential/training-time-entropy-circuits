@@ -1,5 +1,5 @@
 import torch
-from utils.accessor import DataAccessor, convert, info, add_same_layer_cross_basis
+from utils.accessor import DataAccessor, add_same_layer_cross_basis
 
 
 def test_save_load_cov(tmp_path, make_factors_dict):
@@ -67,10 +67,10 @@ def test_roundtrip_cov_to_cov_svd_to_eigenvalues(tmp_path, make_factors_dict):
     DataAccessor(factors).save(cov_path, format="cov")
 
     svd_path = str(tmp_path / "svd.pt")
-    convert(cov_path, "cov_svd", svd_path)
+    DataAccessor(cov_path).save(svd_path, format="cov_svd")
 
     eig_path = str(tmp_path / "eig.pt")
-    convert(svd_path, "eigenvalues", eig_path)
+    DataAccessor(svd_path).save(eig_path, format="eigenvalues")
 
     svd_data = torch.load(svd_path, map_location="cpu", weights_only=False)
     eig_data = torch.load(eig_path, map_location="cpu", weights_only=False)
@@ -117,6 +117,24 @@ def test_info_returns_string(tmp_path, make_factors_dict):
     factors = make_factors_dict(d=16, with_grad=False, with_means=False)
     path = str(tmp_path / "test.pt")
     DataAccessor(factors).save(path, format="cov_svd")
-    result = info(path)
+    result = DataAccessor(path).info()
     assert isinstance(result, str)
     assert len(result) > 0
+
+
+def test_save_stamps_missing_checkpoint_metadata(tmp_path, make_factors_dict):
+    factors = make_factors_dict(d=16, with_grad=False, with_means=False)
+    model_dir = tmp_path / "pythia-14m"
+    model_dir.mkdir()
+    path = str(model_dir / "step0.pt")
+    DataAccessor(factors).save(path, format="cov")
+
+    data = torch.load(path, map_location="cpu", weights_only=False)
+    data.pop("__hf_model__", None)
+    data.pop("__revision__", None)
+    torch.save(data, path)
+
+    DataAccessor(path).save(path, format="eigenvalues")
+    stamped = torch.load(path, map_location="cpu", weights_only=False)
+    assert stamped["__hf_model__"] == "EleutherAI/pythia-14m"
+    assert stamped["__revision__"] == "step0"
