@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 """Stamp .pt files with __revision__ and __hf_model__ from checkpoint schedule.
 
-Usage: python scripts/stamp_revisions.py inferences/kfac_small          # whole config
-       python scripts/stamp_revisions.py inferences/kfac_small/OLMo-2-0425-1B  # one model
-       python scripts/stamp_revisions.py inferences/kfac_small/OLMo-2-0425-1B/step1000.pt  # one file
+Usage: python scripts/stamp_revisions.py data/inferences/kfac_small          # whole config
+       python scripts/stamp_revisions.py data/inferences/kfac_small/OLMo-2-0425-1B  # one model
+       python scripts/stamp_revisions.py data/inferences/kfac_small/OLMo-2-0425-1B/step1000.pt  # one file
 """
 import os, sys, re, torch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))

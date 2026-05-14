@@ -22,6 +22,7 @@ Usage:
 import gc
 import os
 import sys
+import time
 import torch
 import torch.nn as nn
 from concurrent.futures import ThreadPoolExecutor
@@ -48,7 +49,7 @@ from utils.model_registry import (
     delete_cached_revision,
 )
 from utils.hooks import HookCollector, setup_identity_head, restore_head
-from utils.accessor import save_factors
+from utils.accessor import DataAccessor
 from utils.data_utils import (
     get_loader,
     load_and_cache_texts,
@@ -145,6 +146,9 @@ class CollectConfig:
 
     # --- Continue ---
     continue_from: "str | None" = None  # path to a previous run's output_dir to continue from
+
+    # --- Profiling ---
+    profile_vram: bool = False  # print peak CUDA memory after collection
 
     # --- Sweep ---
     array_id: "int | None" = None
@@ -283,7 +287,6 @@ def _derive_B_factors(factors, model, model_config):
     Uses DataAccessor._B_covariance so derivation logic lives in one place.
     """
     import re
-    from utils.accessor import DataAccessor
     acc = DataAccessor(factors, model=model, model_config=model_config)
     for hook_name, data in factors.items():
         if not re.match(r"blk\d+\.(up|down|gate)", hook_name):
@@ -589,6 +592,10 @@ def _merge_with_existing(existing_raw: dict, new_factors: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 def main(cfg: CollectConfig):
+    if cfg.profile_vram and torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
+        torch.cuda.empty_cache()
+
     model_name = cfg.model_name
     if isinstance(model_name, list):
         raise ValueError(
@@ -751,6 +758,8 @@ def main(cfg: CollectConfig):
     if not _IS_TTY:
         ckpt_bar_kwargs.update(bar_format="{desc}: {n}/{total} [{elapsed}<{remaining}]")
 
+    t_load, t_collect, t_save, t_metrics = 0.0, 0.0, 0.0, 0.0
+
     for idx, (step_num, revision, step_model) in enumerate(tqdm(to_process, **ckpt_bar_kwargs)):
         # Prefetch next
         if idx + 1 < len(to_process):
@@ -761,6 +770,7 @@ def main(cfg: CollectConfig):
 
         model = None
         try:
+            _t0 = time.time()
             model = load_model(model_config, step_model, revision)
             model.to(device)
 
@@ -779,6 +789,7 @@ def main(cfg: CollectConfig):
             if cfg.sample_labels and cfg.seed is not None:
                 torch.manual_seed(cfg.seed + step_num)
 
+            t_load += time.time() - _t0; _t0 = time.time()
             factors = _collect_for_checkpoint(
                 model, model_config, cfg, texts, tokenizer, packed_ids,
                 blocks, device, boundary_token_ids,
@@ -797,6 +808,7 @@ def main(cfg: CollectConfig):
                 else:
                     tqdm.write(f"  WARNING: no existing file to merge at {exist_path}")
 
+            t_collect += time.time() - _t0; _t0 = time.time()
             out_path = os.path.join(output_dir, f"step{step_num}.pt")
             token_filter = {
                 "token_selection": cfg.token_selection,
@@ -810,19 +822,22 @@ def main(cfg: CollectConfig):
             save_n_chunks = None
             if cfg.packing == "packed" and packed_ids is not None:
                 save_n_chunks = n_chunks_done + len(packed_ids)
-            save_factors(factors, out_path, cfg.storage_format, cfg.cross_basis_refs,
-                         cfg.storage_dtype, token_filter, n_chunks=save_n_chunks)
+            acc = DataAccessor(factors, model=model, model_config=model_config,
+                               model_name=step_model, revision=revision)
+            acc.save(out_path, format=cfg.storage_format,
+                     cross_basis_refs=cfg.cross_basis_refs,
+                     storage_dtype=cfg.storage_dtype, token_filter=token_filter,
+                     n_chunks=save_n_chunks)
+            t_save += time.time() - _t0
             tqdm.write(f"Step {step_num}: {len(factors)} hook points -> {out_path}")
 
             if cfg.compute_metrics:
+                _t0 = time.time()
                 import numpy as np
-                from utils.accessor import DataAccessor
                 from scripts.compute_metrics import compute_metrics_for_checkpoint
-                saved_data = torch.load(out_path, map_location="cpu", weights_only=False)
-                acc = DataAccessor(saved_data, model=model, model_config=model_config)
                 step_metrics = compute_metrics_for_checkpoint(acc, verbose=True)
                 metrics_dir = os.path.join(cfg.output_dir.replace("inferences", "results", 1)
-                                           if cfg.output_dir else "results")
+                                           if cfg.output_dir else "data/results")
                 os.makedirs(metrics_dir, exist_ok=True)
                 metrics_path = os.path.join(metrics_dir, f"results_{short_name}.npy")
                 res_dict = {}
@@ -833,6 +848,7 @@ def main(cfg: CollectConfig):
                         pass
                 res_dict[step_num] = step_metrics
                 np.save(metrics_path, res_dict)
+                t_metrics += time.time() - _t0
                 tqdm.write(f"  Metrics: {len(step_metrics)} hooks -> {metrics_path}")
 
         except Exception as e:
@@ -851,6 +867,15 @@ def main(cfg: CollectConfig):
 
     executor.shutdown(wait=True)
     print(f"Completed! Output saved to {output_dir}")
+
+    total = t_load + t_collect + t_save + t_metrics
+    if total > 0:
+        print(f"\n  Timing: load {t_load:.1f}s, collect {t_collect:.1f}s, save {t_save:.1f}s, metrics {t_metrics:.1f}s (total {total:.1f}s)")
+
+    if cfg.profile_vram and torch.cuda.is_available():
+        peak = torch.cuda.max_memory_allocated()
+        print(f"  Peak VRAM: {peak / 2**30:.2f} GiB")
+        print(torch.cuda.memory_summary(abbreviated=True))
 
 
 if __name__ == "__main__":

@@ -122,12 +122,12 @@ def test_snapshot_powerlaw_fit(request):
 
 def test_snapshot_storage_cov_svd(request, tmp_path):
     _fixed_seed()
-    from utils.accessor import save_factors
+    from utils.accessor import DataAccessor
     d, N = 32, 200
     X = torch.randn(N, d, dtype=torch.float64)
     factors = {"hook0": {"A": X.T @ X, "n_A": N, "n": N, "A_mean": X.float().mean(0)}}
     path = str(tmp_path / "svd.pt")
-    save_factors(factors, path, storage_format="cov_svd+m")
+    DataAccessor(factors).save(path, format="cov_svd+m")
     data = torch.load(path, map_location="cpu", weights_only=False)
     entry = data["hook0"]
     _compare_or_update("storage_cov_svd", {
@@ -139,13 +139,13 @@ def test_snapshot_storage_cov_svd(request, tmp_path):
 
 def test_snapshot_storage_convert_chain(request, tmp_path):
     _fixed_seed()
-    from utils.accessor import save_factors, convert
+    from utils.accessor import DataAccessor, convert
     d, N = 32, 200
     X = torch.randn(N, d, dtype=torch.float64)
     factors = {"hook0": {"A": X.T @ X, "n_A": N, "n": N}}
 
     cov_path = str(tmp_path / "cov.pt")
-    save_factors(factors, cov_path, storage_format="cov")
+    DataAccessor(factors).save(cov_path, format="cov")
     svd_path = str(tmp_path / "svd.pt")
     convert(cov_path, "cov_svd", svd_path)
     eig_path = str(tmp_path / "eig.pt")

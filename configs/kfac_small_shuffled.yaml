@@ -1,4 +1,4 @@
-output_dir: inferences/kfac_small_shuffled
+output_dir: data/inferences/kfac_small_shuffled
 # Same as kfac_small_updated but using pre-built shuffled olmo-mix data.
 
 model_name:

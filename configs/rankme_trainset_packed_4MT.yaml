@@ -1,4 +1,4 @@
-output_dir: inferences/rankme_trainset_packed_4MT
+output_dir: data/inferences/rankme_trainset_packed_4MT
 # Residual activation collection with packed training data.
 # Uses before_final_norm hook (raw residual stream), packed sequences, all tokens.
 # "native" resolves to each model's training data (pile_deduped for Pythia, olmo_mix for OLMo).

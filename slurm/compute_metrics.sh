@@ -28,7 +28,7 @@ mkdir -p slurm/logs
 
 CONFIG_DIR="$INPUT"
 SCAN_DIR="$CONFIG_DIR"
-[[ "$CONFIG_DIR" != */* ]] && SCAN_DIR="inferences/$CONFIG_DIR"
+[[ "$CONFIG_DIR" != */* ]] && SCAN_DIR="data/inferences/$CONFIG_DIR"
 
 # Build model list.
 MODELS=()

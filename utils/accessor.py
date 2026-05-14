@@ -168,55 +168,8 @@ def _cast_for(tensor: torch.Tensor, item_type: str, storage_dtype) -> torch.Tens
 # Section 4: Storage write functions (from storage.py)
 # ===========================================================================
 
-def save_factors(
-    factors_dict: dict,
-    save_path: str,
-    storage_format: str = "cov",
-    cross_basis_refs: Optional[list] = None,
-    storage_dtype: "str | dict | None" = None,
-    token_filter: Optional[dict] = None,
-    n_chunks: Optional[int] = None,
-):
-    """Save collected factors in the specified storage format.
 
-    Args:
-        factors_dict: {hook_name: {"A": Tensor, "G": Tensor, "n": int, ...}}
-                      A can be (d,d) covariance or (N,d) raw activations.
-        save_path: output .pt path
-        storage_format: "acts" | "cov" | "cov_svd" | "eigenvalues" (with optional +m)
-        cross_basis_refs: list of .pt paths with cov_svd data to project onto
-        storage_dtype: None   -> per-item defaults (eigvals:fp64, eigvecs/acts/cov:fp32)
-                       str    -> apply to all item types (e.g. "bf16" to halve all sizes)
-                       dict   -> per-item overrides, e.g. {"eigvals": "fp64", "eigvecs": "fp32"}
-    """
-    base_format = _FORMAT_ALIASES.get(storage_format.split("+")[0], storage_format.split("+")[0])
-    store_means = "+m" in storage_format
 
-    if base_format == "acts":
-        result = _prepare_acts(factors_dict, storage_dtype)
-    elif base_format == "acts_svd":
-        result = _prepare_acts_svd(factors_dict, storage_dtype)
-    elif base_format == "cov":
-        result = _prepare_cov(factors_dict, store_means=store_means, storage_dtype=storage_dtype)
-    elif base_format == "cov_svd":
-        result = _prepare_cov_svd(factors_dict, store_means=store_means, storage_dtype=storage_dtype)
-    elif base_format == "eigenvalues":
-        result = _prepare_eigenvalues(factors_dict, store_means=store_means, storage_dtype=storage_dtype)
-    else:
-        raise ValueError(f"Unknown storage_format: {storage_format!r}")
-
-    # Add cross-basis projections if requested
-    if cross_basis_refs:
-        for ref_path in cross_basis_refs:
-            _add_cross_basis(result, ref_path)
-
-    if token_filter:
-        result["__token_filter__"] = token_filter
-    if n_chunks is not None:
-        result["__n_chunks__"] = n_chunks
-    result["__format__"] = storage_format
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    torch.save(result, save_path)
 
 
 # ---------------------------------------------------------------------------
@@ -775,6 +728,45 @@ class DataAccessor:
             self.model_config, hf_repo, self._revision, hook_names, need_norm,
         )
         return True
+
+    # ------------------------------------------------------------------
+    # Save
+    # ------------------------------------------------------------------
+
+    def save(self, path, format="cov_svd", cross_basis_refs=None,
+             storage_dtype=None, token_filter=None, n_chunks=None):
+        """Save data in the specified storage format."""
+        base_format = _FORMAT_ALIASES.get(format.split("+")[0], format.split("+")[0])
+        store_means = "+m" in format
+        hook_data = {k: v for k, v in self.data.items() if not k.startswith("__")}
+
+        if base_format == "acts":
+            result = _prepare_acts(hook_data, storage_dtype)
+        elif base_format == "acts_svd":
+            result = _prepare_acts_svd(hook_data, storage_dtype)
+        elif base_format == "cov":
+            result = _prepare_cov(hook_data, store_means=store_means, storage_dtype=storage_dtype)
+        elif base_format == "cov_svd":
+            result = _prepare_cov_svd(hook_data, store_means=store_means, storage_dtype=storage_dtype)
+        elif base_format == "eigenvalues":
+            result = _prepare_eigenvalues(hook_data, store_means=store_means, storage_dtype=storage_dtype)
+        else:
+            raise ValueError(f"Unknown format: {format!r}")
+
+        if cross_basis_refs:
+            for ref_path in cross_basis_refs:
+                _add_cross_basis(result, ref_path)
+        if token_filter:
+            result["__token_filter__"] = token_filter
+        if n_chunks is not None:
+            result["__n_chunks__"] = n_chunks
+        if self._model_name:
+            result["__hf_model__"] = self._hf_repo or self._model_name
+        if self._revision:
+            result["__revision__"] = self._revision
+        result["__format__"] = format
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        torch.save(result, path)
 
     # ------------------------------------------------------------------
     # Public access points

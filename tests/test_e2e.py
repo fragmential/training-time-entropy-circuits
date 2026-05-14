@@ -126,8 +126,7 @@ def test_storage_roundtrip_real_data(model_and_config, texts_and_packed):
     """Full pipeline: collect → save → convert → accessor reads correctly."""
     from utils.model_registry import get_final_layernorm
     from utils.hooks import HookCollector, setup_identity_head, restore_head
-    from utils.accessor import save_factors, convert
-    from utils.accessor import DataAccessor
+    from utils.accessor import DataAccessor, convert
     from utils.data_utils import compute_token_mask
 
     model, config = model_and_config
@@ -147,7 +146,7 @@ def test_storage_roundtrip_real_data(model_and_config, texts_and_packed):
     with tempfile.TemporaryDirectory() as tmpdir:
         # Save as cov+m → convert to cov_svd
         cov_path = os.path.join(tmpdir, "cov.pt")
-        save_factors(factors, cov_path, storage_format="cov+m")
+        DataAccessor(factors).save(cov_path, format="cov+m")
 
         svd_path = os.path.join(tmpdir, "svd.pt")
         convert(cov_path, "cov_svd", svd_path)

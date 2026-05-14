@@ -2,9 +2,9 @@
 # SLURM wrapper for python -m utils.accessor — one job per model subdir (or single job if --input points to a model dir).
 # Usage: ./slurm/storage.sh <command> [flags...] --input <path>
 # Examples:
-#   ./slurm/storage.sh convert --to cov_svd --input inferences/full_limited
-#   ./slurm/storage.sh project --onto both --input inferences/full_limited/pythia-31m-deduped
-#   ./slurm/storage.sh set-filter --token-selection last --input inferences/full_limited
+#   ./slurm/storage.sh convert --to cov_svd --input data/inferences/full_limited
+#   ./slurm/storage.sh project --onto both --input data/inferences/full_limited/pythia-31m-deduped
+#   ./slurm/storage.sh set-filter --token-selection last --input data/inferences/full_limited
 
 set -euo pipefail
 

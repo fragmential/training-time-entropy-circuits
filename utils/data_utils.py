@@ -62,14 +62,14 @@ def load_and_cache_texts(
                    exceeds this value. Overrides num_samples as the stopping criterion.
                    Example: 80_000_000 ≈ 20M tokens, matching the reference K-FAC repo.
     """
-    os.makedirs("data/cache", exist_ok=True)
+    os.makedirs("data/filtered_texts", exist_ok=True)
     if max_bytes is not None:
         mb_hundredths = int(max_bytes / 10_000)   # truncate to 2 decimal places in MB
         mb_str = f"{mb_hundredths / 100:.2f}".rstrip("0").rstrip(".")
         cache_key = f"{dataset_name}_{mb_str}MB"
     else:
         cache_key = f"{dataset_name}_{num_samples}"
-    cache_path = os.path.join("data", "cache", f"filtered_texts_{cache_key}.json")
+    cache_path = os.path.join("data", "filtered_texts", f"{cache_key}.json")
     if os.path.exists(cache_path):
         with open(cache_path) as f:
             texts = json.load(f)

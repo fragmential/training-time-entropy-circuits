@@ -1,4 +1,4 @@
-output_dir: inferences/kfac_merullo_final
+output_dir: data/inferences/kfac_merullo_final
 # Reproduces Merullo et al. K-FAC analysis on OLMo-2 models.
 # Last checkpoint only, specific layers (23/24/25 for 7B, 14/15 for 1B),
 # gate+up+down projections, A+G covariance at 60% energy.

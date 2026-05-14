@@ -35,9 +35,6 @@ _MAP = {
     "utils/model_registry.py": [
         "tests/test_e2e.py",
     ],
-    "utils/checkpoint_info.py": [
-        "tests/test_e2e.py",
-    ],
     "scripts/collect.py": [
         "tests/test_e2e.py",
     ],

@@ -4,8 +4,14 @@ Reproduction and extension of spectral analysis of LLM representations during pr
 
 ## Installation
 
+This project is managed with uv. if you have it installed, all you need to get setup is:
 ```bash
-pip install torch transformers datasets numpy matplotlib seaborn scikit-learn tqdm jsonargparse
+uv sync
+```
+
+To activate the venv, use
+```bash
+source .venv/bin/activate
 ```
 
 ## Quick Start
@@ -26,7 +32,7 @@ python scripts/collect.py --config configs/full_limited.yaml \
     --model_name allenai/OLMo-2-1124-7B
 ```
 
-Config files set defaults; CLI flags override them. Each config has `output_dir: inferences/<config_name>` at the top.
+Config files set defaults; CLI flags override them. Each config has `output_dir: data/inferences/<config_name>` at the top.
 
 | Config | What it does |
 |--------|-------------|
@@ -40,7 +46,7 @@ Config files set defaults; CLI flags override them. Each config has `output_dir:
 
 ```bash
 python scripts/compute_metrics.py --model_name pythia-6.9b \
-    --input_dir inferences/reproduce_rankme_alpha/pythia-6.9b
+    --input_dir data/inferences/reproduce_rankme_alpha/pythia-6.9b
 ```
 
 ### Verify the pipeline
@@ -69,15 +75,18 @@ utils/
 ├── storage.py            # Storage formats + CLI tool
 ├── accessor.py           # DataAccessor (format-agnostic reader)
 ├── data_utils.py         # Packing, padding, token masks
-├── powerlaw.py           # Eigenspectrum and metric utilities
-└── checkpoint_info.py    # Step-to-token mapping
+└── powerlaw.py           # Eigenspectrum and metric utilities
 
 data/                     # Dataset loaders (HuggingFace streaming)
 ├── fineweb_loader.py, pile_loader.py, olmomix_loader.py
 ├── dolmino_loader.py, tulu_sft_loader.py
 ├── wikitext_loader.py, lam_loader.py, sciq_loader.py
 
-inferences/               # Symlink → /projects/prjs1815/inferences
+data/
+├── inferences/           # Symlink → /projects/prjs1815/inferences
+├── results/              # Computed metrics (.npy)
+├── filtered_texts/       # Cached text JSONs (auto-generated)
+└── mixes/                # Pre-shuffled token tensors
 rankme_alpha_scripts/     # Legacy pipeline (reference)
 kfac_scripts/             # Legacy pipeline (reference)
 memorization_kfac/        # Merullo et al. code (unmodified reference)

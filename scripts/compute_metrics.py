@@ -24,7 +24,7 @@ Results structure:
     }}}
 
 Usage:
-    python scripts/compute_metrics.py inferences/full_limited pythia-14m-deduped
+    python scripts/compute_metrics.py data/inferences/full_limited pythia-14m-deduped
     python scripts/compute_metrics.py full_limited pythia-70m-deduped
     python scripts/compute_metrics.py fineweb pythia-14m-deduped --recompute
 """
@@ -795,16 +795,16 @@ def main(
     recompute: bool = False,
     derive: bool = True,
     keep_cached: bool = False,
-    data_root: str = "inferences",
-    output_root: str = "results",
+    data_root: str = "data/inferences",
+    output_root: str = "data/results",
 ):
     """Compute spectral metrics from collected data.
 
     Args:
-        config_directory: Parent directory of model directory (e.g. inferences/rankme_alpha_packed).
-        data_root: Parent directory of config_directory. (default: inferences; overwritten by
+        config_directory: Parent directory of model directory (e.g. data/inferences/rankme_alpha_packed).
+        data_root: Parent directory of config_directory. (default: data/inferences; overwritten by
                    config_directory dirname if config_directory is more than a basename).
-        output_root: Directory of all result files. (default: results).
+        output_root: Directory of all result files. (default: data/results).
         model_name: Short model name (e.g. pythia-14m-deduped).
         num_workers: Number of parallel workers (default: cpu count).
         recompute: If True, recompute all steps even if results exist.

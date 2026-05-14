@@ -22,11 +22,11 @@ class ModelConfig:
 # Per-model overrides for fields that differ within a family.
 _OLMO_OVERRIDES = {
     "allenai/OLMo-2-0425-1B": {
-        "revisions_file": "data/1b_revisions.txt",
+        "revisions_file": "utils/revisions/1b_revisions.txt",
         "early_training_model": "allenai/OLMo-2-0425-1B-early-training",
     },
     "allenai/OLMo-2-1124-7B": {
-        "revisions_file": "data/7b_revisions.txt",
+        "revisions_file": "utils/revisions/7b_revisions.txt",
     },
 }
 
@@ -376,6 +376,32 @@ def load_selective_weights(config, hf_repo, revision, hook_names, need_norm=Fals
             result["__norm__"] = norm
 
     return result
+
+
+# --- Token counting ---
+
+PYTHIA_TOKENS_PER_STEP = 2_097_152
+
+_token_count_cache = {}
+
+def get_token_count(model_name: str, step_num: int) -> int:
+    """Return the number of pretraining tokens at a given step for a model."""
+    if 'pythia' in model_name.lower():
+        return step_num * PYTHIA_TOKENS_PER_STEP
+
+    config = get_model_config(model_name)
+    if config.revisions_file is None:
+        raise ValueError(f"No revisions_file for '{model_name}'")
+
+    if config.revisions_file not in _token_count_cache:
+        _token_count_cache[config.revisions_file] = _read_revisions_file(config.revisions_file)
+
+    rev_string = _token_count_cache[config.revisions_file].get(step_num)
+    if rev_string is None:
+        raise ValueError(f"Step {step_num} not found in {config.revisions_file}")
+
+    tokens_str = rev_string.split('-tokens')[-1].rstrip('B')
+    return int(tokens_str) * 10**9
 
 
 # --- HF cache management ---

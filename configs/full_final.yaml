@@ -1,4 +1,4 @@
-output_dir: inferences/full_final
+output_dir: data/inferences/full_final
 # Full collection (final checkpoint only): pre-norm residual + A + G covariance.
 # Packed training data, all tokens. "native" resolves per model family.
 

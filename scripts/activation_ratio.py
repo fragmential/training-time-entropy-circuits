@@ -23,7 +23,7 @@ Usage:
         --revision final \\
         --datasets clean:olmo_mix \\
         --datasets mem:memorization_kfac\\ (reference\\ repo)/data/olmo2_1b_mem_extra_dedup_j70.jsonl \\
-        --output_path results/activation_ratios.npy
+        --output_path data/results/activation_ratios.npy
 """
 
 import json
@@ -274,7 +274,7 @@ def main(
         seq_len: Chunk length for packed sequences.
         batch_size: Inference batch size.
         output_path: Where to save results (.npy). Defaults to
-                     results/activation_ratios_{model_short}_{step}.npy.
+                     data/results/activation_ratios_{model_short}_{step}.npy.
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -386,7 +386,7 @@ def main(
     if output_path is None:
         step_str = os.path.splitext(os.path.basename(basis_path))[0]
         short = model_name.split("/")[-1]
-        output_path = os.path.join("results", f"activation_ratios_{short}_{step_str}.npy")
+        output_path = os.path.join("data", "results", f"activation_ratios_{short}_{step_str}.npy")
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     np.save(output_path, all_results)
     print(f"\nSaved to {output_path}")
