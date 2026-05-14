@@ -10,11 +10,10 @@ import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from utils.data_utils import load_and_cache_texts, pad_and_tokenize, compute_token_mask
+from utils.data_utils import get_loader, load_and_cache_texts, pad_and_tokenize, compute_token_mask
 from utils.model_registry import get_model_config, get_checkpoint_schedule
 from transformers import AutoModelForCausalLM
 from utils.hooks import setup_identity_head, restore_head
-from data import get_loader
 
 HF_HOME = "/projects/prjs1815/hf_cache"
 os.environ["HF_HOME"] = HF_HOME

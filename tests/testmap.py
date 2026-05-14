@@ -38,12 +38,6 @@ _MAP = {
     "utils/checkpoint_info.py": [
         "tests/test_e2e.py",
     ],
-    "data/__init__.py": [
-        "tests/test_e2e.py",
-    ],
-    "data/loaders.py": [
-        "tests/test_e2e.py",
-    ],
     "scripts/collect.py": [
         "tests/test_e2e.py",
     ],

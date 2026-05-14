@@ -127,11 +127,7 @@ slurm/storage.sh
               │  model_registry.py ▶ checkpoint_info.py            │
               └─────────────────────────────────────────────────────┘
 
-              data/ (called only by collect.py via data_utils.py):
-              ┌─────────────────────────────────────────────────────┐
-              │  __init__.py :: get_loader() → loaders.py          │
-              │  loaders.py  :: _REGISTRY dict, single get_dataset │
-              └─────────────────────────────────────────────────────┘
+              data/ (revision files only, no code)
 ```
 
 ---

@@ -42,8 +42,7 @@ def tokenizer():
 
 @pytest.fixture(scope="module")
 def texts_and_packed(tokenizer):
-    from data import get_loader
-    from utils.data_utils import load_and_cache_texts, pack_sequences
+    from utils.data_utils import get_loader, load_and_cache_texts, pack_sequences
     loader_fn = get_loader("fineweb")
     texts = load_and_cache_texts(loader_fn, NUM_SAMPLES, 32, tokenizer, "fineweb")
     packed = pack_sequences(texts, tokenizer, SEQ_LEN)

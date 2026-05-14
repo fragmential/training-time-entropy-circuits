@@ -35,7 +35,6 @@ _IS_TTY = sys.stderr.isatty()
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from data import get_loader
 from utils.model_registry import (
     get_model_config,
     get_checkpoint_schedule,
@@ -51,6 +50,7 @@ from utils.model_registry import (
 from utils.hooks import HookCollector, setup_identity_head, restore_head
 from utils.accessor import save_factors
 from utils.data_utils import (
+    get_loader,
     load_and_cache_texts,
     pack_sequences,
     compute_token_mask,

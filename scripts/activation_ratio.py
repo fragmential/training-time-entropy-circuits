@@ -40,8 +40,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from utils.model_registry import get_model_config, load_model, load_tokenizer, get_mlp_projections
 from utils.hooks import HookCollector
 from utils.accessor import DataAccessor
-from data import get_loader
-from utils.data_utils import load_and_cache_texts, pack_sequences, compute_token_mask
+from utils.data_utils import get_loader, load_and_cache_texts, pack_sequences, compute_token_mask
 
 
 # ---------------------------------------------------------------------------

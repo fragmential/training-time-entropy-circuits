@@ -20,8 +20,7 @@ from utils.model_registry import (
     get_num_layers, get_checkpoint_schedule,
     prefetch_checkpoint, delete_cached_revision,
 )
-from utils.data_utils import load_and_cache_texts, pack_sequences
-from data import get_loader
+from utils.data_utils import get_loader, load_and_cache_texts, pack_sequences
 
 
 def parse_args():

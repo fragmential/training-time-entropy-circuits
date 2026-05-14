@@ -33,12 +33,10 @@ utils/
   hooks.py            # HookCollector — single unified hook class for all collection modes
   accessor.py         # DataAccessor (read), save_factors (write), storage formats,
                       #   eigendecomp helpers, convert/project/info CLI, decomp_profiler
-  data_utils.py       # Packing, padding, token mask computation, load_and_cache_texts
+  data_utils.py       # Dataset registry, packing, padding, token mask, load_and_cache_texts
   checkpoint_info.py  # Step-to-token count lookups
 
-data/                 # Dataset loaders and revision files
-  loaders.py          # Consolidated loader registry (all datasets)
-  __init__.py          # Re-exports from loaders.py
+data/                 # Revision files
   1b_revisions.txt, 7b_revisions.txt  # OLMo-2 checkpoint revision lists
 
 memorization_kfac (reference repo)/  # Merullo et al. released code (unmodified)
