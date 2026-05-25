@@ -43,7 +43,7 @@ from typing import Optional
 
 
 # ===========================================================================
-# Section 2: Eigendecomp helpers (from powerlaw.py)
+# Section 2: Eigendecomp helpers
 # ===========================================================================
 
 class _DecompProfiler:
@@ -115,11 +115,13 @@ def get_eigenspectrum(acts=None, cov=None, mu=None, topk=None):
 
 
 # ===========================================================================
-# Section 3: Storage constants and helpers (from storage.py)
+# Section 3: Storage constants and dtype helpers
 # ===========================================================================
 
 _FACTOR_KEYS = ("A", "G")
 _STORABLE_FACTOR_KEYS = ("A", "G", "B")  # includes derived factors
+
+_STEP_RE = re.compile(r"step(\d+)")
 
 _FORMAT_ALIASES = {
     "activations": "acts",
@@ -164,154 +166,9 @@ def _cast_for(tensor: torch.Tensor, item_type: str, storage_dtype) -> torch.Tens
     return _cast(tensor, dtype_str)
 
 
-# ===========================================================================
-# Section 4: Storage write functions (from storage.py)
-# ===========================================================================
-
-
-
-
-
-# ---------------------------------------------------------------------------
-# Format preparation
-# ---------------------------------------------------------------------------
-
-def _prepare_acts(factors_dict: dict, storage_dtype=None) -> dict:
-    """Store raw activation tensors + counts."""
-    result = {}
-    for name, data in factors_dict.items():
-        entry = {"n": data.get("n", 0)}
-        for key in _FACTOR_KEYS:
-            if key in data and data[key] is not None:
-                t = data[key]
-                entry[key] = _cast_for(t.cpu(), "acts", storage_dtype)
-            n_key = f"n_{key}"
-            if n_key in data:
-                entry[n_key] = data[n_key]
-            mask_key = f"{key}_mask"
-            if mask_key in data and data[mask_key] is not None:
-                entry[mask_key] = data[mask_key].cpu().bool()
-        result[name] = entry
-    return result
-
-
-def _prepare_acts_svd(factors_dict: dict, storage_dtype=None) -> dict:
-    """Compute full SVD of raw activations. Stores U(N,d), S(d,), V(d,d) + counts.
-
-    Reconstructable: (U * S.unsqueeze(0)) @ V.T  ->  original (N, d) activations.
-    Convert to cov_svd by dropping U (see convert()).
-    """
-    result = {}
-    for name, data in factors_dict.items():
-        entry = {"n": data.get("n", 0)}
-        for key in _FACTOR_KEYS:
-            if key not in data or data[key] is None:
-                continue
-            t = data[key]
-            if not (isinstance(t, torch.Tensor) and t.dim() == 2 and t.shape[0] != t.shape[1]):
-                continue  # skip covariance matrices
-            X = t.float().cpu()
-            U, S, Vt = torch.linalg.svd(X, full_matrices=False)
-            entry[f"{key}_U"] = _cast_for(U, "acts", storage_dtype)
-            entry[f"{key}_S"] = _cast_for(S, "eigvals", storage_dtype)
-            entry[f"{key}_V"] = _cast_for(Vt.T, "eigvecs", storage_dtype)
-            entry[f"n_{key}"] = X.shape[0]
-            mask_key = f"{key}_mask"
-            if mask_key in data and data[mask_key] is not None:
-                entry[mask_key] = data[mask_key].cpu().bool()
-        result[name] = entry
-    return result
-
-
-def _prepare_cov(factors_dict: dict, store_means: bool = False, storage_dtype=None) -> dict:
-    """Store raw covariance matrices + counts, optionally with means."""
-    result = {}
-    for name, data in factors_dict.items():
-        entry = {"n": data.get("n", 0)}
-        for key in _FACTOR_KEYS:
-            if key in data and data[key] is not None:
-                entry[key] = _cast_for(data[key].cpu(), "cov", storage_dtype)
-            n_key = f"n_{key}"
-            if n_key in data:
-                entry[n_key] = data[n_key]
-            if store_means:
-                mean_key = f"{key}_mean"
-                if mean_key in data and data[mean_key] is not None:
-                    entry[mean_key] = _cast_for(data[mean_key].cpu(), "mean", storage_dtype)
-        result[name] = entry
-    return result
-
-
-def _prepare_cov_svd(factors_dict: dict, store_means: bool = False, storage_dtype=None) -> dict:
-    """Eigendecompose each covariance matrix. Store eigvecs + eigvals, optionally means.
-
-    Uses torch.linalg.eigh on GPU when available, falls back to CPU.
-    Also stores centered eigenvalues when means are available.
-    """
-    import time as _t
-    decomp_profiler.enable()
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    t_total = _t.time()
-    result = {}
-    for name, data in factors_dict.items():
-        entry = {"n": data.get("n", 0)}
-        for key in _FACTOR_KEYS:
-            if key in data and data[key] is not None:
-                M = data[key]
-                n = data.get(f"n_{key}", data.get("n", 1))
-                entry[f"n_{key}"] = n
-                cov = (M.float() / n).to(device)
-                eigvals, eigvecs = eigh_descending(cov)
-                eigvals = eigvals.cpu()
-                eigvecs = eigvecs.cpu()
-                entry[f"{key}_eigvals"] = _cast_for(eigvals, "eigvals", storage_dtype)
-                entry[f"{key}_eigvecs"] = _cast_for(eigvecs, "eigvecs", storage_dtype)
-                # Centered eigenvalues if mean available
-                mean_key = f"{key}_mean"
-                if mean_key in data and data[mean_key] is not None:
-                    mu = data[mean_key].float().to(device)
-                    centered_cov = cov - torch.outer(mu, mu)
-                    c = eigvalsh_descending(centered_cov).cpu()
-                    entry[f"{key}_eigvals_centered"] = _cast_for(c, "eigvals", storage_dtype)
-            if store_means:
-                mean_key = f"{key}_mean"
-                if mean_key in data and data[mean_key] is not None:
-                    entry[mean_key] = _cast_for(data[mean_key].cpu(), "mean", storage_dtype)
-        result[name] = entry
-    print(f"  cov_svd save ({device}): {_t.time()-t_total:.1f}s")
-    print(decomp_profiler.summary())
-    decomp_profiler.disable()
-    return result
-
-
-def _prepare_eigenvalues(factors_dict: dict, store_means: bool = False, storage_dtype=None) -> dict:
-    """Compute eigenvalues only. No basis stored."""
-    result = {}
-    for name, data in factors_dict.items():
-        entry = {"n": data.get("n", 0)}
-        for key in _STORABLE_FACTOR_KEYS:
-            if key in data and data[key] is not None:
-                M = data[key].cpu()  # preserve accumulator dtype
-                n = data.get(f"n_{key}", data.get("n", 1))
-                entry[f"n_{key}"] = n
-                dev = "cuda" if torch.cuda.is_available() else "cpu"
-                cov = (M.to(dev) / n)
-                mean_key = f"{key}_mean"
-                mu = data[mean_key].to(device=dev, dtype=cov.dtype) if mean_key in data and data[mean_key] is not None else None
-                centered, uncentered = get_eigenspectrum(cov=cov, mu=mu)
-                entry[f"{key}_eigvals"] = _cast_for(uncentered.cpu(), "eigvals", storage_dtype)
-                if centered is not None:
-                    entry[f"{key}_eigvals_centered"] = _cast_for(centered.cpu(), "eigvals", storage_dtype)
-            if store_means:
-                mean_key = f"{key}_mean"
-                if mean_key in data and data[mean_key] is not None:
-                    entry[mean_key] = _cast_for(data[mean_key].cpu(), "mean", storage_dtype)
-        result[name] = entry
-    return result
-
 
 # ===========================================================================
-# Section 5: Cross-basis and format operations (from storage.py)
+# Section 4: Cross-basis projection helper
 # ===========================================================================
 
 def _add_cross_basis(result: dict, ref_path: str):
@@ -357,315 +214,35 @@ def _add_cross_basis(result: dict, ref_path: str):
             entry[f"{key}_cross_eigvals_{ref_label}"] = cross_eigvals
 
 
-def project_onto_basis(data_path: str, basis_path: str, output_path: str = None):
-    """CLI-friendly: add cross-basis eigenvalues from basis_path into data_path."""
-    data = torch.load(data_path, map_location="cpu", weights_only=False)
-    _add_cross_basis(data, basis_path)
-    out = output_path or data_path
-    torch.save(data, out)
-    return out
-
-
-def project_spectra_onto_this(data_path: str, spectra_path: str, output_path: str = None):
-    """CLI-friendly: project spectra from spectra_path onto eigenbasis in data_path."""
-    data = torch.load(data_path, map_location="cpu", weights_only=False)
-    spectra = torch.load(spectra_path, map_location="cpu", weights_only=False)
-    spectra_label = os.path.splitext(os.path.basename(spectra_path))[0]
-
-    for name in data:
-        if name.startswith("__"):
-            continue
-        if name not in spectra:
-            continue
-        entry = data[name]
-        spec_entry = spectra[name]
-
-        for key in _FACTOR_KEYS:
-            eigvecs_key = f"{key}_eigvecs"
-            if eigvecs_key not in entry:
-                continue
-            U_this = entry[eigvecs_key]
-
-            # Get their covariance
-            M_other = None
-            if key in spec_entry:
-                t = spec_entry[key]
-                if t.dim() == 2 and t.shape[0] == t.shape[1]:
-                    n = spec_entry.get(f"n_{key}", spec_entry.get("n", 1))
-                    M_other = t.float() / n
-            if M_other is None and f"{key}_eigvals" in spec_entry and eigvecs_key in spec_entry:
-                V = spec_entry[eigvecs_key]
-                S = spec_entry[f"{key}_eigvals"]
-                M_other = reconstruct_cov(S, V)
-
-            if M_other is None:
-                continue
-
-            M_proj = U_this.T @ M_other @ U_this
-            cross_eigvals = eigvalsh_descending(M_proj)
-            entry[f"{key}_cross_eigvals_{spectra_label}"] = cross_eigvals
-
-    out = output_path or data_path
-    torch.save(data, out)
-    return out
-
-
-def add_same_layer_cross_basis(data: dict, onto: str = "both") -> None:
-    """Add same-layer cross-factor eigenvalue projections in-place.
-
-    For each hook point, detects compatible same-dimension factor pairs:
-      G <-> B  for MLP hooks (both d_out)
-      G <-> A  for residual hooks (both d_model, B not stored)
-
-    Stores results as:
-      G_cross_eigvals_B  (or G_cross_eigvals_A for residual)
-      B_cross_eigvals_G  (or A_cross_eigvals_G for residual)
-
-    Args:
-        data: loaded .pt dict, modified in-place
-        onto: "B" -- project G onto fwd-factor basis
-              "G" -- project fwd-factor onto G basis
-              "both" / "BG" / "GB" -- both directions
-    """
-    do_onto_fwd = onto in ("B", "both", "BG", "GB")
-    do_onto_G   = onto in ("G", "both", "BG", "GB")
-
-    for name, entry in data.items():
-        if name.startswith("__"):
-            continue
-
-        has_G = "G_eigvecs" in entry and "G_eigvals" in entry
-        if not has_G:
-            continue
-
-        # Prefer B (MLP), fall back to A (residual)
-        if "B_eigvecs" in entry and "B_eigvals" in entry:
-            fwd_fac = "B"
-        elif "A_eigvecs" in entry and "A_eigvals" in entry:
-            fwd_fac = "A"
-        else:
-            continue
-
-        fwd_V = entry[f"{fwd_fac}_eigvecs"].float()
-        fwd_S = entry[f"{fwd_fac}_eigvals"].float()
-        G_V   = entry["G_eigvecs"].float()
-        G_S   = entry["G_eigvals"].float()
-
-        if fwd_V.shape != G_V.shape:
-            continue  # dimensions differ -- skip
-
-        if do_onto_fwd:
-            M_G    = reconstruct_cov(G_S, G_V)
-            M_proj = fwd_V.T @ M_G @ fwd_V
-            entry[f"G_cross_eigvals_{fwd_fac}"] = eigvalsh_descending(M_proj)
-
-        if do_onto_G:
-            M_fwd  = reconstruct_cov(fwd_S, fwd_V)
-            M_proj = G_V.T @ M_fwd @ G_V
-            entry[f"{fwd_fac}_cross_eigvals_G"] = eigvalsh_descending(M_proj)
-
-
-def set_token_filter(path: str, filter_dict: dict, output_path: str = None) -> str:
-    """Edit the stored token filter metadata in a .pt file."""
-    data = torch.load(path, map_location="cpu", weights_only=False)
-    data["__token_filter__"] = filter_dict
-    out = output_path or path
-    torch.save(data, out)
-    return out
-
-
-# ---------------------------------------------------------------------------
-# Format conversion
-# ---------------------------------------------------------------------------
-
-def convert(input_path: str, to_format: str, output_path: str = None):
-    """Convert a stored .pt file to a different format.
-
-    Supported conversions:
-        acts     -> cov -> cov_svd -> eigenvalues   (progressive reduction, lossless until eigenvalues)
-        cov_svd  -> cov                            (reconstruct from eigdecomp x n)
-        acts_svd -> acts                           (reconstruct U S V^T)
-        acts_svd -> cov_svd                        (drop U, derive eigenvalues from S^2/n)
-    """
-    data = torch.load(input_path, map_location="cpu", weights_only=False)
-    src_format = _FORMAT_ALIASES.get(data.get("__format__", "cov").split("+")[0],
-                                     data.get("__format__", "cov").split("+")[0])
-    to_format = _FORMAT_ALIASES.get(to_format, to_format)
-
-    if to_format == src_format:
-        return input_path
-
-    result = {}
-    for name, entry in data.items():
-        if name.startswith("__"):
-            continue
-
-        new_entry = {"n": entry.get("n", 0)}
-        # Copy over cross-basis, counts, and means
-        for k, v in entry.items():
-            if k.startswith("n_") or "cross_eigvals" in k or k.endswith("_mean"):
-                new_entry[k] = v
-
-        for key in _FACTOR_KEYS:
-            # Handle acts -> cov conversion: compute xxT from raw activations
-            is_raw_acts = (
-                key in entry
-                and isinstance(entry[key], torch.Tensor)
-                and entry[key].dim() == 2
-                and entry[key].shape[0] != entry[key].shape[1]
-            )
-
-            if to_format == "cov":
-                if is_raw_acts:
-                    # acts -> cov
-                    X = entry[key].float()
-                    new_entry[key] = X.T @ X
-                    new_entry[f"n_{key}"] = X.shape[0]
-                elif f"{key}_eigvecs" in entry and f"{key}_eigvals" in entry:
-                    # Reconstruct from svd
-                    V = entry[f"{key}_eigvecs"]
-                    S = entry[f"{key}_eigvals"]
-                    n = entry.get(f"n_{key}", entry.get("n", 1))
-                    new_entry[key] = reconstruct_cov(S, V) * n
-                elif key in entry and not is_raw_acts:
-                    new_entry[key] = entry[key]
-
-            elif to_format == "cov_svd":
-                if is_raw_acts:
-                    # acts -> cov_svd: compute covariance then eigendecompose
-                    X = entry[key].float()
-                    n = X.shape[0]
-                    M = (X.T @ X) / n
-                    eigvals, eigvecs = eigh_descending(M)
-                    new_entry[f"{key}_eigvals"] = eigvals
-                    new_entry[f"{key}_eigvecs"] = eigvecs
-                    new_entry[f"n_{key}"] = n
-                elif key in entry and not is_raw_acts:
-                    # cov -> cov_svd
-                    M = entry[key].float()
-                    n = entry.get(f"n_{key}", entry.get("n", 1))
-                    eigvals, eigvecs = eigh_descending(M / n)
-                    new_entry[f"{key}_eigvals"] = eigvals
-                    new_entry[f"{key}_eigvecs"] = eigvecs
-                elif f"{key}_U" in entry:
-                    # acts_svd -> cov_svd (drop U, keep V and S)
-                    new_entry[f"{key}_eigvecs"] = entry[f"{key}_V"]
-                    S = entry[f"{key}_S"]
-                    n = entry.get(f"n_{key}", entry.get("n", 1))
-                    new_entry[f"{key}_eigvals"] = (S ** 2) / n
-                elif f"{key}_eigvals" in entry:
-                    # Already have svd data, copy
-                    new_entry[f"{key}_eigvals"] = entry[f"{key}_eigvals"]
-                    if f"{key}_eigvecs" in entry:
-                        new_entry[f"{key}_eigvecs"] = entry[f"{key}_eigvecs"]
-
-            elif to_format == "eigenvalues":
-                if is_raw_acts:
-                    # acts -> eigenvalues
-                    X = entry[key].float()
-                    n = X.shape[0]
-                    eigvals = eigvalsh_descending((X.T @ X) / n)
-                    new_entry[f"{key}_eigvals"] = eigvals
-                    new_entry[f"n_{key}"] = n
-                elif f"{key}_eigvals" in entry:
-                    new_entry[f"{key}_eigvals"] = entry[f"{key}_eigvals"]
-                elif key in entry and not is_raw_acts:
-                    M = entry[key].float()
-                    n = entry.get(f"n_{key}", entry.get("n", 1))
-                    eigvals = eigvalsh_descending(M / n)
-                    new_entry[f"{key}_eigvals"] = eigvals
-
-            elif to_format == "acts":
-                if is_raw_acts:
-                    new_entry[key] = entry[key]
-                elif f"{key}_U" in entry:
-                    # acts_svd -> acts: reconstruct from U S V^T
-                    U = entry[f"{key}_U"].float()
-                    S = entry[f"{key}_S"].float()
-                    V = entry[f"{key}_V"].float()
-                    new_entry[key] = (U * S.unsqueeze(0)) @ V.T
-
-            elif to_format == "acts_svd":
-                if f"{key}_U" in entry:
-                    new_entry[f"{key}_U"] = entry[f"{key}_U"]
-                    new_entry[f"{key}_S"] = entry[f"{key}_S"]
-                    new_entry[f"{key}_V"] = entry[f"{key}_V"]
-                    if f"n_{key}" in entry:
-                        new_entry[f"n_{key}"] = entry[f"n_{key}"]
-                elif is_raw_acts:
-                    X = entry[key].float()
-                    U, S, Vt = torch.linalg.svd(X, full_matrices=False)
-                    new_entry[f"{key}_U"] = U
-                    new_entry[f"{key}_S"] = S
-                    new_entry[f"{key}_V"] = Vt.T
-                    new_entry[f"n_{key}"] = X.shape[0]
-
-        result[name] = new_entry
-
-    result["__format__"] = to_format
-    out = output_path or input_path
-    torch.save(result, out)
-    return out
-
-
-def trim_svd(input_path: str, output_path: str = None):
-    """Drop U matrices from acts_svd format, converting to cov_svd."""
-    return convert(input_path, "cov_svd", output_path)
-
-
-# ---------------------------------------------------------------------------
-# Info
-# ---------------------------------------------------------------------------
-
-def info(path: str) -> str:
-    """Print summary of stored data."""
-    data = torch.load(path, map_location="cpu", weights_only=False)
-    fmt = data.get("__format__", "unknown")
-    lines = [f"File: {path}", f"Format: {fmt}", ""]
-
-    tf = data.get("__token_filter__")
-    if tf:
-        lines.append("Token filter:")
-        for k, v in tf.items():
-            lines.append(f"  {k}: {v}")
-        lines.append("")
-
-    for name, entry in sorted(data.items()):
-        if name.startswith("__"):
-            continue
-        lines.append(f"  {name}:")
-        lines.append(f"    n = {entry.get('n', '?')}")
-        for k, v in sorted(entry.items()):
-            if k in ("n",):
-                continue
-            if isinstance(v, torch.Tensor):
-                size_mb = v.numel() * v.element_size() / (1024 * 1024)
-                lines.append(f"    {k}: {tuple(v.shape)} {v.dtype} ({size_mb:.2f} MB)")
-            elif isinstance(v, (int, float)):
-                lines.append(f"    {k}: {v}")
-        lines.append("")
-
-    return "\n".join(lines)
-
+# ===========================================================================
+# Section 5: CLI worker functions
+# ===========================================================================
 
 def _convert_worker(args):
     path, fmt = args
-    return convert(path, fmt)
+    DataAccessor(path).save(path, format=fmt)
+    return path
 
 def _project_same_layer_worker(args):
     path, onto = args
-    data = torch.load(path, map_location="cpu", weights_only=False)
-    add_same_layer_cross_basis(data, onto)
-    torch.save(data, path)
+    acc = DataAccessor(path)
+    acc.add_cross_basis(onto)
+    acc.save(path)
     return path
 
 def _project_onto_file_worker(args):
     path, basis_path = args
-    return project_onto_basis(path, basis_path)
+    acc = DataAccessor(path)
+    acc.project_onto(basis_path)
+    acc.save(path)
+    return path
 
 def _set_filter_worker(args):
     path, filter_dict = args
-    return set_token_filter(path, filter_dict)
+    acc = DataAccessor(path)
+    acc.set_token_filter(filter_dict)
+    acc.save(path)
+    return path
 
 
 # ===========================================================================
@@ -730,28 +307,45 @@ class DataAccessor:
         return True
 
     # ------------------------------------------------------------------
-    # Save
+    # Save (view-based: reads from FactorView properties, no manual conversion)
     # ------------------------------------------------------------------
 
-    def save(self, path, format="cov_svd", cross_basis_refs=None,
+    def save(self, path, format=None, cross_basis_refs=None,
              storage_dtype=None, token_filter=None, n_chunks=None):
-        """Save data in the specified storage format."""
+        """Save data in the specified storage format.
+
+        Reads from FactorView properties — the views handle all format conversion
+        lazily. Any source format (raw factors, cov, cov_svd, etc.) can be saved
+        as any target format, provided the conversion is well-defined.
+        """
+        if format is None:
+            format = self.data.get("__format__", "cov_svd")
         base_format = _FORMAT_ALIASES.get(format.split("+")[0], format.split("+")[0])
         store_means = "+m" in format
-        hook_data = {k: v for k, v in self.data.items() if not k.startswith("__")}
 
-        if base_format == "acts":
-            result = _prepare_acts(hook_data, storage_dtype)
-        elif base_format == "acts_svd":
-            result = _prepare_acts_svd(hook_data, storage_dtype)
-        elif base_format == "cov":
-            result = _prepare_cov(hook_data, store_means=store_means, storage_dtype=storage_dtype)
-        elif base_format == "cov_svd":
-            result = _prepare_cov_svd(hook_data, store_means=store_means, storage_dtype=storage_dtype)
-        elif base_format == "eigenvalues":
-            result = _prepare_eigenvalues(hook_data, store_means=store_means, storage_dtype=storage_dtype)
-        else:
-            raise ValueError(f"Unknown format: {format!r}")
+        decomp_profiler.enable()
+        result = {}
+        for hn in self.hook_names():
+            raw_entry = self.data[hn]
+            entry = {"n": raw_entry.get("n", 0)}
+            hv = self[hn]
+
+            for factor in self._stored_factors(hn):
+                fv = getattr(hv, factor)
+                self._pack_factor(entry, fv, factor, base_format, store_means, storage_dtype)
+
+            # Preserve cross-basis projections (format-independent)
+            for k, v in raw_entry.items():
+                if "cross_eigvals" in k:
+                    entry[k] = v
+            # Preserve masks only when storing raw activations
+            if base_format in ("acts", "acts_svd"):
+                for k, v in raw_entry.items():
+                    if k.endswith("_mask") and isinstance(v, torch.Tensor):
+                        entry[k] = v.cpu().bool()
+
+            result[hn] = entry
+        decomp_profiler.disable()
 
         if cross_basis_refs:
             for ref_path in cross_basis_refs:
@@ -760,6 +354,7 @@ class DataAccessor:
             result["__token_filter__"] = token_filter
         if n_chunks is not None:
             result["__n_chunks__"] = n_chunks
+        self._ensure_metadata(path)
         if self._model_name:
             result["__hf_model__"] = self._hf_repo or self._model_name
         if self._revision:
@@ -767,6 +362,171 @@ class DataAccessor:
         result["__format__"] = format
         os.makedirs(os.path.dirname(path), exist_ok=True)
         torch.save(result, path)
+
+    @staticmethod
+    def _pack_factor(entry, fv, factor, base_format, store_means, storage_dtype):
+        """Read view properties for `factor` and pack into entry dict for the given format."""
+        n = fv.n
+
+        if base_format == "cov_svd":
+            # Call eigvecs first to trigger full eigh in one shot (cache will satisfy eigvals).
+            eigvecs = fv.eigvecs
+            eigvals = fv.eigvals
+            if eigvals is None or eigvecs is None:
+                return
+            entry[f"{factor}_eigvals"] = _cast_for(eigvals, "eigvals", storage_dtype)
+            entry[f"{factor}_eigvecs"] = _cast_for(eigvecs, "eigvecs", storage_dtype)
+            entry[f"n_{factor}"] = n
+            c = fv.eigvals_centered
+            if c is not None:
+                entry[f"{factor}_eigvals_centered"] = _cast_for(c, "eigvals", storage_dtype)
+
+        elif base_format == "eigenvalues":
+            eigvals = fv.eigvals
+            if eigvals is None:
+                return
+            entry[f"{factor}_eigvals"] = _cast_for(eigvals, "eigvals", storage_dtype)
+            entry[f"n_{factor}"] = n
+            c = fv.eigvals_centered
+            if c is not None:
+                entry[f"{factor}_eigvals_centered"] = _cast_for(c, "eigvals", storage_dtype)
+
+        elif base_format == "cov":
+            cov = fv.cov
+            if cov is None or n is None:
+                return
+            entry[factor] = _cast_for(cov * n, "cov", storage_dtype)  # store unnormalized
+            entry[f"n_{factor}"] = n
+
+        elif base_format == "acts":
+            acts = fv.acts_raw
+            if acts is None:
+                return
+            entry[factor] = _cast_for(acts, "acts", storage_dtype)
+            entry[f"n_{factor}"] = n
+
+        elif base_format == "acts_svd":
+            svd = fv.svd
+            if svd is None or len(svd) < 3:
+                return  # need full SVD (U, S, V); skip if only (S, V) available
+            U, S, V = svd
+            entry[f"{factor}_U"] = _cast_for(U, "acts", storage_dtype)
+            entry[f"{factor}_S"] = _cast_for(S, "eigvals", storage_dtype)
+            entry[f"{factor}_V"] = _cast_for(V, "eigvecs", storage_dtype)
+            entry[f"n_{factor}"] = n
+
+        else:
+            raise ValueError(f"Unknown format: {base_format!r}")
+
+        if store_means:
+            m = fv.mean
+            if m is not None:
+                entry[f"{factor}_mean"] = _cast_for(m, "mean", storage_dtype)
+
+    def _stored_factors(self, hook_name):
+        """Factors explicitly present in raw data for this hook. Avoids triggering
+        model-dependent B derivation during save (B included only if data is there)."""
+        entry = self.data.get(hook_name, {})
+        return [k for k in ("A", "G", "B")
+                if k in entry or f"{k}_eigvals" in entry or f"{k}_U" in entry]
+
+    # ------------------------------------------------------------------
+    # In-place operations (project, set filter, info)
+    # ------------------------------------------------------------------
+
+    def info(self) -> str:
+        """Summary of stored data: format, token filter, per-hook factor sizes."""
+        fmt = self.data.get("__format__", "unknown")
+        lines = [f"Format: {fmt}", ""]
+        tf = self.data.get("__token_filter__")
+        if tf:
+            lines.append("Token filter:")
+            for k, v in tf.items():
+                lines.append(f"  {k}: {v}")
+            lines.append("")
+        for name, entry in sorted(self.data.items()):
+            if name.startswith("__"):
+                continue
+            lines.append(f"  {name}:")
+            lines.append(f"    n = {entry.get('n', '?')}")
+            for k, v in sorted(entry.items()):
+                if k == "n":
+                    continue
+                if isinstance(v, torch.Tensor):
+                    size_mb = v.numel() * v.element_size() / (1024 * 1024)
+                    lines.append(f"    {k}: {tuple(v.shape)} {v.dtype} ({size_mb:.2f} MB)")
+                elif isinstance(v, (int, float)):
+                    lines.append(f"    {k}: {v}")
+            lines.append("")
+        return "\n".join(lines)
+
+    def add_cross_basis(self, onto: str = "both") -> None:
+        """Add same-layer cross-factor eigenvalue projections in-place.
+
+        For each hook, detects compatible same-dimension factor pairs (G<->B for
+        MLP hooks; G<->A for residual hooks). Stores `{f}_cross_eigvals_{g}` keys.
+
+        onto: "B" -- project G onto fwd-factor basis
+              "G" -- project fwd-factor onto G basis
+              "both" / "BG" / "GB" -- both directions
+        """
+        do_onto_fwd = onto in ("B", "both", "BG", "GB")
+        do_onto_G   = onto in ("G", "both", "BG", "GB")
+
+        for name, entry in self.data.items():
+            if name.startswith("__"):
+                continue
+            if "G_eigvecs" not in entry or "G_eigvals" not in entry:
+                continue
+            if "B_eigvecs" in entry and "B_eigvals" in entry:
+                fwd_fac = "B"
+            elif "A_eigvecs" in entry and "A_eigvals" in entry:
+                fwd_fac = "A"
+            else:
+                continue
+
+            fwd_V = entry[f"{fwd_fac}_eigvecs"].float()
+            fwd_S = entry[f"{fwd_fac}_eigvals"].float()
+            G_V   = entry["G_eigvecs"].float()
+            G_S   = entry["G_eigvals"].float()
+            if fwd_V.shape != G_V.shape:
+                continue
+
+            if do_onto_fwd:
+                M_G    = reconstruct_cov(G_S, G_V)
+                M_proj = fwd_V.T @ M_G @ fwd_V
+                entry[f"G_cross_eigvals_{fwd_fac}"] = eigvalsh_descending(M_proj)
+            if do_onto_G:
+                M_fwd  = reconstruct_cov(fwd_S, fwd_V)
+                M_proj = G_V.T @ M_fwd @ G_V
+                entry[f"{fwd_fac}_cross_eigvals_G"] = eigvalsh_descending(M_proj)
+
+    def project_onto(self, ref_path: str) -> None:
+        """Project this data onto the eigenbasis from ref_path. In-place."""
+        _add_cross_basis(self.data, ref_path)
+
+    def set_token_filter(self, filter_dict: dict) -> None:
+        """Set token filter metadata in-place."""
+        self.data["__token_filter__"] = filter_dict
+
+    def _ensure_metadata(self, output_path: str) -> None:
+        """If __revision__ is missing, resolve it from the checkpoint schedule using
+        the model name and step number parsed from output_path. Cheap dict lookup,
+        no model loading."""
+        if self._revision is not None or self._model_name is None:
+            return
+        m = _STEP_RE.search(os.path.basename(output_path))
+        if not m:
+            return
+        step = int(m.group(1))
+        try:
+            from utils.model_registry import get_model_config, get_checkpoint_schedule
+            cfg = self.model_config or get_model_config(self._model_name)
+            sched = {s: (r, hf) for s, r, hf in get_checkpoint_schedule(cfg, None)}
+        except Exception:
+            return
+        if step in sched:
+            self._revision, self._hf_repo = sched[step]
 
     # ------------------------------------------------------------------
     # Public access points
@@ -1218,9 +978,9 @@ class DataAccessor:
         return result
 
 
-# ---------------------------------------------------------------------------
-# View classes
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# Section 7: View classes (BlocksView / BlockView / HookView / FactorView)
+# ===========================================================================
 
 class BlocksView:
     """acc.blocks[N] -> BlockView."""
@@ -1395,7 +1155,7 @@ class FactorView:
 
 
 # ===========================================================================
-# Section 8: CLI (from storage.py)
+# Section 8: CLI
 # ===========================================================================
 
 if __name__ == "__main__":
@@ -1455,7 +1215,8 @@ if __name__ == "__main__":
 
     if args.command == "info":
         for pt in _pt_files(args.input):
-            print(info(pt))
+            print(f"File: {pt}")
+            print(DataAccessor(pt).info())
 
     elif args.command == "convert":
         pts = _pt_files(args.input)
@@ -1463,7 +1224,8 @@ if __name__ == "__main__":
             print("Warning: --output ignored for directory input (files converted in-place)")
             args.output = None
         if len(pts) == 1:
-            out = convert(pts[0], args.to, args.output)
+            out = args.output or pts[0]
+            DataAccessor(pts[0]).save(out, format=args.to)
             print(f"Saved to {out}")
         else:
             print(f"Converting {len(pts)} files to {args.to}...")
@@ -1476,24 +1238,26 @@ if __name__ == "__main__":
             args.output = None
         if args.onto:
             if len(pts) == 1:
-                data = torch.load(pts[0], map_location="cpu", weights_only=False)
-                add_same_layer_cross_basis(data, args.onto)
+                acc = DataAccessor(pts[0])
+                acc.add_cross_basis(args.onto)
                 out = args.output or pts[0]
-                torch.save(data, out)
+                acc.save(out)
                 print(f"Saved to {out}")
             else:
                 print(f"Projecting {len(pts)} files (onto={args.onto})...")
                 _run_pool(_project_same_layer_worker, [(p, args.onto) for p in pts], args.workers)
         else:
             if len(pts) == 1:
-                out = project_onto_basis(pts[0], args.onto_file, args.output)
+                acc = DataAccessor(pts[0])
+                acc.project_onto(args.onto_file)
+                out = args.output or pts[0]
+                acc.save(out)
                 print(f"Saved to {out}")
             else:
                 print(f"Projecting {len(pts)} files onto {args.onto_file}...")
                 _run_pool(_project_onto_file_worker, [(p, args.onto_file) for p in pts], args.workers)
 
     elif args.command == "set-filter":
-        # Build filter dict
         pts = _pt_files(args.input)
         # Load first file to get existing filter as base
         sample = torch.load(pts[0], map_location="cpu", weights_only=False)
@@ -1507,7 +1271,10 @@ if __name__ == "__main__":
         if args.answer_only:
             filter_dict["answer_only"] = True
         if len(pts) == 1:
-            out = set_token_filter(pts[0], filter_dict, args.output)
+            acc = DataAccessor(pts[0])
+            acc.set_token_filter(filter_dict)
+            out = args.output or pts[0]
+            acc.save(out)
             print(f"Saved to {out}")
         else:
             print(f"Setting token filter on {len(pts)} files...")

@@ -29,7 +29,7 @@ A post-processing step, completely decoupled from collection. It:
 
 ### 3. Post-hoc Storage Operations
 
-Format conversion, cross-basis projection, and metadata editing on already-collected `.pt` files, via the `python -m utils.accessor` CLI:
+Format conversion, cross-basis projection, and metadata editing on already-collected `.pt` files, via the `python -m utils.accessor` CLI. All operations route through `DataAccessor`: load file, optionally mutate (add cross-basis / set filter), then `save()` in chosen format. The views handle every format transition lazily.
 - `convert`: acts -> cov -> cov_svd -> eigenvalues (progressive lossy chain)
 - `project`: cross-basis eigenvalue projections (same-layer G<->B or cross-checkpoint)
 - `set-filter`: edit token selection metadata
@@ -43,7 +43,7 @@ Format conversion, cross-basis projection, and metadata editing on already-colle
 |-----------|---------------|-------------|
 | `scripts/collect.py` | Orchestration: data loading, checkpoint loop, hook setup, batch loop, save | Metric computation (except optional inline), format conversion after the fact |
 | `utils/hooks.py` | Real-time accumulation during forward/backward pass (cov or raw acts) | Storage format decisions, token mask computation |
-| `utils/accessor.py` | Format transformation, disk I/O, CLI post-processing, format-agnostic read with lazy derivation, eigendecomposition | Running models for collection |
+| `utils/accessor.py` | `DataAccessor`: single interface for read/write/convert/project/inspect. Views handle lazy format derivation; `save()` consumes views (no explicit conversion code). Also exposes eigendecomp helpers. | Running models for collection |
 | `utils/model_registry.py` | Model config, checkpoint discovery, model/tokenizer loading, architecture introspection, selective weight loading, step-to-token-count | Data loading, metric computation |
 | `utils/data_utils.py` | Text loading/caching, packing/padding, token mask computation, label computation | Model loading, storage |
 | `data/` loaders | HuggingFace streaming dataset access | Tokenization, caching (that's data_utils) |
@@ -136,17 +136,16 @@ Collection                    Post-hoc conversion              Metric computatio
 ─────────                     ────────────────────             ──────────────────
 
 HookCollector                 accessor.py CLI                  DataAccessor
-accumulates:                  convert command:                 reads any format,
-  - raw acts (N,d)              acts -> cov                   derives what's missing:
-  - cov matrix (d,d)           cov -> cov_svd                  cov_svd -> eigvals
-  - sample count n             cov_svd -> eigenvalues          cov -> eigh -> eigvals
-        │                      acts -> acts_svd                acts -> PCA -> eigvals
-        ▼                      (reverse paths too)             A + W -> B (derive)
-DataAccessor.save()                   │                               │
-transforms to                         ▼                               ▼
-storage format:               .pt files on disk               spectral_metrics()
-  acts, cov, cov_svd,        (same format, different          rankme, alpha, kfac
-  eigenvalues, acts_svd        compression level)
-  (+m for means,
-   +b for B derivation)
+accumulates:                  DataAccessor(p).save(            reads any format,
+  - raw acts (N,d)              o, format=fmt):                derives what's missing:
+  - cov matrix (d,d)           views compute requested         cov_svd -> eigvals
+  - sample count n             fields; same lazy paths         cov -> eigh -> eigvals
+        │                      as read-side derivation         acts -> PCA -> eigvals
+        ▼                                  │                   A + W -> B (derive)
+DataAccessor.save()                        ▼                          │
+reads from views,             .pt files on disk                       ▼
+writes target format:        (same data, different             spectral_metrics()
+  acts, cov, cov_svd,         compression level)               rankme, alpha, kfac
+  eigenvalues, acts_svd
+  (+m for means)
 ```

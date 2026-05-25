@@ -1,5 +1,5 @@
 import torch
-from utils.accessor import DataAccessor, convert, info, add_same_layer_cross_basis
+from utils.accessor import DataAccessor
 
 
 def test_save_load_cov(tmp_path, make_factors_dict):
@@ -67,10 +67,10 @@ def test_roundtrip_cov_to_cov_svd_to_eigenvalues(tmp_path, make_factors_dict):
     DataAccessor(factors).save(cov_path, format="cov")
 
     svd_path = str(tmp_path / "svd.pt")
-    convert(cov_path, "cov_svd", svd_path)
+    DataAccessor(cov_path).save(svd_path, format="cov_svd")
 
     eig_path = str(tmp_path / "eig.pt")
-    convert(svd_path, "eigenvalues", eig_path)
+    DataAccessor(svd_path).save(eig_path, format="eigenvalues")
 
     svd_data = torch.load(svd_path, map_location="cpu", weights_only=False)
     eig_data = torch.load(eig_path, map_location="cpu", weights_only=False)
@@ -96,10 +96,9 @@ def test_same_layer_cross_basis(tmp_path, make_factors_dict):
     factors = make_factors_dict(d=16, with_grad=True, with_means=False)
     path = str(tmp_path / "svd.pt")
     DataAccessor(factors).save(path, format="cov_svd")
-    data = torch.load(path, map_location="cpu", weights_only=False)
-    add_same_layer_cross_basis(data, onto="both")
-    entry = data["hook0"]
-    # Should have cross-projection keys
+    acc = DataAccessor(path)
+    acc.add_cross_basis(onto="both")
+    entry = acc.data["hook0"]
     cross_keys = [k for k in entry if "cross_eigvals" in k]
     assert len(cross_keys) > 0
 
@@ -117,6 +116,6 @@ def test_info_returns_string(tmp_path, make_factors_dict):
     factors = make_factors_dict(d=16, with_grad=False, with_means=False)
     path = str(tmp_path / "test.pt")
     DataAccessor(factors).save(path, format="cov_svd")
-    result = info(path)
+    result = DataAccessor(path).info()
     assert isinstance(result, str)
     assert len(result) > 0

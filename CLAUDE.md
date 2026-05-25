@@ -10,8 +10,8 @@ scripts/
   collect.py            # Main collection: residual activations + MLP covariance factors
   compute_metrics.py    # Unified metrics: RankMe, alpha, K-FAC log-det (includes metric functions)
   activation_ratio.py   # Band analysis on stored eigenvectors + activations
-  estimate_vram.py      # GPU VRAM estimator (forward peak; backward is typically 2-3x higher)
-  convert_npy.py        # Convert legacy .npy activation files to .pt format
+  stamp_revisions.py    # Backfill __hf_model__/__revision__ on old .pt files
+                        #   (new files are auto-stamped by DataAccessor.save())
 
 configs/                # YAML configs for collect.py (--config flag)
   reproduce_rankme_alpha.yaml       # padded fineweb, identity head, last token
@@ -31,8 +31,10 @@ kfac_scripts/           # Legacy K-FAC pipeline (kept for reference)
 utils/
   model_registry.py   # ModelConfig, checkpoint discovery, model loading, architecture helpers, token counting
   hooks.py            # HookCollector — single unified hook class for all collection modes
-  accessor.py         # DataAccessor (read + write via .save()), storage formats,
-                      #   eigendecomp helpers, convert/project/info CLI, decomp_profiler
+  accessor.py         # DataAccessor: unified read/write/convert/project/inspect.
+                      #   Views (FactorView) handle lazy format conversion;
+                      #   save() reads from views — no explicit conversion code.
+                      #   Also exposes eigendecomp helpers + decomp_profiler.
   data_utils.py       # Dataset registry, packing, padding, token mask, load_and_cache_texts
   revisions/          # OLMo-2 checkpoint revision lists (1b, 7b)
 
