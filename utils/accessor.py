@@ -92,6 +92,10 @@ def reconstruct_cov(eigvals, eigvecs):
     """V @ diag(lambda) @ V.T"""
     return eigvecs @ torch.diag(eigvals.to(eigvecs.dtype)) @ eigvecs.T
 
+def cross_eigvals(cov, basis):
+    """Eigenvalues of `cov` expressed in `basis` (columns): eigvalsh(basis.T @ cov @ basis)."""
+    return eigvalsh_descending(basis.T @ cov.to(basis.dtype) @ basis)
+
 
 def _eigh(C, k):
     v = eigvalsh_descending(C)
@@ -165,108 +169,6 @@ def _cast_for(tensor: torch.Tensor, item_type: str, storage_dtype) -> torch.Tens
     return _cast(tensor, dtype_str)
 
 
-# ===========================================================================
-# Section 4: Cross-basis helpers
-# ===========================================================================
-
-def _add_cross_basis(result: dict, ref_path: str):
-    """Project data in result onto eigenbasis from ref_path. Adds cross-eigenvalues."""
-    ref = torch.load(ref_path, map_location="cpu", weights_only=False)
-    ref_label = os.path.splitext(os.path.basename(ref_path))[0]
-
-    for name in result:
-        if name.startswith("__"):
-            continue
-        if name not in ref:
-            continue
-        entry = result[name]
-        ref_entry = ref[name]
-
-        for key in _FACTOR_KEYS:
-            eigvecs_key = f"{key}_eigvecs"
-            if eigvecs_key not in ref_entry:
-                continue
-
-            U_ref = ref_entry[eigvecs_key]  # (d, k)
-
-            # Try to project from covariance matrix or from our own svd
-            M = None
-            if key in entry:
-                t = entry[key]
-                # Only project from (d,d) covariance, not (N,d) raw acts
-                if t.dim() == 2 and t.shape[0] == t.shape[1]:
-                    n = entry.get(f"n_{key}", entry.get("n", 1))
-                    M = t / n
-            if M is None and f"{key}_eigvals" in entry and eigvecs_key in entry:
-                # Reconstruct from our svd
-                V = entry[eigvecs_key]
-                S = entry[f"{key}_eigvals"]
-                M = reconstruct_cov(S, V)
-
-            if M is None:
-                continue
-
-            # Project: M_proj = U_ref.T @ M @ U_ref, then eigenvalues
-            M_proj = U_ref.T @ M @ U_ref
-            cross_eigvals = eigvalsh_descending(M_proj)
-            entry[f"{key}_cross_eigvals_{ref_label}"] = cross_eigvals
-
-
-def add_same_layer_cross_basis(data: dict, onto: str = "both") -> None:
-    """Add same-layer cross-factor eigenvalue projections in-place.
-
-    For each hook point, detects compatible same-dimension factor pairs:
-      G <-> B  for MLP hooks (both d_out)
-      G <-> A  for residual hooks (both d_model, B not stored)
-
-    Stores results as:
-      G_cross_eigvals_B  (or G_cross_eigvals_A for residual)
-      B_cross_eigvals_G  (or A_cross_eigvals_G for residual)
-
-    Args:
-        data: loaded .pt dict, modified in-place
-        onto: "B" -- project G onto fwd-factor basis
-              "G" -- project fwd-factor onto G basis
-              "both" / "BG" / "GB" -- both directions
-    """
-    do_onto_fwd = onto in ("B", "both", "BG", "GB")
-    do_onto_G   = onto in ("G", "both", "BG", "GB")
-
-    for name, entry in data.items():
-        if name.startswith("__"):
-            continue
-
-        has_G = "G_eigvecs" in entry and "G_eigvals" in entry
-        if not has_G:
-            continue
-
-        # Prefer B (MLP), fall back to A (residual)
-        if "B_eigvecs" in entry and "B_eigvals" in entry:
-            fwd_fac = "B"
-        elif "A_eigvecs" in entry and "A_eigvals" in entry:
-            fwd_fac = "A"
-        else:
-            continue
-
-        fwd_V = entry[f"{fwd_fac}_eigvecs"].float()
-        fwd_S = entry[f"{fwd_fac}_eigvals"].float()
-        G_V   = entry["G_eigvecs"].float()
-        G_S   = entry["G_eigvals"].float()
-
-        if fwd_V.shape != G_V.shape:
-            continue  # dimensions differ -- skip
-
-        if do_onto_fwd:
-            M_G    = reconstruct_cov(G_S, G_V)
-            M_proj = fwd_V.T @ M_G @ fwd_V
-            entry[f"G_cross_eigvals_{fwd_fac}"] = eigvalsh_descending(M_proj)
-
-        if do_onto_G:
-            M_fwd  = reconstruct_cov(fwd_S, fwd_V)
-            M_proj = G_V.T @ M_fwd @ G_V
-            entry[f"{fwd_fac}_cross_eigvals_G"] = eigvalsh_descending(M_proj)
-
-
 def _convert_worker(args):
     path, fmt = args
     acc = DataAccessor(path)
@@ -304,29 +206,6 @@ def _resolve_hf_name(short_name: str) -> str:
     return short_name
 
 
-def _infer_checkpoint_metadata(path: str):
-    """Infer (__hf_model__, __revision__) from a model-dir/stepN.pt path."""
-    if not path:
-        return None, None
-    m = _STEP_FILE_RE.match(os.path.basename(path))
-    if not m:
-        return None, None
-    step = int(m.group(1))
-    model_dir = os.path.basename(os.path.dirname(path))
-    if not model_dir:
-        return None, None
-    try:
-        from utils.model_registry import get_model_config, get_checkpoint_schedule
-        model_name = _resolve_hf_name(model_dir)
-        config = get_model_config(model_name)
-        for schedule_step, revision, hf_model in get_checkpoint_schedule(config, None):
-            if schedule_step == step:
-                return hf_model, revision
-    except Exception:
-        return None, None
-    return None, None
-
-
 class DataAccessor:
     """Format-agnostic reader for collected activation / covariance data.
 
@@ -347,13 +226,13 @@ class DataAccessor:
         self.data = data
         self.model = model
         self.model_config = model_config
-        inferred_hf, inferred_rev = _infer_checkpoint_metadata(self.path)
-        self._model_name = model_name or data.get("__hf_model__") or inferred_hf
-        self._revision = revision or data.get("__revision__") or inferred_rev
-        self._hf_repo = data.get("__hf_model__") or inferred_hf  # actual repo (may differ from model_name for early-training)
+        self._model_name = model_name or data.get("__hf_model__")
+        self._revision = revision or data.get("__revision__")
+        self._hf_repo = data.get("__hf_model__")  # actual repo (may differ from model_name for early-training)
         self._selective_weights: Optional[dict] = None
         self._layer_cache: dict = {}
         self._eigh_cache: dict = {}  # (hook, factor) -> (centered_eigvals, uncentered_eigvals, eigvecs_or_None, centered_eigvecs_or_None)
+        self._B_cov_cache: dict = {}  # hook -> derived B covariance (shared by .cov and .eigvecs)
 
     def _ensure_weights(self):
         """Ensure model weights are available (full model or selective loading)."""
@@ -385,9 +264,12 @@ class DataAccessor:
         result = self.to_dict(format=format, storage_dtype=storage_dtype)
 
         if cross_basis_refs:
+            target = DataAccessor(result, model=self.model, model_config=self.model_config,
+                                  model_name=self._model_name)
             for ref_path in cross_basis_refs:
-                _add_cross_basis(result, ref_path)
+                target._project_onto(ref_path)
 
+        self._stamp_from_path(path)
         self._write_metadata(result, format, token_filter=token_filter, n_chunks=n_chunks)
         directory = os.path.dirname(path)
         if directory:
@@ -452,9 +334,9 @@ class DataAccessor:
                 out_entry[f"n_{factor}"] = n
 
         elif base_format == "cov_svd":
-            eigvals = view.eigvals
-            eigvecs = view.eigvecs
-            if eigvals is not None and eigvecs is not None:
+            eigh = view.eigh
+            if eigh is not None:
+                eigvals, eigvecs = eigh
                 out_entry[f"{factor}_eigvals"] = _cast_for(eigvals.cpu(), "eigvals", storage_dtype)
                 out_entry[f"{factor}_eigvecs"] = _cast_for(eigvecs.cpu(), "eigvecs", storage_dtype)
                 if n is not None:
@@ -502,6 +384,29 @@ class DataAccessor:
             result["__revision__"] = self._revision
         result["__format__"] = format
 
+    def _stamp_from_path(self, output_path: str) -> None:
+        """Backfill missing model/revision by inferring from a model-dir/stepN.pt path."""
+        if self._revision is not None and self._hf_repo is not None:
+            return
+        m = _STEP_FILE_RE.match(os.path.basename(output_path or ""))
+        model_dir = os.path.basename(os.path.dirname(output_path or ""))
+        if not m or not model_dir:
+            return
+        try:
+            import contextlib, io
+            from utils.model_registry import get_model_config, get_checkpoint_schedule
+            config = get_model_config(_resolve_hf_name(model_dir))
+            with contextlib.redirect_stdout(io.StringIO()):
+                schedule = get_checkpoint_schedule(config, None)
+        except Exception:
+            return
+        for step, rev, hf in schedule:
+            if step == int(m.group(1)):
+                self._model_name = self._model_name or hf
+                self._hf_repo = self._hf_repo or hf
+                self._revision = self._revision or rev
+                return
+
     def info(self) -> str:
         """Return a summary of stored data."""
         fmt = self.data.get("__format__", "unknown")
@@ -543,41 +448,57 @@ class DataAccessor:
     def set_token_filter(self, filter_dict: dict, output_path: str = None) -> str:
         """Edit token filter metadata and save."""
         self.data["__token_filter__"] = filter_dict
-        out = output_path or self.path
-        if out is None:
-            raise ValueError("output_path is required for in-memory data")
-        torch.save(self.data, out)
-        return out
-
-    def stamp_metadata(self, output_path: str = None) -> str:
-        """Write inferred model metadata into the file if available."""
-        if self._hf_repo:
-            self.data["__hf_model__"] = self._hf_repo
-        if self._revision:
-            self.data["__revision__"] = self._revision
-        out = output_path or self.path
-        if out is None:
-            raise ValueError("output_path is required for in-memory data")
-        torch.save(self.data, out)
-        return out
+        return self._save_in_place(output_path)
 
     def project_same_layer(self, onto: str = "both", output_path: str = None) -> str:
-        """Add same-layer cross-factor eigenvalue projections and save."""
-        add_same_layer_cross_basis(self.data, onto)
-        self._write_metadata(self.data, self.data.get("__format__", "unknown"))
-        out = output_path or self.path
-        if out is None:
-            raise ValueError("output_path is required for in-memory data")
-        torch.save(self.data, out)
-        return out
+        """Project gradient G against the same hook's forward factor and save.
+
+        The forward factor is B for MLP hooks (derived from weights if needed) and
+        A for residual hooks — exactly what `hook.B` resolves to. onto: "B" projects
+        G onto the forward basis, "G" the reverse, "both" both directions."""
+        do_fwd = onto in ("B", "both", "BG", "GB")
+        do_G = onto in ("G", "both", "BG", "GB")
+        for hook in self.hook_names():
+            G, fwd = self[hook].G, self[hook].B
+            label = "A" if _is_residual_hook(hook) else "B"
+            try:
+                fwd_vecs, G_vecs = fwd.eigvecs, G.eigvecs
+            except ValueError:
+                continue  # MLP B needs A_mean (bias term) that wasn't stored
+            if fwd_vecs is None or G_vecs is None or fwd_vecs.shape != G_vecs.shape:
+                continue
+            if do_fwd:
+                self._entry(hook)[f"G_cross_eigvals_{label}"] = cross_eigvals(G.cov, fwd_vecs)
+            if do_G:
+                self._entry(hook)[f"{label}_cross_eigvals_G"] = cross_eigvals(fwd.cov, G_vecs)
+        return self._save_in_place(output_path)
 
     def project_onto_basis(self, basis_path: str, output_path: str = None) -> str:
-        """Add cross-basis eigenvalues from basis_path and save."""
-        _add_cross_basis(self.data, basis_path)
-        self._write_metadata(self.data, self.data.get("__format__", "unknown"))
+        """Project this data onto another file's eigenbasis (cross-checkpoint) and save."""
+        self._project_onto(basis_path)
+        return self._save_in_place(output_path)
+
+    def _project_onto(self, basis_path: str) -> None:
+        """Add `{factor}_cross_eigvals_{ref}` from the reference file's eigenbasis. In place."""
+        ref = DataAccessor(basis_path)
+        label = os.path.splitext(os.path.basename(basis_path))[0]
+        for hook in self.hook_names():
+            if hook not in ref.data:
+                continue
+            for factor in _FACTOR_KEYS:
+                basis = getattr(ref[hook], factor).eigvecs
+                cov = getattr(self[hook], factor).cov
+                if basis is None or cov is None or cov.shape[0] != basis.shape[0]:
+                    continue
+                self._entry(hook)[f"{factor}_cross_eigvals_{label}"] = cross_eigvals(cov, basis)
+
+    def _save_in_place(self, output_path: str = None) -> str:
+        """Persist self.data unchanged in format, refreshing metadata."""
         out = output_path or self.path
         if out is None:
             raise ValueError("output_path is required for in-memory data")
+        self._stamp_from_path(out)
+        self._write_metadata(self.data, self.data.get("__format__", "unknown"))
         torch.save(self.data, out)
         return out
 
@@ -712,7 +633,7 @@ class DataAccessor:
                             centered = c_vals.cpu()
                             centered_eigvecs = c_vecs.cpu()
                         else:
-                            centered = get_eigenspectrum(cov=cov, mu=mu)[0].cpu()
+                            centered = eigvalsh_descending(cov - torch.outer(mu, mu)).cpu()
                 else:
                     c, u = get_eigenspectrum(cov=cov, mu=mu)
                     centered = c.cpu() if c is not None else None
@@ -848,6 +769,8 @@ class DataAccessor:
     # ------------------------------------------------------------------
 
     def _B_covariance(self, hook_name: str) -> Optional[torch.Tensor]:
+        if hook_name in self._B_cov_cache:
+            return self._B_cov_cache[hook_name]
         entry = self._entry(hook_name)
         dev = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -882,6 +805,7 @@ class DataAccessor:
             Wmu = W @ mu.to(device=dev, dtype=W.dtype)
             B_cov = B_cov + torch.outer(Wmu, b) + torch.outer(b, Wmu) + torch.outer(b, b)
 
+        self._B_cov_cache[hook_name] = B_cov
         return B_cov
 
     def _ensure_B_eigh(self, hook_name: str, need_vecs: bool = False, need_centered_vecs: bool = False):
@@ -1172,8 +1096,8 @@ class FactorView:
     @property
     def eigh(self) -> Optional[tuple]:
         """(eigvals: Tensor, eigvecs: Tensor) -- sorted descending."""
+        V = self.eigvecs  # eigvecs first: one decomposition, eigvals from cache
         ev = self.eigvals
-        V = self.eigvecs
         if ev is None or V is None:
             return None
         return ev, V
@@ -1181,8 +1105,8 @@ class FactorView:
     @property
     def eigh_centered(self) -> Optional[tuple]:
         """(eigvals_centered: Tensor, eigvecs_centered: Tensor) -- sorted descending."""
-        ev = self.eigvals_centered
         V = self.eigvecs_centered
+        ev = self.eigvals_centered
         if ev is None or V is None:
             return None
         return ev, V

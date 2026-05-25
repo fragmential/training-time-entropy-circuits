@@ -1,5 +1,5 @@
 import torch
-from utils.accessor import DataAccessor, add_same_layer_cross_basis
+from utils.accessor import DataAccessor
 
 
 def test_save_load_cov(tmp_path, make_factors_dict):
@@ -93,14 +93,13 @@ def test_cov_svd_reconstruction(tmp_path, make_factors_dict):
 
 
 def test_same_layer_cross_basis(tmp_path, make_factors_dict):
-    factors = make_factors_dict(d=16, with_grad=True, with_means=False)
+    # Residual hook: forward factor resolves to A (no model needed for B).
+    factors = {"after_final_norm": make_factors_dict(d=16, with_grad=True, with_means=False)["hook0"]}
     path = str(tmp_path / "svd.pt")
     DataAccessor(factors).save(path, format="cov_svd")
-    data = torch.load(path, map_location="cpu", weights_only=False)
-    add_same_layer_cross_basis(data, onto="both")
-    entry = data["hook0"]
-    # Should have cross-projection keys
-    cross_keys = [k for k in entry if "cross_eigvals" in k]
+    acc = DataAccessor(path)
+    acc.project_same_layer(onto="both", output_path=path)
+    cross_keys = [k for k in acc.data["after_final_norm"] if "cross_eigvals" in k]
     assert len(cross_keys) > 0
 
 
