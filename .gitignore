@@ -13,4 +13,3 @@ data/filtered_texts
 slurm/logs/*
 analysis/transcriptions
 analysis/figures
-tests/snapshots/*

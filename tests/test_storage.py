@@ -1,5 +1,6 @@
+import os
 import torch
-from utils.accessor import DataAccessor
+from utils.accessor import DataAccessor, decomp_profiler, eigh_descending
 
 
 def test_save_load_cov(tmp_path, make_factors_dict):
@@ -119,6 +120,157 @@ def test_info_returns_string(tmp_path, make_factors_dict):
     result = DataAccessor(path).info()
     assert isinstance(result, str)
     assert len(result) > 0
+
+
+def _count_decomps(fn):
+    """Run fn under the decomp profiler; return (n_eigh, n_eigvalsh)."""
+    decomp_profiler.enable()
+    try:
+        fn()
+        calls = list(decomp_profiler.calls)
+    finally:
+        decomp_profiler.disable()
+    return (sum(c[0].startswith("eigh[") for c in calls),
+            sum(c[0].startswith("eigvalsh[") for c in calls))
+
+
+def test_save_cov_svd_single_decomposition(tmp_path, make_factors_dict):
+    # cov_svd from a raw cov must do exactly one full eigendecomposition, no extra eigvalsh.
+    factors = make_factors_dict(d=16, with_grad=False, with_means=False)
+    path = str(tmp_path / "svd.pt")
+    n_eigh, n_eigvalsh = _count_decomps(lambda: DataAccessor(factors).save(path, format="cov_svd"))
+    assert n_eigh == 1
+    assert n_eigvalsh == 0
+
+
+def test_save_cov_svd_means_one_extra_eigvalsh(tmp_path, make_factors_dict):
+    # With +m, the centered eigenvalues add exactly one eigvalsh (eigvecs reused from the eigh).
+    factors = make_factors_dict(d=16, with_grad=False, with_means=True)
+    path = str(tmp_path / "svd.pt")
+    n_eigh, n_eigvalsh = _count_decomps(lambda: DataAccessor(factors).save(path, format="cov_svd+m"))
+    assert n_eigh == 1
+    assert n_eigvalsh == 1
+
+
+def test_storage_dtype_defaults(tmp_path, make_factors_dict):
+    factors = make_factors_dict(d=16, with_grad=False, with_means=True)
+    path = str(tmp_path / "svd.pt")
+    DataAccessor(factors).save(path, format="cov_svd+m")
+    entry = torch.load(path, map_location="cpu", weights_only=False)["hook0"]
+    assert entry["A_eigvals"].dtype == torch.float64
+    assert entry["A_eigvecs"].dtype == torch.float32
+    assert entry["A_mean"].dtype == torch.float32
+
+
+def test_storage_dtype_global_override(tmp_path, make_factors_dict):
+    factors = make_factors_dict(d=16, with_grad=False, with_means=True)
+    path = str(tmp_path / "svd.pt")
+    DataAccessor(factors).save(path, format="cov_svd+m", storage_dtype="bf16")
+    entry = torch.load(path, map_location="cpu", weights_only=False)["hook0"]
+    for key in ("A_eigvals", "A_eigvecs", "A_mean"):
+        assert entry[key].dtype == torch.bfloat16
+
+
+def test_storage_dtype_per_item_override(tmp_path, make_factors_dict):
+    factors = make_factors_dict(d=16, with_grad=False, with_means=True)
+    path = str(tmp_path / "svd.pt")
+    DataAccessor(factors).save(path, format="cov_svd+m",
+                               storage_dtype={"eigvals": "fp32", "eigvecs": "fp16", "mean": "bf16"})
+    entry = torch.load(path, map_location="cpu", weights_only=False)["hook0"]
+    assert entry["A_eigvals"].dtype == torch.float32
+    assert entry["A_eigvecs"].dtype == torch.float16
+    assert entry["A_mean"].dtype == torch.bfloat16
+
+
+def test_cross_checkpoint_self_projection_invariant(tmp_path, make_factors_dict):
+    # Projecting a covariance onto its own eigenbasis yields its own spectrum.
+    factors = make_factors_dict(d=16, with_grad=False, with_means=False)
+    path = str(tmp_path / "step0.pt")
+    DataAccessor(factors).save(path, format="cov_svd")
+    DataAccessor(path).project_onto_basis(path, output_path=path)
+
+    stem = os.path.splitext(os.path.basename(path))[0]
+    entry = torch.load(path, map_location="cpu", weights_only=False)["hook0"]
+    assert torch.allclose(entry[f"A_cross_eigvals_{stem}"].double(),
+                          entry["A_eigvals"].double(), atol=1e-4)
+
+
+def test_same_layer_mlp_selects_B(tmp_path):
+    # An MLP hook with stored B (and G) must project against B, not silently fall back to A.
+    d = 16
+
+    def spd():
+        M = torch.randn(d, d, dtype=torch.float64)
+        return M @ M.T + 0.1 * torch.eye(d, dtype=torch.float64)
+
+    bvals, bvecs = eigh_descending(spd())
+    gvals, gvecs = eigh_descending(spd())
+    data = {
+        "blk0.up": {
+            "B_eigvals": bvals, "B_eigvecs": bvecs.float(), "n_B": 200,
+            "G_eigvals": gvals, "G_eigvecs": gvecs.float(), "n_G": 200,
+        },
+        "__format__": "cov_svd",
+    }
+    path = str(tmp_path / "svd.pt")
+    DataAccessor(data).project_same_layer(onto="both", output_path=path)
+    entry = torch.load(path, map_location="cpu", weights_only=False)["blk0.up"]
+    assert "G_cross_eigvals_B" in entry
+    assert "B_cross_eigvals_G" in entry
+    assert "G_cross_eigvals_A" not in entry
+
+
+def test_convert_drops_mean_keeps_centered(tmp_path, make_factors_dict):
+    # Raw mean is only persisted with +m, but centered eigvals are derived whenever a mean exists.
+    factors = make_factors_dict(d=16, with_grad=False, with_means=True)
+    cov_path = str(tmp_path / "cov.pt")
+    DataAccessor(factors).save(cov_path, format="cov+m")
+
+    svd_path = str(tmp_path / "svd.pt")
+    DataAccessor(cov_path).save(svd_path, format="cov_svd")
+    entry = torch.load(svd_path, map_location="cpu", weights_only=False)["hook0"]
+    assert "A_mean" not in entry
+    assert "A_eigvals_centered" in entry
+
+    svdm_path = str(tmp_path / "svd_m.pt")
+    DataAccessor(cov_path).save(svdm_path, format="cov_svd+m")
+    entry_m = torch.load(svdm_path, map_location="cpu", weights_only=False)["hook0"]
+    assert "A_mean" in entry_m
+
+
+def test_no_eager_metadata_inference_on_construct(tmp_path, make_factors_dict):
+    # Constructing over a model-dir/stepN.pt path must not infer metadata (no path/dir I/O).
+    factors = make_factors_dict(d=16, with_grad=False, with_means=False)
+    model_dir = tmp_path / "pythia-14m"
+    model_dir.mkdir()
+    path = str(model_dir / "step0.pt")
+    DataAccessor(factors).save(path, format="cov")
+
+    data = torch.load(path, map_location="cpu", weights_only=False)
+    data.pop("__hf_model__", None)
+    data.pop("__revision__", None)
+    torch.save(data, path)
+
+    acc = DataAccessor(path)
+    assert acc._model_name is None
+
+
+def test_existing_metadata_not_overwritten(tmp_path, make_factors_dict):
+    factors = make_factors_dict(d=16, with_grad=False, with_means=False)
+    model_dir = tmp_path / "pythia-14m"
+    model_dir.mkdir()
+    path = str(model_dir / "step0.pt")
+    DataAccessor(factors).save(path, format="cov")
+
+    data = torch.load(path, map_location="cpu", weights_only=False)
+    data["__hf_model__"] = "custom/x"
+    data["__revision__"] = "rev99"
+    torch.save(data, path)
+
+    DataAccessor(path).save(path, format="eigenvalues")
+    stamped = torch.load(path, map_location="cpu", weights_only=False)
+    assert stamped["__hf_model__"] == "custom/x"
+    assert stamped["__revision__"] == "rev99"
 
 
 def test_save_stamps_missing_checkpoint_metadata(tmp_path, make_factors_dict):

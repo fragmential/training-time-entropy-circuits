@@ -1,5 +1,6 @@
+import copy
 import torch
-from utils.accessor import DataAccessor
+from utils.accessor import DataAccessor, reconstruct_cov
 
 
 def _make_cov_svd_data(d=32):
@@ -106,3 +107,40 @@ def test_eigvals_descending():
     acc = DataAccessor(data)
     eigvals = acc["hook0"].A.eigvals
     assert (eigvals[:-1] >= eigvals[1:]).all()
+
+
+def test_eigvecs_access_order_independent():
+    # Raw-cov source: eigvecs are computed, not stored. Reading eigvals first must
+    # not leave eigvecs as None (the latent access-order bug).
+    d = 16
+    data = _make_cov_data(d=d)
+
+    acc_vals_first = DataAccessor(copy.deepcopy(data))
+    ev = acc_vals_first["hook0"].A.eigvals
+    vecs = acc_vals_first["hook0"].A.eigvecs
+    assert ev is not None and vecs is not None
+
+    acc_vecs_first = DataAccessor(copy.deepcopy(data))
+    vecs2 = acc_vecs_first["hook0"].A.eigvecs
+    ev2 = acc_vecs_first["hook0"].A.eigvals
+    assert ev2 is not None and vecs2 is not None
+    assert torch.allclose(ev, ev2, atol=1e-6)
+
+    assert torch.allclose(reconstruct_cov(ev, vecs), acc_vals_first["hook0"].A.cov, atol=1e-4)
+
+
+def test_eigvecs_centered_access_order_independent(make_factors_dict):
+    # Meaned raw-cov source: same order-independence for the centered pair, which
+    # also exercises the eigvecs-first ordering of FactorView.eigh_centered.
+    factors = make_factors_dict(d=16, with_means=True, with_grad=False)
+
+    acc_vals_first = DataAccessor(copy.deepcopy(factors))
+    ev = acc_vals_first["hook0"].A.eigvals_centered
+    vecs = acc_vals_first["hook0"].A.eigvecs_centered
+    assert ev is not None and vecs is not None
+
+    acc_vecs_first = DataAccessor(copy.deepcopy(factors))
+    vecs2 = acc_vecs_first["hook0"].A.eigvecs_centered
+    ev2 = acc_vecs_first["hook0"].A.eigvals_centered
+    assert ev2 is not None and vecs2 is not None
+    assert torch.allclose(ev, ev2, atol=1e-6)
