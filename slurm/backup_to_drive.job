@@ -1,0 +1,115 @@
+#!/bin/bash
+#SBATCH --partition=staging
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
+#SBATCH --time=12:00:00
+#SBATCH --job-name=gdrive_backup
+#SBATCH --output=slurm/logs/gdrive_backup_%j.out
+
+# Back up to / restore from Google Drive under gdrive:msc-backup-data/<name>/.
+# Archives are one .tar per first-level subdir (no gzip: float tensors barely
+# compress). Work happens one tar at a time via node-local scratch, and both
+# modes skip work already done, so a re-submit resumes where it left off.
+#
+#   up   : pack each subdir of <src_dir> and upload
+#   down : download each .tar of <name> and extract into data/inferences/<local>
+#
+# Usage:
+#   sbatch slurm/backup_to_drive.job up   data/inferences/full          # -> msc-backup-data/full/
+#   sbatch slurm/backup_to_drive.job up   data/inferences/full myname   # -> msc-backup-data/myname/
+#   sbatch slurm/backup_to_drive.job down full                          # -> data/inferences/full/
+#   sbatch slurm/backup_to_drive.job down full myname                   # -> data/inferences/myname/
+
+set -euo pipefail
+
+MODE="${1:?Usage: sbatch $0 <up|down> ...}"
+REMOTE="gdrive"
+DEST_BASE="msc-backup-data"
+LOCAL_BASE="data/inferences"
+
+cd "$HOME/Tracing-representation-geometry-reproduction" || exit 1
+mkdir -p slurm/logs
+
+WORK="${TMPDIR:-/tmp}/gdrive_${SLURM_JOB_ID:-$$}"
+mkdir -p "$WORK"
+trap 'rm -rf "$WORK"' EXIT
+
+LOG="slurm/logs/rclone_${SLURM_JOB_ID:-$$}.log"
+RCLONE_OPTS=(--retries 5 --low-level-retries 10 --stats 30s -v --log-file "$LOG")
+JOBS="${JOBS:-8}"   # concurrent tar+upload workers (override: JOBS=12 sbatch ...)
+
+case "$MODE" in
+  up|backup|upload)
+    SRC="${2:?Usage: sbatch $0 up <src_dir> [dest_name]}"
+    SRC="${SRC%/}"
+    NAME="${3:-$(basename "$SRC")}"
+    REMOTE_DIR="${REMOTE}:${DEST_BASE}/${NAME}"
+    [ -d "$SRC" ] || { echo "Source dir not found: $SRC" >&2; exit 1; }
+    echo "UP  $SRC -> $REMOTE_DIR ($JOBS parallel, log: $LOG)"
+
+    # Immediate subdirs become individual tars; if none, tar SRC whole.
+    mapfile -t SUBDIRS < <(find "$SRC" -maxdepth 1 -mindepth 1 -type d | sort)
+    if [ ${#SUBDIRS[@]} -eq 0 ]; then
+        PARENT="$(dirname "$SRC")"; ITEMS=("$(basename "$SRC")")
+    else
+        PARENT="$SRC"; ITEMS=()
+        for d in "${SUBDIRS[@]}"; do ITEMS+=("$(basename "$d")"); done
+    fi
+    echo "Packing ${#ITEMS[@]} item(s) from $PARENT"
+
+    pack_upload() {   # one subdir: skip if present, else tar -> upload -> delete
+        local name="$1"
+        if rclone lsf "$REMOTE_DIR/" 2>/dev/null | grep -qx "${name}.tar"; then
+            echo "SKIP  ${name}.tar (already on remote)"; return
+        fi
+        echo "PACK  ${name}.tar"
+        tar -cf "$WORK/${name}.tar" -C "$PARENT" "$name"
+        echo "PUSH  ${name}.tar -> $REMOTE_DIR/"
+        rclone copy "${RCLONE_OPTS[@]}" --drive-chunk-size 256M "$WORK/${name}.tar" "$REMOTE_DIR/"
+        rm -f "$WORK/${name}.tar"
+    }
+
+    # Worker pool: keep at most $JOBS uploads in flight, queue the rest.
+    running=0
+    for name in "${ITEMS[@]}"; do
+        pack_upload "$name" &
+        (( ++running >= JOBS )) && { wait -n || true; ((running--)); }
+    done
+    wait
+    echo "Done. Remote contents:"; rclone size "$REMOTE_DIR/" 2>/dev/null || true
+    ;;
+
+  down|restore|download)
+    NAME="${2:?Usage: sbatch $0 down <name> [local_name]}"   # remote folder
+    LOCAL="${3:-$NAME}"                                       # local target name
+    REMOTE_DIR="${REMOTE}:${DEST_BASE}/${NAME}"
+    echo "DOWN  $REMOTE_DIR -> $LOCAL_BASE/$LOCAL (log: $LOG)"
+
+    mapfile -t TARS < <(rclone lsf "$REMOTE_DIR/" --include "*.tar" 2>/dev/null | sort)
+    [ ${#TARS[@]} -gt 0 ] || { echo "No .tar files at $REMOTE_DIR" >&2; exit 1; }
+    echo "Restoring ${#TARS[@]} archive(s)"
+
+    INTO="$LOCAL_BASE/$LOCAL"
+    for tarname in "${TARS[@]}"; do
+        item="${tarname%.tar}"
+        # Per-subdir archive (item/...) lands as INTO/item. A whole-dir fallback
+        # archive (item == remote NAME) has its leading dir stripped so its
+        # contents land directly in INTO (honoring a renamed local target).
+        if [ "$item" = "$NAME" ]; then STRIP=(--strip-components=1); EXPECT="$INTO"
+        else STRIP=(); EXPECT="$INTO/$item"; fi
+        if [ -d "$EXPECT" ] && [ -n "$(ls -A "$EXPECT" 2>/dev/null)" ]; then
+            echo "SKIP  ${tarname} ($EXPECT exists)"; continue
+        fi
+        echo "PULL  ${tarname}"
+        rclone copy "${RCLONE_OPTS[@]}" "$REMOTE_DIR/$tarname" "$WORK/"
+        echo "UNTAR ${tarname} -> $INTO/"
+        mkdir -p "$INTO"
+        tar -xf "$WORK/$tarname" -C "$INTO" "${STRIP[@]}"
+        rm -f "$WORK/$tarname"
+    done
+    echo "Done. Restored into $LOCAL_BASE/$LOCAL"
+    ;;
+
+  *)
+    echo "Unknown mode: '$MODE' (expected up|down)" >&2; exit 1 ;;
+esac
