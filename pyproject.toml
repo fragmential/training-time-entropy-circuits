@@ -23,6 +23,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
 
+[dependency-groups]
+notebook = ["ipykernel"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["e2e: end-to-end tests requiring model downloads (deselect with '-m not e2e')"]
