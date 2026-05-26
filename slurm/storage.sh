@@ -39,8 +39,7 @@ for ((j=0; j<${#CMD_ARGS[@]}; j++)); do
 done
 if [ "$CMD" = "convert" ]; then
     BASE_FMT="${TO_FMT%%+*}"
-    [[ "$TO_FMT" == *b* ]] && HAS_B=1 || HAS_B=0
-    [[ "$TO_FMT" == *m* ]] && HAS_M=1 || HAS_M=0
+    BASE_FMT="${BASE_FMT%%-*}"
     WARNED=0
 
     # Warning 1: eigvals keeps only eigenvalues -> covariances are gone
@@ -54,21 +53,26 @@ EOF
         WARNED=1
     fi
 
-    # Warning 2: B factor / means
-    if [ "$HAS_B" = "0" ] && [ "$HAS_M" = "0" ]; then
+    # Warning 2: explicit negative overrides for B factor / means
+    if [[ "$TO_FMT" == *"-b"* ]] && [[ "$TO_FMT" == *"-m"* ]]; then
         cat >&2 <<'EOF'
 
-WARNING:  no +b and no +m  ->  DESTROYS the B FACTOR *and* the MEANS
-of ALL data. You will not be able to derive B or center the spectra.
-To keep them, add the modifiers:   --to <fmt>+bm
+WARNING:  -b and -m explicitly drop the B FACTOR and MEANS where they
+would otherwise be preserved by default.
 EOF
         WARNED=1
-    elif [ "$HAS_B" = "0" ]; then
+    elif [[ "$TO_FMT" == *"-b"* ]]; then
         cat >&2 <<'EOF'
 
-WARNING:  +m present but +b missing  ->  DESTROYS the B FACTOR
-The activation means are preserved, but B cannot be derived afterwards.
-To keep B too, add:   --to <fmt>+bm
+WARNING:  -b explicitly drops the B FACTOR where it would otherwise be
+preserved by default.
+EOF
+        WARNED=1
+    elif [[ "$TO_FMT" == *"-m"* ]]; then
+        cat >&2 <<'EOF'
+
+WARNING:  -m explicitly drops MEANS where they would otherwise be preserved
+by default. Centered spectra and some B derivations may become impossible.
 EOF
         WARNED=1
     fi
@@ -87,7 +91,7 @@ EOF
             fi
         else
             echo ">>> No TTY to confirm a lossy convert — aborting." >&2
-            echo ">>> Re-run interactively, or add +bm (or --output-dir) to silence this." >&2
+            echo ">>> Re-run interactively, or use --output-dir while testing." >&2
             exit 1
         fi
     fi

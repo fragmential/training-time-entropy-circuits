@@ -49,7 +49,7 @@ from utils.model_registry import (
     delete_cached_revision,
 )
 from utils.hooks import HookCollector, setup_identity_head, restore_head
-from utils.accessor import DataAccessor, parse_format
+from utils.accessor import DataAccessor, parse_format, parse_format_spec
 from utils.data_utils import (
     get_loader,
     load_and_cache_texts,
@@ -291,12 +291,15 @@ def _collect_for_checkpoint(
     """
     collects_mlp = cfg.collect_A or cfg.collect_G
     needs_grad = cfg.collect_G or cfg.collect_final_grads
-    storage_base, storage_flags = parse_format(cfg.storage_format)
+    storage_base, storage_flags, storage_drop_flags = parse_format_spec(cfg.storage_format)
     storage_mode = "acts" if storage_base == "acts" else "cov"
     # +b implies +m (means needed for B derivation)
-    if "b" in storage_flags and "m" not in storage_flags:
+    if "b" in storage_flags and "m" not in storage_flags and "m" not in storage_drop_flags:
         print("  NOTE: +b implies +m — storing means for B derivation")
-    collect_means = "m" in storage_flags or "b" in storage_flags
+    collect_means = (
+        "m" not in storage_drop_flags
+        and ("m" in storage_flags or "b" in storage_flags or storage_base in ("cov_svd", "eigenvalues"))
+    )
 
     all_factors = {}
 

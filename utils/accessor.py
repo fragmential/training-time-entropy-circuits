@@ -134,24 +134,40 @@ _BASE_FORMATS = {"acts", "acts_svd", "cov", "cov_svd", "eigenvalues"}
 _VALID_MODIFIERS = {"b", "m"}
 
 
-def parse_format(fmt):
-    """Split a storage format into (base, set of modifier flags).
+def parse_format_spec(fmt):
+    """Split a storage format into (base, plus_flags, minus_flags).
 
-    Modifiers are the individual chars after the base, so +bm == +b+m == +mb.
+    Modifiers are individual chars after +/- signs, so +bm == +b+m == +mb.
+    Later +/- occurrences win, allowing e.g. eigenvalues-b or cov_svd+m-b.
     Raises ValueError on an unknown base or modifier.
     """
-    base, *mods = fmt.split("+")
+    m = re.match(r"([^+-]+)((?:[+-][^+-]+)*)$", fmt)
+    if not m:
+        raise ValueError(f"Unknown format: {fmt!r}")
+    base, mods = m.groups()
     base = _FORMAT_ALIASES.get(base, base)
     if base not in _BASE_FORMATS:
         raise ValueError(f"Unknown format: {fmt!r}")
-    flags = set("".join(mods))
-    unknown = flags - _VALID_MODIFIERS
-    if unknown:
-        raise ValueError(
-            f"Unknown format modifier(s) {sorted(unknown)} in {fmt!r}; "
-            f"valid modifiers: {sorted(_VALID_MODIFIERS)}"
-        )
-    return base, flags
+    plus, minus = set(), set()
+    for sign, chars in re.findall(r"([+-])([^+-]+)", mods):
+        unknown = set(chars) - _VALID_MODIFIERS
+        if unknown:
+            raise ValueError(
+                f"Unknown format modifier(s) {sorted(unknown)} in {fmt!r}; "
+                f"valid modifiers: {sorted(_VALID_MODIFIERS)}"
+            )
+        for ch in chars:
+            if sign == "+":
+                plus.add(ch); minus.discard(ch)
+            else:
+                minus.add(ch); plus.discard(ch)
+    return base, plus, minus
+
+
+def parse_format(fmt):
+    """Split a storage format into (base, positive modifier flags)."""
+    base, plus, _ = parse_format_spec(fmt)
+    return base, plus
 
 _DTYPE_MAP = {
     "float32":  torch.float32,  "fp32": torch.float32,
@@ -193,8 +209,8 @@ def _cast_for(tensor: torch.Tensor, item_type: str, storage_dtype) -> torch.Tens
 
 
 def _convert_worker(args):
-    in_path, out_path, fmt = args
-    return DataAccessor(in_path).save(out_path, format=fmt)
+    in_path, out_path, fmt, abort_on_model_load = args
+    return DataAccessor(in_path, abort_on_model_load=abort_on_model_load).save(out_path, format=fmt)
 
 def _project_same_layer_worker(args):
     in_path, out_path, onto = args
@@ -236,7 +252,8 @@ class DataAccessor:
                     access that requires it. Ignored if model is already provided.
     """
 
-    def __init__(self, data, model=None, model_config=None, model_name=None, revision=None):
+    def __init__(self, data, model=None, model_config=None, model_name=None, revision=None,
+                 abort_on_model_load: bool = False):
         if model_name is not None and "/" not in model_name:
             model_name = _resolve_hf_name(model_name)
         self.path = data if isinstance(data, str) else None
@@ -249,6 +266,7 @@ class DataAccessor:
         self._revision = revision or data.get("__revision__")
         self._hf_repo = data.get("__hf_model__")  # actual repo (may differ from model_name for early-training)
         self._selective_weights: Optional[dict] = None
+        self.abort_on_model_load = abort_on_model_load
         self._layer_cache: dict = {}
         self._eigh_cache: dict = {}  # (hook, factor) -> (centered_eigvals, uncentered_eigvals, eigvecs_or_None, centered_eigvecs_or_None)
         self._B_cov_cache: dict = {}  # hook -> derived B covariance (shared by .cov and .eigvecs)
@@ -259,6 +277,11 @@ class DataAccessor:
             return True
         if self._model_name is None:
             return False
+        if self.abort_on_model_load:
+            raise RuntimeError(
+                f"Aborting before loading model weights for {self._model_name}"
+                + (f"@{self._revision}" if self._revision else "")
+            )
         # Selective loading: only the layers we actually need
         hook_names = [k for k in self.data if re.match(r"blk\d+\.(up|down|gate)", k)]
         need_norm = "before_final_norm" in self.data and "after_final_norm" not in self.data
@@ -298,9 +321,7 @@ class DataAccessor:
 
     def to_dict(self, format="cov_svd", storage_dtype=None) -> dict:
         """Materialize this accessor's data as a storage-format dict."""
-        base_format, flags = parse_format(format)
-        store_b = "b" in flags
-        store_means = "m" in flags or store_b  # +b implies +m: the mean is needed to (re-)derive B
+        base_format, plus, minus = parse_format_spec(format)
         result = {}
 
         for hook_name in self.hook_names():
@@ -311,15 +332,39 @@ class DataAccessor:
                     out_entry[k] = v
 
             factors = list(_FACTOR_KEYS)
+            store_b = self._should_store_b(entry, base_format, plus, minus)
             if store_b:
                 factors.append("B")
 
             for factor in factors:
-                self._write_factor(out_entry, hook_name, factor, base_format, store_means, storage_dtype)
+                store_mean = self._should_store_mean(hook_name, factor, base_format, plus, minus)
+                self._write_factor(out_entry, hook_name, factor, base_format, store_mean, storage_dtype)
 
             result[hook_name] = out_entry
 
         return result
+
+    def _should_store_b(self, entry, base_format, plus, minus) -> bool:
+        if "b" in minus:
+            return False
+        if "b" in plus or base_format == "eigenvalues":
+            return True
+        return any(k in entry for k in ("B", "B_eigvals", "B_eigvecs"))
+
+    def _should_store_mean(self, hook_name, factor, base_format, plus, minus) -> bool:
+        if "m" in minus:
+            return False
+        if "m" in plus or "b" in plus or base_format == "eigenvalues":
+            return True
+        entry = self._entry(hook_name)
+        if f"{factor}_mean" in entry:
+            return True
+        return base_format == "cov_svd" and self._has_raw_activations(entry, factor)
+
+    @staticmethod
+    def _has_raw_activations(entry, factor) -> bool:
+        t = entry.get(factor)
+        return isinstance(t, torch.Tensor) and t.dim() == 2 and t.shape[0] != t.shape[1]
 
     def _write_factor(self, out_entry, hook_name, factor, base_format, store_means, storage_dtype):
         view = self[hook_name]._factor(factor)
@@ -761,7 +806,11 @@ class DataAccessor:
         if factor == "B":
             return self._B_mean(hook_name)
         entry = self._entry(hook_name)
-        return entry.get(f"{factor}_mean")
+        stored = entry.get(f"{factor}_mean")
+        if stored is not None:
+            return stored
+        acts = self._activations(hook_name, factor)
+        return acts.float().mean(0) if acts is not None else None
 
     def _svd(self, hook_name: str, factor: str):
         """(U, S, V) from acts if available, else (S, V) from eigdecomp."""
@@ -1201,6 +1250,8 @@ if __name__ == "__main__":
     p.add_argument("--output-dir", default=None, dest="output_dir", metavar="DIR",
                    help="Write outputs here, mirroring input filenames (default: in-place)")
     p.add_argument("--workers", type=int, default=None)
+    p.add_argument("--abort-on-model-load", action="store_true",
+                   help="Abort instead of lazily loading model weights for derivations such as B")
 
     # --- project ---
     p = sub.add_parser("project", help="Add cross-basis eigenvalue projections")
@@ -1237,10 +1288,15 @@ if __name__ == "__main__":
         pairs = _resolve_outputs(_pt_files(args.input), args.output, args.output_dir)
         if len(pairs) == 1:
             ip, op = pairs[0]
-            print(f"Saved to {DataAccessor(ip).save(op, format=args.to)}")
+            acc = DataAccessor(ip, abort_on_model_load=args.abort_on_model_load)
+            print(f"Saved to {acc.save(op, format=args.to)}")
         else:
             print(f"Converting {len(pairs)} files to {args.to}...")
-            _run_pool(_convert_worker, [(ip, op, args.to) for ip, op in pairs], args.workers)
+            _run_pool(
+                _convert_worker,
+                [(ip, op, args.to, args.abort_on_model_load) for ip, op in pairs],
+                args.workers,
+            )
 
     elif args.command == "project":
         pairs = _resolve_outputs(_pt_files(args.input), args.output, args.output_dir)

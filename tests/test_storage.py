@@ -220,8 +220,8 @@ def test_same_layer_mlp_selects_B(tmp_path):
     assert "G_cross_eigvals_A" not in entry
 
 
-def test_convert_drops_mean_keeps_centered(tmp_path, make_factors_dict):
-    # Raw mean is only persisted with +m, but centered eigvals are derived whenever a mean exists.
+def test_convert_preserves_mean_by_default_and_minus_m_drops_it(tmp_path, make_factors_dict):
+    # Bare cov_svd preserves stored means; -m explicitly drops them.
     factors = make_factors_dict(d=16, with_grad=False, with_means=True)
     cov_path = str(tmp_path / "cov.pt")
     DataAccessor(factors).save(cov_path, format="cov+m")
@@ -229,13 +229,64 @@ def test_convert_drops_mean_keeps_centered(tmp_path, make_factors_dict):
     svd_path = str(tmp_path / "svd.pt")
     DataAccessor(cov_path).save(svd_path, format="cov_svd")
     entry = torch.load(svd_path, map_location="cpu", weights_only=False)["hook0"]
-    assert "A_mean" not in entry
+    assert "A_mean" in entry
     assert "A_eigvals_centered" in entry
 
-    svdm_path = str(tmp_path / "svd_m.pt")
-    DataAccessor(cov_path).save(svdm_path, format="cov_svd+m")
-    entry_m = torch.load(svdm_path, map_location="cpu", weights_only=False)["hook0"]
-    assert "A_mean" in entry_m
+    svd_drop_path = str(tmp_path / "svd_drop.pt")
+    DataAccessor(cov_path).save(svd_drop_path, format="cov_svd-m")
+    entry_drop = torch.load(svd_drop_path, map_location="cpu", weights_only=False)["hook0"]
+    assert "A_mean" not in entry_drop
+    assert "A_eigvals_centered" in entry_drop
+
+
+def test_acts_to_cov_svd_derives_mean_by_default(tmp_path):
+    acts = torch.randn(20, 8)
+    path = str(tmp_path / "svd.pt")
+    DataAccessor({"hook0": {"A": acts, "n_A": len(acts), "n": len(acts)}}).save(path, format="cov_svd")
+    entry = torch.load(path, map_location="cpu", weights_only=False)["hook0"]
+    assert torch.allclose(entry["A_mean"], acts.mean(0), atol=1e-6)
+
+
+def test_b_preserve_and_drop_overrides(tmp_path):
+    data = {
+        "hook0": {
+            "n": 5,
+            "A": torch.eye(4) * 5,
+            "A_mean": torch.ones(4),
+            "B": torch.eye(4) * 10,
+            "B_mean": torch.arange(4).float(),
+        }
+    }
+
+    svd_path = str(tmp_path / "svd.pt")
+    DataAccessor(data).save(svd_path, format="cov_svd")
+    entry = torch.load(svd_path, map_location="cpu", weights_only=False)["hook0"]
+    assert "B_eigvals" in entry
+    assert "B_eigvecs" in entry
+    assert "B_mean" in entry
+
+    drop_path = str(tmp_path / "drop.pt")
+    DataAccessor(data).save(drop_path, format="cov_svd-b")
+    entry_drop = torch.load(drop_path, map_location="cpu", weights_only=False)["hook0"]
+    assert not any(k.startswith("B") for k in entry_drop)
+
+
+def test_eigenvalues_preserves_means_and_b_by_default(tmp_path):
+    data = {
+        "hook0": {
+            "n": 5,
+            "A": torch.eye(4) * 5,
+            "A_mean": torch.ones(4),
+            "B": torch.eye(4) * 10,
+            "B_mean": torch.arange(4).float(),
+        }
+    }
+    path = str(tmp_path / "eig.pt")
+    DataAccessor(data).save(path, format="eigvals")
+    entry = torch.load(path, map_location="cpu", weights_only=False)["hook0"]
+    assert {"A_mean", "B_mean", "A_eigvals", "B_eigvals"} <= set(entry)
+    assert "A_eigvecs" not in entry
+    assert "B_eigvecs" not in entry
 
 
 def test_no_eager_metadata_inference_on_construct(tmp_path, make_factors_dict):
