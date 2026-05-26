@@ -170,24 +170,20 @@ def _cast_for(tensor: torch.Tensor, item_type: str, storage_dtype) -> torch.Tens
 
 
 def _convert_worker(args):
-    path, fmt = args
-    acc = DataAccessor(path)
-    return acc.save(path, format=fmt)
+    in_path, out_path, fmt = args
+    return DataAccessor(in_path).save(out_path, format=fmt)
 
 def _project_same_layer_worker(args):
-    path, onto = args
-    acc = DataAccessor(path)
-    return acc.project_same_layer(onto=onto, output_path=path)
+    in_path, out_path, onto = args
+    return DataAccessor(in_path).project_same_layer(onto=onto, output_path=out_path)
 
 def _project_onto_file_worker(args):
-    path, basis_path = args
-    acc = DataAccessor(path)
-    return acc.project_onto_basis(basis_path, output_path=path)
+    in_path, out_path, basis_path = args
+    return DataAccessor(in_path).project_onto_basis(basis_path, output_path=out_path)
 
 def _set_filter_worker(args):
-    path, filter_dict = args
-    acc = DataAccessor(path)
-    return acc.set_token_filter(filter_dict, output_path=path)
+    in_path, out_path, filter_dict = args
+    return DataAccessor(in_path).set_token_filter(filter_dict, output_path=out_path)
 
 
 # ===========================================================================
@@ -1156,6 +1152,17 @@ if __name__ == "__main__":
             for out in pool.imap_unordered(worker, task_args):
                 print(f"  -> {out}")
 
+    def _resolve_outputs(pts, output, output_dir):
+        """Map each input .pt to its output path. In-place by default."""
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+            return [(p, os.path.join(output_dir, os.path.basename(p))) for p in pts]
+        if output:
+            if len(pts) == 1:
+                return [(pts[0], output)]
+            print("Warning: --output ignored for directory input (use --output-dir)")
+        return [(p, p) for p in pts]
+
     parser = argparse.ArgumentParser(
         prog="python -m utils.accessor",
         description="Storage tool: convert, project, inspect .pt factor files",
@@ -1171,6 +1178,8 @@ if __name__ == "__main__":
     p.add_argument("--input", required=True, metavar="PATH")
     p.add_argument("--to", required=True, metavar="FORMAT")
     p.add_argument("--output", default=None, metavar="PATH", help="Output path (only valid for single-file input)")
+    p.add_argument("--output-dir", default=None, dest="output_dir", metavar="DIR",
+                   help="Write outputs here, mirroring input filenames (default: in-place)")
     p.add_argument("--workers", type=int, default=None)
 
     # --- project ---
@@ -1182,6 +1191,8 @@ if __name__ == "__main__":
     g.add_argument("--onto-file", dest="onto_file", metavar="FILE",
                    help="Cross-checkpoint: project each file onto eigenbasis from this reference file")
     p.add_argument("--output", default=None, metavar="PATH", help="Output path (only valid for single-file input)")
+    p.add_argument("--output-dir", default=None, dest="output_dir", metavar="DIR",
+                   help="Write outputs here, mirroring input filenames (default: in-place)")
     p.add_argument("--workers", type=int, default=None)
 
     # --- set-filter ---
@@ -1192,6 +1203,8 @@ if __name__ == "__main__":
     p.add_argument("--boundary-token-ids", type=int, nargs="+", dest="boundary_token_ids")
     p.add_argument("--answer-only", action="store_true", dest="answer_only")
     p.add_argument("--output", default=None, metavar="PATH")
+    p.add_argument("--output-dir", default=None, dest="output_dir", metavar="DIR",
+                   help="Write outputs here, mirroring input filenames (default: in-place)")
     p.add_argument("--workers", type=int, default=None)
 
     args = parser.parse_args()
@@ -1201,40 +1214,32 @@ if __name__ == "__main__":
             print(DataAccessor(pt).info())
 
     elif args.command == "convert":
-        pts = _pt_files(args.input)
-        if args.output and len(pts) > 1:
-            print("Warning: --output ignored for directory input (files converted in-place)")
-            args.output = None
-        if len(pts) == 1:
-            out = DataAccessor(pts[0]).save(args.output or pts[0], format=args.to)
-            print(f"Saved to {out}")
+        pairs = _resolve_outputs(_pt_files(args.input), args.output, args.output_dir)
+        if len(pairs) == 1:
+            ip, op = pairs[0]
+            print(f"Saved to {DataAccessor(ip).save(op, format=args.to)}")
         else:
-            print(f"Converting {len(pts)} files to {args.to}...")
-            _run_pool(_convert_worker, [(p, args.to) for p in pts], args.workers)
+            print(f"Converting {len(pairs)} files to {args.to}...")
+            _run_pool(_convert_worker, [(ip, op, args.to) for ip, op in pairs], args.workers)
 
     elif args.command == "project":
-        pts = _pt_files(args.input)
-        if args.output and len(pts) > 1:
-            print("Warning: --output ignored for directory input")
-            args.output = None
+        pairs = _resolve_outputs(_pt_files(args.input), args.output, args.output_dir)
         if args.onto:
-            if len(pts) == 1:
-                out = args.output or pts[0]
-                DataAccessor(pts[0]).project_same_layer(args.onto, output_path=out)
-                print(f"Saved to {out}")
+            if len(pairs) == 1:
+                ip, op = pairs[0]
+                print(f"Saved to {DataAccessor(ip).project_same_layer(args.onto, output_path=op)}")
             else:
-                print(f"Projecting {len(pts)} files (onto={args.onto})...")
-                _run_pool(_project_same_layer_worker, [(p, args.onto) for p in pts], args.workers)
+                print(f"Projecting {len(pairs)} files (onto={args.onto})...")
+                _run_pool(_project_same_layer_worker, [(ip, op, args.onto) for ip, op in pairs], args.workers)
         else:
-            if len(pts) == 1:
-                out = DataAccessor(pts[0]).project_onto_basis(args.onto_file, args.output or pts[0])
-                print(f"Saved to {out}")
+            if len(pairs) == 1:
+                ip, op = pairs[0]
+                print(f"Saved to {DataAccessor(ip).project_onto_basis(args.onto_file, op)}")
             else:
-                print(f"Projecting {len(pts)} files onto {args.onto_file}...")
-                _run_pool(_project_onto_file_worker, [(p, args.onto_file) for p in pts], args.workers)
+                print(f"Projecting {len(pairs)} files onto {args.onto_file}...")
+                _run_pool(_project_onto_file_worker, [(ip, op, args.onto_file) for ip, op in pairs], args.workers)
 
     elif args.command == "set-filter":
-        # Build filter dict
         pts = _pt_files(args.input)
         # Load first file to get existing filter as base
         sample = torch.load(pts[0], map_location="cpu", weights_only=False)
@@ -1247,12 +1252,13 @@ if __name__ == "__main__":
             filter_dict["boundary_token_ids"] = args.boundary_token_ids
         if args.answer_only:
             filter_dict["answer_only"] = True
-        if len(pts) == 1:
-            out = DataAccessor(pts[0]).set_token_filter(filter_dict, args.output or pts[0])
-            print(f"Saved to {out}")
+        pairs = _resolve_outputs(pts, args.output, args.output_dir)
+        if len(pairs) == 1:
+            ip, op = pairs[0]
+            print(f"Saved to {DataAccessor(ip).set_token_filter(filter_dict, op)}")
         else:
-            print(f"Setting token filter on {len(pts)} files...")
-            _run_pool(_set_filter_worker, [(p, filter_dict) for p in pts], args.workers)
+            print(f"Setting token filter on {len(pairs)} files...")
+            _run_pool(_set_filter_worker, [(ip, op, filter_dict) for ip, op in pairs], args.workers)
 
     else:
         parser.print_help()

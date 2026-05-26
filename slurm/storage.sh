@@ -1,8 +1,10 @@
 #!/bin/bash
 # SLURM wrapper for python -m utils.accessor — one job per model subdir (or single job if --input points to a model dir).
-# Usage: ./slurm/storage.sh <command> [flags...] --input <path>
+# Usage: ./slurm/storage.sh <command> [flags...] --input <path> [--output-dir <path>]
+# In-place by default; --output-dir writes results to <output-dir>/<model_name>/ instead.
 # Examples:
 #   ./slurm/storage.sh convert --to cov_svd --input data/inferences/full_limited
+#   ./slurm/storage.sh convert --to cov_svd --input data/inferences/full_limited --output-dir data/inferences/full_limited_svd
 #   ./slurm/storage.sh project --onto both --input data/inferences/full_limited/pythia-31m-deduped
 #   ./slurm/storage.sh set-filter --token-selection last --input data/inferences/full_limited
 
@@ -10,13 +12,16 @@ set -euo pipefail
 
 mkdir -p slurm/logs
 
-# Split --input from remaining args
+# Split --input and --output-dir from remaining args
 INPUT_PATH=""
+OUTPUT_BASE=""
 CMD_ARGS=()
 i=0; ARGS=("$@")
 while [ $i -lt ${#ARGS[@]} ]; do
     if [ "${ARGS[$i]}" = "--input" ] && [ $((i+1)) -lt ${#ARGS[@]} ]; then
         INPUT_PATH="${ARGS[$((i+1))]}"; i=$((i+2))
+    elif [ "${ARGS[$i]}" = "--output-dir" ] && [ $((i+1)) -lt ${#ARGS[@]} ]; then
+        OUTPUT_BASE="${ARGS[$((i+1))]}"; i=$((i+2))
     else
         CMD_ARGS+=("${ARGS[$i]}"); i=$((i+1))
     fi
@@ -52,10 +57,17 @@ sbatch --array=0-$((N-1)) <<EOF
 
 MODEL_DIRS=(${DIRS_STR})
 MODEL_DIR="\${MODEL_DIRS[\$SLURM_ARRAY_TASK_ID]}"
+OUTPUT_BASE="${OUTPUT_BASE}"
 export HF_HOME="/projects/prjs1815/hf_cache"
 
 cd "\$HOME/Tracing-representation-geometry-reproduction" || exit 1
 export OMP_NUM_THREADS=1
 echo "Processing: \$MODEL_DIR"
-time uv run python -m utils.accessor${QUOTED_ARGS} --input "\$MODEL_DIR" --workers 16
+if [ -n "\$OUTPUT_BASE" ]; then
+    OUT_DIR="\$OUTPUT_BASE/\$(basename "\$MODEL_DIR")"
+    echo "Output: \$OUT_DIR"
+    time uv run python -m utils.accessor${QUOTED_ARGS} --input "\$MODEL_DIR" --output-dir "\$OUT_DIR" --workers 16
+else
+    time uv run python -m utils.accessor${QUOTED_ARGS} --input "\$MODEL_DIR" --workers 16
+fi
 EOF
