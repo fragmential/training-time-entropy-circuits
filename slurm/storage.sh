@@ -31,6 +31,68 @@ if [ -z "$INPUT_PATH" ]; then
     echo "Error: --input <path> is required" >&2; exit 1
 fi
 
+# Loud, layered warnings when a `convert` discards data (irreversible if in-place)
+CMD="${CMD_ARGS[0]:-}"
+TO_FMT=""
+for ((j=0; j<${#CMD_ARGS[@]}; j++)); do
+    [ "${CMD_ARGS[$j]}" = "--to" ] && [ $((j+1)) -lt ${#CMD_ARGS[@]} ] && TO_FMT="${CMD_ARGS[$((j+1))]}"
+done
+if [ "$CMD" = "convert" ]; then
+    BASE_FMT="${TO_FMT%%+*}"
+    [[ "$TO_FMT" == *b* ]] && HAS_B=1 || HAS_B=0
+    [[ "$TO_FMT" == *m* ]] && HAS_M=1 || HAS_M=0
+    WARNED=0
+
+    # Warning 1: eigvals keeps only eigenvalues -> covariances are gone
+    if [ "$BASE_FMT" = "eigvals" ] || [ "$BASE_FMT" = "eigenvalues" ]; then
+        cat >&2 <<'EOF'
+
+WARNING:  --to eigvals  DESTROYS the COVARIANCE MATRICES
+Only eigenvalues are kept; the full A/G covariances and eigenvectors
+are discarded  ->  no reconstruction, no reprojection onto other bases.
+EOF
+        WARNED=1
+    fi
+
+    # Warning 2: B factor / means
+    if [ "$HAS_B" = "0" ] && [ "$HAS_M" = "0" ]; then
+        cat >&2 <<'EOF'
+
+WARNING:  no +b and no +m  ->  DESTROYS the B FACTOR *and* the MEANS
+of ALL data. You will not be able to derive B or center the spectra.
+To keep them, add the modifiers:   --to <fmt>+bm
+EOF
+        WARNED=1
+    elif [ "$HAS_B" = "0" ]; then
+        cat >&2 <<'EOF'
+
+WARNING:  +m present but +b missing  ->  DESTROYS the B FACTOR
+The activation means are preserved, but B cannot be derived afterwards.
+To keep B too, add:   --to <fmt>+bm
+EOF
+        WARNED=1
+    fi
+
+    if [ "$WARNED" = "1" ]; then
+        if [ -n "$OUTPUT_BASE" ]; then
+            echo ">>> Mode: writing to $OUTPUT_BASE — source files are PRESERVED." >&2
+        else
+            echo ">>> Mode: IN-PLACE — the above are PERMANENTLY REMOVED from the source files." >&2
+        fi
+        if [ -t 0 ]; then
+            printf '>>> Type "proceed" to continue (anything else aborts): ' >&2
+            read -r CONFIRM
+            if [ "$CONFIRM" != "proceed" ]; then
+                echo ">>> Aborted." >&2; exit 1
+            fi
+        else
+            echo ">>> No TTY to confirm a lossy convert — aborting." >&2
+            echo ">>> Re-run interactively, or add +bm (or --output-dir) to silence this." >&2
+            exit 1
+        fi
+    fi
+fi
+
 # Model dir (.pt files) or dataset dir (subdirs)
 if compgen -G "${INPUT_PATH}/*.pt" > /dev/null 2>&1; then
     MODEL_DIRS=("$INPUT_PATH")

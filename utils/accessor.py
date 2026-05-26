@@ -130,6 +130,29 @@ _FORMAT_ALIASES = {
     "eigvals":     "eigenvalues",
 }
 
+_BASE_FORMATS = {"acts", "acts_svd", "cov", "cov_svd", "eigenvalues"}
+_VALID_MODIFIERS = {"b", "m"}
+
+
+def parse_format(fmt):
+    """Split a storage format into (base, set of modifier flags).
+
+    Modifiers are the individual chars after the base, so +bm == +b+m == +mb.
+    Raises ValueError on an unknown base or modifier.
+    """
+    base, *mods = fmt.split("+")
+    base = _FORMAT_ALIASES.get(base, base)
+    if base not in _BASE_FORMATS:
+        raise ValueError(f"Unknown format: {fmt!r}")
+    flags = set("".join(mods))
+    unknown = flags - _VALID_MODIFIERS
+    if unknown:
+        raise ValueError(
+            f"Unknown format modifier(s) {sorted(unknown)} in {fmt!r}; "
+            f"valid modifiers: {sorted(_VALID_MODIFIERS)}"
+        )
+    return base, flags
+
 _DTYPE_MAP = {
     "float32":  torch.float32,  "fp32": torch.float32,
     "float64":  torch.float64,  "fp64": torch.float64,
@@ -275,13 +298,10 @@ class DataAccessor:
 
     def to_dict(self, format="cov_svd", storage_dtype=None) -> dict:
         """Materialize this accessor's data as a storage-format dict."""
-        base_format = _FORMAT_ALIASES.get(format.split("+")[0], format.split("+")[0])
-        store_means = "+m" in format
-        store_b = "+b" in format
+        base_format, flags = parse_format(format)
+        store_b = "b" in flags
+        store_means = "m" in flags or store_b  # +b implies +m: the mean is needed to (re-)derive B
         result = {}
-
-        if base_format not in {"acts", "acts_svd", "cov", "cov_svd", "eigenvalues"}:
-            raise ValueError(f"Unknown format: {format!r}")
 
         for hook_name in self.hook_names():
             entry = self._entry(hook_name)

@@ -49,7 +49,7 @@ from utils.model_registry import (
     delete_cached_revision,
 )
 from utils.hooks import HookCollector, setup_identity_head, restore_head
-from utils.accessor import DataAccessor
+from utils.accessor import DataAccessor, parse_format
 from utils.data_utils import (
     get_loader,
     load_and_cache_texts,
@@ -291,11 +291,12 @@ def _collect_for_checkpoint(
     """
     collects_mlp = cfg.collect_A or cfg.collect_G
     needs_grad = cfg.collect_G or cfg.collect_final_grads
-    storage_mode = "acts" if cfg.storage_format.split("+")[0] == "acts" else "cov"
+    storage_base, storage_flags = parse_format(cfg.storage_format)
+    storage_mode = "acts" if storage_base == "acts" else "cov"
     # +b implies +m (means needed for B derivation)
-    if "+b" in cfg.storage_format and "+m" not in cfg.storage_format:
+    if "b" in storage_flags and "m" not in storage_flags:
         print("  NOTE: +b implies +m — storing means for B derivation")
-    collect_means = "+m" in cfg.storage_format or "+b" in cfg.storage_format
+    collect_means = "m" in storage_flags or "b" in storage_flags
 
     all_factors = {}
 
@@ -484,7 +485,7 @@ def _reconstruct_raw_factors(existing_data: dict) -> dict:
     Reads __format__ from the file itself to determine how to decode it.
     """
     fmt_str = existing_data.get("__format__", "cov")
-    base_format = fmt_str.split("+")[0]
+    base_format, _ = parse_format(fmt_str)
     raw = {}
     for hook_name, entry in existing_data.items():
         if hook_name.startswith("__"):
