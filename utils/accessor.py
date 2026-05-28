@@ -32,6 +32,9 @@ CLI usage:
     python -m utils.accessor convert --input <path> --to cov_svd
     python -m utils.accessor project --input <path> --onto both
     python -m utils.accessor set-filter --input <path> --token-selection last
+
+Convert/project/set-filter mutate in place by default; pass --output-dir <DIR>
+(or --output <FILE> for single-file input) to redirect.
 """
 
 import os

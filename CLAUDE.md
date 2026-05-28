@@ -102,7 +102,7 @@ Configs use a `CollectConfig` dataclass (in `scripts/collect.py`). Key fields:
 - **cov**: Raw d×d covariance Σ xxT + count n. Divide by n for E[xxT].
 - **cov_svd**: Eigendecomposition of E[xxT]: eigvecs V(d,k) + eigvals λ(k). Default for multi-checkpoint. Recoverable: V @ diag(λ) @ V.T
 - **eigenvalues**: Just eigenvalues λ(k). Cheapest.
-- **+m modifier** (e.g. `cov_svd+m`): also store activation means, needed for B derivation when layer has bias.
+- **Modifiers**: `+b` derives and stores B (auto-includes means for bias correction); `+m` stores activation means; `-b`/`-m` opt out. Default: keep whatever was already stored. `eigenvalues` base always includes B + means (they're tiny and can't be recovered from eigvals alone).
 - Full name aliases: `activations`=`acts`, `covariance`=`cov`.
 - Cross-basis projections stored additionally alongside primary format.
 
@@ -124,6 +124,7 @@ python -m utils.accessor project --input <dir_or_file> --onto both   # same-laye
 python -m utils.accessor project --input <dir_or_file> --onto-file ref.pt  # cross-checkpoint
 python -m utils.accessor set-filter --input <dir> --token-selection last
 ```
+In-place by default. Add `--output-dir <DIR>` (or `--output <FILE>` for a single file) to write results elsewhere; `slurm/storage.sh` accepts the same `--output-dir` and mirrors per-model subdirs under it.
 
 ### DataAccessor
 ```python
