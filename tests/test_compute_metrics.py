@@ -19,6 +19,27 @@ def test_spectral_metrics_alpha(make_powerlaw_eigvals):
     assert abs(out["alpha"] - 1.5) < 0.2
 
 
+# Real collection produces fp64 eigenvalues (fp64 cov -> eigvalsh). The metric
+# functions must accept them; the fp32 fixtures above never exercised this.
+def test_metrics_accept_fp64_eigvals():
+    ev = torch.tensor([10.0 / (i + 1) for i in range(200)], dtype=torch.float64)
+    o32 = spectral_metrics(ev.float())
+    o64 = spectral_metrics(ev)  # crashed in stringer (float vs double) before the fix
+    assert abs(o32["alpha"] - o64["alpha"]) < 1e-3
+    assert kfac_metrics(ev, ev * 2.0)["trace"] > 0
+    d = 200  # >100 so the alpha-fit window (trange 11..100) is valid
+    vec = torch.eye(d, dtype=torch.float64)
+    gen = generalized_eigenvalues_GB(ev, vec, ev, vec)  # fp64 -> spectral_metrics
+    assert spectral_metrics(gen)["d"] == d
+
+
+# Per-OV-head slices are d_head-sized (32 < 100); the alpha-fit window must not
+# index past the spectrum.
+def test_spectral_metrics_small_dim():
+    out = spectral_metrics(torch.tensor([10.0 / (i + 1) for i in range(32)], dtype=torch.float64))
+    assert out["d"] == 32 and out["rankme"] > 0  # crashed (index OOB) before the fix
+
+
 def test_spectral_metrics_trace():
     # Need >= 100 eigenvalues for stringer_get_powerlaw (uses trange 11-100)
     eigvals = torch.tensor([10.0 / (i + 1) for i in range(200)])

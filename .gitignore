@@ -7,11 +7,7 @@ __pycache__
 cache
 *reference*
 local_experiments
-data/inferences
-data/results
-data/mixes
-data/filtered_texts
-data/weight_cache
+data/*
 slurm/logs/*
 analysis/transcriptions
 analysis/figures

@@ -181,12 +181,6 @@ class CollectConfig:
     # --- Cache ---
     keep_cached: bool = False  # don't delete HF checkpoints after processing
 
-    # Extra gitignore-style globs (state-dict-key patterns) added on top of the
-    # per-family DEFAULT_WEIGHT_CACHE_GLOBS in utils.model_registry. A leading '!'
-    # negates a default include. Persisted to .pt metadata so downstream
-    # compute_metrics / convert see the same set.
-    weight_cache_patterns: "list | None" = None
-
     # --- Continue ---
     continue_from: "str | None" = None  # path to a previous run's output_dir to continue from
 
@@ -857,8 +851,7 @@ def main(cfg: CollectConfig):
             if cfg.packing == "packed" and packed_ids is not None:
                 save_n_chunks = n_chunks_done + len(packed_ids)
             acc = DataAccessor(factors, model=model, model_config=model_config,
-                               model_name=step_model, revision=revision,
-                               weight_cache_patterns=cfg.weight_cache_patterns)
+                               model_name=step_model, revision=revision)
             acc.save(out_path, format=cfg.storage_format,
                      cross_basis_refs=cfg.cross_basis_refs,
                      storage_dtype=cfg.storage_dtype, token_filter=token_filter,

@@ -1,10 +1,10 @@
 """Model-specific logic for checkpoint discovery, model loading, tokenizer setup, and HF cache management."""
-import fnmatch
 import os
-import re
 from dataclasses import dataclass
 from types import SimpleNamespace
 import numpy as np
+
+from utils.hook_names import mlp_proj, ov_head
 
 
 @dataclass
@@ -271,15 +271,15 @@ def _hook_to_sd_keys(config, hook_name):
     Per-OV-head hooks at the same block index all map to the same o_proj prefix —
     one weight matrix serves all H heads.
     """
-    m = re.match(r"blk(\d+)\.(up|down|gate)$", hook_name)
-    if m:
-        idx, proj = m.group(1), m.group(2)
+    mp = mlp_proj(hook_name)
+    if mp:
+        idx, proj = mp
         if config.family == "pythia":
             return f"gpt_neox.layers.{idx}.mlp.{_PYTHIA_PROJ_MAP[proj]}"
         return f"model.layers.{idx}.mlp.{_OLMO_PROJ_MAP[proj]}"
-    m = re.match(r"blk(\d+)\.attn\.head\d+$", hook_name)
-    if m:
-        idx = m.group(1)
+    oh = ov_head(hook_name)
+    if oh:
+        idx = oh[0]
         if config.family == "pythia":
             return f"gpt_neox.layers.{idx}.attention.dense"
         return f"model.layers.{idx}.self_attn.o_proj"
@@ -365,17 +365,6 @@ class _RMSNorm:
 
 # --- Weight cache (single-tensor on-disk cache for derived factors) ---
 
-# State-dict-key globs (per family) selecting tensors worth caching to
-# data/weight_cache/. Defaults cover attention output projections, used by
-# .O derivation for per-OV-head entries. Override per-collection via
-# CollectConfig.weight_cache_patterns (gitignore semantics: entries appended,
-# leading '!' negates).
-DEFAULT_WEIGHT_CACHE_GLOBS = {
-    "pythia": ["*.attention.dense.weight"],
-    "olmo":   ["*.self_attn.o_proj.weight"],
-}
-
-
 def _weight_cache_root():
     return os.environ.get("WEIGHT_CACHE_DIR", os.path.join("data", "weight_cache"))
 
@@ -388,30 +377,6 @@ def _cache_path(family, hf_repo, revision, sd_key):
     return os.path.join(
         _weight_cache_root(), family, _model_short_name(hf_repo), str(revision), f"{sd_key}.pt"
     )
-
-
-def resolve_cache_globs(family, extras=()):
-    """Return effective glob rules as a list of (pattern, include_bool).
-
-    Defaults (per family) are include-only. Extras are appended; a leading '!'
-    makes the entry an exclusion. Match-time uses last-match-wins, so an extra
-    '!*.attention.dense.weight' can disable a default include.
-    """
-    rules = [(p, True) for p in DEFAULT_WEIGHT_CACHE_GLOBS.get(family, [])]
-    for p in extras or []:
-        if p.startswith("!"):
-            rules.append((p[1:], False))
-        else:
-            rules.append((p, True))
-    return rules
-
-
-def _should_cache(sd_key, rules):
-    decision = False
-    for pat, include in rules:
-        if fnmatch.fnmatchcase(sd_key, pat):
-            decision = include
-    return decision
 
 
 def _cache_lookup(family, hf_repo, revision, sd_key):
@@ -460,22 +425,15 @@ def _get_cached_snap_dir(hf_repo, revision):
     return None
 
 
-def load_selective_weights(config, hf_repo, revision, hook_names, need_norm=False, extra_cache_globs=()):
+def load_selective_weights(config, hf_repo, revision, hook_names, need_norm=False):
     """Load only the weight tensors needed for specific hooks from safetensors.
-
-    Per-key on-disk cache at data/weight_cache/<family>/<short>/<revision>/<sd_key>.pt
-    is consulted first for any key matching the effective cache globs
-    (family defaults + extras, gitignore semantics). Cache misses fall through
-    to the safetensors path and are written back. snapshot_download is skipped
-    entirely when all requested keys come from the cache.
 
     Returns dict:
         {hook_name: SimpleNamespace(weight=Tensor, bias=Tensor|None), ...}
         If need_norm: "__norm__" key with a callable norm (supports .float()).
     """
-    # Collect all state dict keys we need
     all_keys = set()
-    hook_prefixes = {}  # hook_name -> sd_prefix
+    hook_prefixes = {}
     for h in hook_names:
         prefix = _hook_to_sd_keys(config, h)
         if prefix:
@@ -489,25 +447,21 @@ def load_selective_weights(config, hf_repo, revision, hook_names, need_norm=Fals
         all_keys.add(f"{norm_prefix}.weight")
         all_keys.add(f"{norm_prefix}.bias")
 
-    # Cache-first
-    rules = resolve_cache_globs(config.family, extra_cache_globs)
     tensors = {}
     missing = set()
     for k in all_keys:
-        if _should_cache(k, rules):
-            t = _cache_lookup(config.family, hf_repo, revision, k)
-            if t is not None:
-                tensors[k] = t
-                continue
-        missing.add(k)
+        t = _cache_lookup(config.family, hf_repo, revision, k)
+        if t is not None:
+            tensors[k] = t
+        else:
+            missing.add(k)
 
     if missing:
         from huggingface_hub import snapshot_download
         snap_dir = snapshot_download(hf_repo, revision=revision)
         loaded = _load_selective_tensors(snap_dir, missing)
         for k, t in loaded.items():
-            if _should_cache(k, rules):
-                _cache_store(config.family, hf_repo, revision, k, t)
+            _cache_store(config.family, hf_repo, revision, k, t)
         tensors.update(loaded)
 
     result = {}

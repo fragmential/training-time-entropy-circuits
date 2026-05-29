@@ -44,6 +44,8 @@ import torch
 
 from typing import Optional
 
+from utils import hook_names as hn
+
 
 # ===========================================================================
 # Section 2: Eigendecomp helpers (from powerlaw.py)
@@ -126,6 +128,8 @@ def get_eigenspectrum(acts=None, cov=None, mu=None, topk=None):
 # ===========================================================================
 
 _FACTOR_KEYS = ("A", "G")
+_DERIVED = ("B", "O")
+_DERIVED_FLAG = {"B": "b", "O": "o"}
 
 _FORMAT_ALIASES = {
     "activations": "acts",
@@ -256,7 +260,7 @@ class DataAccessor:
     """
 
     def __init__(self, data, model=None, model_config=None, model_name=None, revision=None,
-                 abort_on_model_load: bool = False, weight_cache_patterns=None):
+                 abort_on_model_load: bool = False):
         if model_name is not None and "/" not in model_name:
             model_name = _resolve_hf_name(model_name)
         self.path = data if isinstance(data, str) else None
@@ -270,16 +274,9 @@ class DataAccessor:
         self._hf_repo = data.get("__hf_model__")  # actual repo (may differ from model_name for early-training)
         self._selective_weights: Optional[dict] = None
         self.abort_on_model_load = abort_on_model_load
-        # gitignore-style extra globs for the weight cache; persisted in .pt metadata
-        # so downstream (compute_metrics, convert) sees the same set.
-        self._weight_cache_patterns = (
-            weight_cache_patterns if weight_cache_patterns is not None
-            else data.get("__weight_cache_patterns__")
-        )
         self._layer_cache: dict = {}
         self._eigh_cache: dict = {}  # (hook, factor) -> (centered_eigvals, uncentered_eigvals, eigvecs_or_None, centered_eigvecs_or_None)
-        self._B_cov_cache: dict = {}  # hook -> derived B covariance (shared by .cov and .eigvecs)
-        self._O_cov_cache: dict = {}  # hook -> derived O covariance (per-OV-head post-W_o cov)
+        self._derived_cov_cache: dict = {}  # (hook, factor) -> derived covariance (B or O)
 
     def _ensure_weights(self):
         """Ensure model weights are available (full model or selective loading)."""
@@ -293,8 +290,8 @@ class DataAccessor:
                 + (f"@{self._revision}" if self._revision else "")
             )
         # Selective loading: only the layers we actually need
-        mlp_hooks = [k for k in self.data if re.match(r"blk\d+\.(up|down|gate)$", k)]
-        ov_hooks = [k for k in self.data if re.match(r"blk\d+\.attn\.head\d+$", k)]
+        mlp_hooks = [k for k in self.data if hn.mlp_proj(k)]
+        ov_hooks = [k for k in self.data if hn.ov_head(k)]
         need_norm = "before_final_norm" in self.data and "after_final_norm" not in self.data
         if not mlp_hooks and not ov_hooks and not need_norm:
             return False
@@ -304,7 +301,6 @@ class DataAccessor:
         hf_repo = self._hf_repo or self.model_config.hf_repo
         self._selective_weights = load_selective_weights(
             self.model_config, hf_repo, self._revision, mlp_hooks + ov_hooks, need_norm,
-            extra_cache_globs=self._weight_cache_patterns or (),
         )
         return True
 
@@ -344,12 +340,9 @@ class DataAccessor:
                     out_entry[k] = v
 
             factors = list(_FACTOR_KEYS)
-            store_b = self._should_store_b(entry, base_format, plus, minus)
-            if store_b:
-                factors.append("B")
-            store_o = self._should_store_o(entry, base_format, plus, minus)
-            if store_o:
-                factors.append("O")
+            for factor in _DERIVED:
+                if self._should_store_derived(entry, factor, base_format, plus, minus):
+                    factors.append(factor)
 
             for factor in factors:
                 store_mean = self._should_store_mean(hook_name, factor, base_format, plus, minus)
@@ -359,21 +352,21 @@ class DataAccessor:
 
         return result
 
-    def _should_store_b(self, entry, base_format, plus, minus) -> bool:
-        if "b" in minus:
+    def _should_store_derived(self, entry, factor, base_format, plus, minus) -> bool:
+        flag = _DERIVED_FLAG[factor]
+        if flag in minus:
             return False
-        if "b" in plus or base_format == "eigenvalues":
+        if flag in plus or base_format == "eigenvalues":
             return True
-        return any(k in entry for k in ("B", "B_eigvals", "B_eigvecs"))
+        return any(k in entry for k in (factor, f"{factor}_eigvals", f"{factor}_eigvecs"))
+
+    def _should_store_b(self, entry, base_format, plus, minus) -> bool:
+        return self._should_store_derived(entry, "B", base_format, plus, minus)
 
     def _should_store_o(self, entry, base_format, plus, minus) -> bool:
         if base_format in ("acts", "acts_svd"):
-            return False  # O is a derived covariance; raw-acts formats can't hold it
-        if "o" in minus:
             return False
-        if "o" in plus or base_format == "eigenvalues":
-            return True
-        return any(k in entry for k in ("O", "O_eigvals", "O_eigvecs"))
+        return self._should_store_derived(entry, "O", base_format, plus, minus)
 
     def _should_store_mean(self, hook_name, factor, base_format, plus, minus) -> bool:
         if "m" in minus:
@@ -467,8 +460,6 @@ class DataAccessor:
             result["__hf_model__"] = self._hf_repo or self._model_name
         if self._revision:
             result["__revision__"] = self._revision
-        if self._weight_cache_patterns:
-            result["__weight_cache_patterns__"] = list(self._weight_cache_patterns)
         result["__format__"] = format
 
     def _stamp_from_path(self, output_path: str) -> None:
@@ -654,23 +645,24 @@ class DataAccessor:
         """
         if hook_name in self._layer_cache:
             return self._layer_cache[hook_name]
-        m_mlp = re.match(r"blk(\d+)\.(up|down|gate)$", hook_name)
-        m_ov = re.match(r"blk(\d+)\.attn\.head\d+$", hook_name)
-        if not m_mlp and not m_ov:
+        mlp = hn.mlp_proj(hook_name)
+        ov = hn.ov_head(hook_name)
+        if not mlp and not ov:
             return None
         if not self._ensure_weights():
             return None
         if self.model is not None:
             from utils.model_registry import get_mlp_projections, get_attention_output_proj
-            if m_mlp:
-                block_idx = int(m_mlp.group(1))
+            if mlp:
+                block_idx = mlp[0]
                 for name, layer in get_mlp_projections(self.model, self.model_config, block_idx):
                     self._layer_cache[name] = layer
             else:
-                block_idx = int(m_ov.group(1))
+                block_idx = ov[0]
                 _, o_proj, _, _ = get_attention_output_proj(self.model, self.model_config, block_idx)
                 for k in self.data:
-                    if re.match(rf"blk{block_idx}\.attn\.head\d+$", k):
+                    kv = hn.ov_head(k)
+                    if kv and kv[0] == block_idx:
                         self._layer_cache[k] = o_proj
         elif self._selective_weights is not None and hook_name in self._selective_weights:
             self._layer_cache[hook_name] = self._selective_weights[hook_name]
@@ -685,16 +677,7 @@ class DataAccessor:
 
         Stores (centered_eigvals, uncentered_eigvals, eigvecs_or_None, centered_eigvecs_or_None) in _eigh_cache.
         If need_vecs and we only have eigvals cached, recomputes with full eigh.
-
-        Derived-factor branches (B, O) route to their dedicated paths so the
-        derivation actually fires — _ensure_eigh's generic path would otherwise
-        cache (None, None, None, None) for derivable-but-unstored factors,
-        short-circuiting subsequent _<X>_eigenvalues calls.
         """
-        if factor == "B":
-            return self._ensure_B_eigh(hook_name, need_vecs=need_vecs, need_centered_vecs=need_centered_vecs)
-        if factor == "O":
-            return self._ensure_O_eigh(hook_name, need_vecs=need_vecs, need_centered_vecs=need_centered_vecs)
         if need_centered_vecs:
             need_vecs = True
         # blkN.layer virtual hook: redirect A->up.A, G->down.G
@@ -771,6 +754,28 @@ class DataAccessor:
                     centered = c.cpu() if c is not None else None
                     uncentered = u.cpu()
 
+        # Derived factor (B / O): build cov via the linear map, then same eigh logic
+        if (uncentered is None or (need_vecs and eigvecs is None)) and factor in _DERIVED:
+            cov = self._derived_cov(hook_name, factor)
+            if cov is not None:
+                cov = cov.to(dev)
+                mu_t = self._derived_mean(hook_name, factor)
+                mu = mu_t.to(device=dev, dtype=cov.dtype) if mu_t is not None else None
+                if need_vecs:
+                    uncentered, eigvecs = _eigh_full(cov)
+                    uncentered, eigvecs = uncentered.cpu(), eigvecs.cpu()
+                    if mu is not None:
+                        if need_centered_vecs:
+                            c_vals, c_vecs = _eigh_full(cov - torch.outer(mu, mu))
+                            centered = c_vals.cpu()
+                            centered_eigvecs = c_vecs.cpu()
+                        else:
+                            centered = eigvalsh_descending(cov - torch.outer(mu, mu)).cpu()
+                else:
+                    c, u = get_eigenspectrum(cov=cov, mu=mu)
+                    centered = c.cpu() if c is not None else None
+                    uncentered = u.cpu()
+
         # Fallback: raw activations
         if uncentered is None or (need_vecs and eigvecs is None):
             acts = self._activations(hook_name, factor)
@@ -790,47 +795,24 @@ class DataAccessor:
             self._eigh_cache[orig_key] = self._eigh_cache[cache_key]
 
     def _eigenvalues(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
-        if factor == "B":
-            return self._B_eigenvalues(hook_name)
-        if factor == "O":
-            return self._O_eigenvalues(hook_name)
         self._ensure_eigh(hook_name, factor)
         return self._eigh_cache[(hook_name, factor)][1]
 
     def _eigenvalues_centered(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
-        if factor == "B":
-            self._ensure_B_eigh(hook_name)
-            return self._eigh_cache[(hook_name, "B")][0]
-        if factor == "O":
-            self._ensure_O_eigh(hook_name)
-            return self._eigh_cache[(hook_name, "O")][0]
         self._ensure_eigh(hook_name, factor)
         return self._eigh_cache[(hook_name, factor)][0]
 
     def _eigenvectors(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
-        if factor == "B":
-            return self._B_eigenvectors(hook_name)
-        if factor == "O":
-            return self._O_eigenvectors(hook_name)
         self._ensure_eigh(hook_name, factor, need_vecs=True)
         return self._eigh_cache[(hook_name, factor)][2]
 
     def _eigenvectors_centered(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
-        if factor == "B":
-            self._ensure_B_eigh(hook_name, need_centered_vecs=True)
-            return self._eigh_cache[(hook_name, "B")][3]
-        if factor == "O":
-            self._ensure_O_eigh(hook_name, need_centered_vecs=True)
-            return self._eigh_cache[(hook_name, "O")][3]
         self._ensure_eigh(hook_name, factor, need_centered_vecs=True)
         return self._eigh_cache[(hook_name, factor)][3]
 
     def _covariance(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
-        if factor == "B":
-            c = self._B_covariance(hook_name)
-            return c.cpu() if c is not None else None
-        if factor == "O":
-            c = self._O_covariance(hook_name)
+        if factor in _DERIVED:
+            c = self._derived_cov(hook_name, factor)
             return c.cpu() if c is not None else None
 
         entry = self._entry(hook_name)
@@ -877,6 +859,14 @@ class DataAccessor:
                 V = entry[f"{factor}_V"].float()
                 raw = (U * S.unsqueeze(0)) @ V.T
 
+        if raw is None and factor in _DERIVED:
+            deriv = self._derivation(hook_name, factor)
+            A_acts = self._activations(hook_name, "A", apply_mask=apply_mask)
+            if deriv is not None and A_acts is not None:
+                W, b = deriv
+                out = A_acts.to(W.device).float() @ W.T
+                return (out + b if b is not None else out).cpu()
+
         if raw is None:
             return None
 
@@ -887,10 +877,8 @@ class DataAccessor:
         return raw
 
     def _mean(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
-        if factor == "B":
-            return self._B_mean(hook_name)
-        if factor == "O":
-            return self._O_mean(hook_name)
+        if factor in _DERIVED:
+            return self._derived_mean(hook_name, factor)
         entry = self._entry(hook_name)
         stored = entry.get(f"{factor}_mean")
         if stored is not None:
@@ -916,41 +904,59 @@ class DataAccessor:
         return None
 
     # ------------------------------------------------------------------
-    # Internal: B derivation
+    # Internal: generic linear derivation (B = MLP out, O = per-OV-head contrib)
     # ------------------------------------------------------------------
 
-    def _B_covariance(self, hook_name: str) -> Optional[torch.Tensor]:
-        if hook_name in self._B_cov_cache:
-            return self._B_cov_cache[hook_name]
-        entry = self._entry(hook_name)
+    def _derivation(self, hook_name: str, factor: str):
+        """(W, bias) on the compute device for derived `factor`, or None."""
         dev = "cuda" if torch.cuda.is_available() else "cpu"
-
-        if "B" in entry:
-            t = entry["B"]
-            if t.dim() == 2 and t.shape[0] == t.shape[1]:
-                n = entry.get("n_B", entry.get("n", 1))
-                return (t.to(dev).float() / n)
-
-        if "B_eigvecs" in entry and "B_eigvals" in entry:
-            return reconstruct_cov(entry["B_eigvals"].to(dev).float(), entry["B_eigvecs"].to(dev).float())
-
-        # Derivation is MLP-only (W @ A @ W.T with W = full projection weight).
-        # OV-head keys have their own derived factor (O) via _O_covariance.
-        if not re.match(r"blk\d+\.(up|down|gate)$", hook_name):
-            return None
-
-        A_cov = self._covariance(hook_name, "A")
-        if A_cov is None:
+        if factor == "B":
+            if not hn.mlp_proj(hook_name):
+                return None
+            layer = self._get_layer(hook_name)
+            if layer is None:
+                return None
+            W = layer.weight.detach().to(dev).float()
+            b = layer.bias.detach().to(dev).float() if layer.bias is not None else None
+            return W, b
+        ov = hn.ov_head(hook_name)
+        if not ov:
             return None
         layer = self._get_layer(hook_name)
         if layer is None:
             return None
+        A = self._covariance(hook_name, "A")
+        mu = self._mean(hook_name, "A")
+        ref = A if A is not None else mu
+        if ref is None:
+            return None
+        d_head = ref.shape[0]
+        h = ov[1]
+        W = layer.weight.detach().to(dev).float()[:, h * d_head:(h + 1) * d_head]
+        return W, None
 
-        W = layer.weight.detach().to(dev).float()
-        b = layer.bias.detach().to(dev).float() if layer.bias is not None else None
-        A_cov = A_cov.to(dev)
+    def _derived_cov(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
+        cache_key = (hook_name, factor)
+        if cache_key in self._derived_cov_cache:
+            return self._derived_cov_cache[cache_key]
+        entry = self._entry(hook_name)
+        dev = "cuda" if torch.cuda.is_available() else "cpu"
 
-        B_cov = W @ A_cov @ W.T
+        if factor in entry:
+            t = entry[factor]
+            if t.dim() == 2 and t.shape[0] == t.shape[1]:
+                n = entry.get(f"n_{factor}", entry.get("n", 1))
+                return t.to(dev).float() / n
+        if f"{factor}_eigvecs" in entry and f"{factor}_eigvals" in entry:
+            return reconstruct_cov(entry[f"{factor}_eigvals"].to(dev).float(),
+                                   entry[f"{factor}_eigvecs"].to(dev).float())
+
+        deriv = self._derivation(hook_name, factor)
+        A_cov = self._covariance(hook_name, "A")
+        if deriv is None or A_cov is None:
+            return None
+        W, b = deriv
+        cov = W @ A_cov.to(dev) @ W.T
         if b is not None:
             mu = self._mean(hook_name, "A")
             if mu is None:
@@ -959,189 +965,27 @@ class DataAccessor:
                     f"Re-collect with a storage format that includes the '+m' modifier (e.g. cov_svd+m)."
                 )
             Wmu = W @ mu.to(device=dev, dtype=W.dtype)
-            B_cov = B_cov + torch.outer(Wmu, b) + torch.outer(b, Wmu) + torch.outer(b, b)
+            cov = cov + torch.outer(Wmu, b) + torch.outer(b, Wmu) + torch.outer(b, b)
+        self._derived_cov_cache[cache_key] = cov
+        return cov
 
-        self._B_cov_cache[hook_name] = B_cov
-        return B_cov
-
-    def _ensure_B_eigh(self, hook_name: str, need_vecs: bool = False, need_centered_vecs: bool = False):
-        """Ensure B eigendecomposition is cached."""
-        if need_centered_vecs:
-            need_vecs = True
-        cache_key = (hook_name, "B")
-        cached = self._eigh_cache.get(cache_key)
-        if cached is not None:
-            if not need_vecs or cached[2] is not None:
-                if not need_centered_vecs or cached[3] is not None:
-                    return
-
+    def _derived_mean(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
         entry = self._entry(hook_name)
-        # Stored (sufficient if we have eigvecs or don't need them)
-        if "B_eigvals" in entry and (not need_vecs or "B_eigvecs" in entry):
-            self._eigh_cache[cache_key] = (None, entry["B_eigvals"], entry.get("B_eigvecs"), None)
-            return
-
-        # Compute from B covariance
-        B_cov = self._B_covariance(hook_name)
-        if B_cov is None:
-            self._eigh_cache[cache_key] = (None, None, None, None)
-            return
-
-        centered, centered_eigvecs = None, None
-        B_mean = self._B_mean(hook_name)
-        if B_mean is not None:
-            B_centered_cov = B_cov - torch.outer(B_mean.to(B_cov.device).float(), B_mean.to(B_cov.device).float())
-            if need_centered_vecs:
-                centered, centered_eigvecs = eigh_descending(B_centered_cov)
-                centered, centered_eigvecs = centered.cpu(), centered_eigvecs.cpu()
-            else:
-                centered = eigvalsh_descending(B_centered_cov).cpu()
-
-        if need_vecs:
-            vals, vecs = eigh_descending(B_cov)
-            self._eigh_cache[cache_key] = (
-                centered, vals.cpu(), vecs.cpu(), centered_eigvecs)
-        else:
-            eigvals = eigvalsh_descending(B_cov)
-            self._eigh_cache[cache_key] = (
-                centered, eigvals.cpu(), None, centered_eigvecs)
-
-    def _B_eigenvalues(self, hook_name: str) -> Optional[torch.Tensor]:
-        self._ensure_B_eigh(hook_name)
-        return self._eigh_cache[(hook_name, "B")][1]
-
-    def _B_eigenvectors(self, hook_name: str) -> Optional[torch.Tensor]:
-        self._ensure_B_eigh(hook_name, need_vecs=True)
-        return self._eigh_cache[(hook_name, "B")][2]
-
-    def _B_mean(self, hook_name: str) -> Optional[torch.Tensor]:
-        entry = self._entry(hook_name)
-        if "B_mean" in entry:
-            return entry["B_mean"]
-        if not re.match(r"blk\d+\.(up|down|gate)$", hook_name):
-            return None
+        if f"{factor}_mean" in entry:
+            return entry[f"{factor}_mean"]
         mu = self._mean(hook_name, "A")
-        if mu is None:
+        deriv = self._derivation(hook_name, factor)
+        if mu is None or deriv is None:
             return None
-        layer = self._get_layer(hook_name)
-        if layer is None:
-            return None
-        W = layer.weight.detach().float()
-        b = layer.bias.detach().float() if layer.bias is not None else None
-        B_mean = W @ mu.to(W.device).float()
+        W, b = deriv
+        m = W @ mu.to(device=W.device, dtype=W.dtype)
         if b is not None:
-            B_mean = B_mean + b
-        return B_mean.cpu()
+            m = m + b
+        return m.cpu()
 
-    # ------------------------------------------------------------------
-    # Internal: O derivation (per-OV-head post-W_o = W_h @ A @ W_h.T)
-    # ------------------------------------------------------------------
-
-    def _O_covariance(self, hook_name: str) -> Optional[torch.Tensor]:
-        if hook_name in self._O_cov_cache:
-            return self._O_cov_cache[hook_name]
-        entry = self._entry(hook_name)
-        dev = "cuda" if torch.cuda.is_available() else "cpu"
-
-        if "O" in entry:
-            t = entry["O"]
-            if t.dim() == 2 and t.shape[0] == t.shape[1]:
-                n = entry.get("n_O", entry.get("n", 1))
-                return (t.to(dev).float() / n)
-
-        if "O_eigvecs" in entry and "O_eigvals" in entry:
-            return reconstruct_cov(entry["O_eigvals"].to(dev).float(), entry["O_eigvecs"].to(dev).float())
-
-        m = re.match(r"blk(\d+)\.attn\.head(\d+)$", hook_name)
-        if not m:
-            return None
-        head_idx = int(m.group(2))
-
-        A_cov = self._covariance(hook_name, "A")
-        if A_cov is None:
-            return None
-        layer = self._get_layer(hook_name)
-        if layer is None:
-            return None
-
-        W = layer.weight.detach().to(dev).float()
-        d_head = A_cov.shape[0]
-        W_h = W[:, head_idx * d_head : (head_idx + 1) * d_head]
-        A_cov = A_cov.to(dev)
-        O_cov = W_h @ A_cov @ W_h.T
-        self._O_cov_cache[hook_name] = O_cov
-        return O_cov
-
-    def _ensure_O_eigh(self, hook_name: str, need_vecs: bool = False, need_centered_vecs: bool = False):
-        """Ensure O eigendecomposition is cached."""
-        if need_centered_vecs:
-            need_vecs = True
-        cache_key = (hook_name, "O")
-        cached = self._eigh_cache.get(cache_key)
-        if cached is not None:
-            if not need_vecs or cached[2] is not None:
-                if not need_centered_vecs or cached[3] is not None:
-                    return
-
-        entry = self._entry(hook_name)
-        if "O_eigvals" in entry and (not need_vecs or "O_eigvecs" in entry):
-            self._eigh_cache[cache_key] = (
-                entry.get("O_eigvals_centered"),
-                entry["O_eigvals"],
-                entry.get("O_eigvecs"),
-                None,
-            )
-            return
-
-        O_cov = self._O_covariance(hook_name)
-        if O_cov is None:
-            self._eigh_cache[cache_key] = (None, None, None, None)
-            return
-
-        centered, centered_eigvecs = None, None
-        O_mean = self._O_mean(hook_name)
-        if O_mean is not None:
-            mu = O_mean.to(O_cov.device).float()
-            O_centered_cov = O_cov - torch.outer(mu, mu)
-            if need_centered_vecs:
-                centered, centered_eigvecs = eigh_descending(O_centered_cov)
-                centered, centered_eigvecs = centered.cpu(), centered_eigvecs.cpu()
-            else:
-                centered = eigvalsh_descending(O_centered_cov).cpu()
-
-        if need_vecs:
-            vals, vecs = eigh_descending(O_cov)
-            self._eigh_cache[cache_key] = (centered, vals.cpu(), vecs.cpu(), centered_eigvecs)
-        else:
-            eigvals = eigvalsh_descending(O_cov)
-            self._eigh_cache[cache_key] = (centered, eigvals.cpu(), None, centered_eigvecs)
-
-    def _O_eigenvalues(self, hook_name: str) -> Optional[torch.Tensor]:
-        self._ensure_O_eigh(hook_name)
-        return self._eigh_cache[(hook_name, "O")][1]
-
-    def _O_eigenvectors(self, hook_name: str) -> Optional[torch.Tensor]:
-        self._ensure_O_eigh(hook_name, need_vecs=True)
-        return self._eigh_cache[(hook_name, "O")][2]
-
-    def _O_mean(self, hook_name: str) -> Optional[torch.Tensor]:
-        entry = self._entry(hook_name)
-        if "O_mean" in entry:
-            return entry["O_mean"]
-        mu_A = self._mean(hook_name, "A")
-        if mu_A is None:
-            return None
-        m = re.match(r"blk(\d+)\.attn\.head(\d+)$", hook_name)
-        if not m:
-            return None
-        head_idx = int(m.group(2))
-        layer = self._get_layer(hook_name)
-        if layer is None:
-            return None
-        W = layer.weight.detach().float()
-        d_head = mu_A.shape[0]
-        W_h = W[:, head_idx * d_head : (head_idx + 1) * d_head]
-        return (W_h @ mu_A.to(W_h.device).float()).cpu()
+    def _B_covariance(self, hook_name): return self._derived_cov(hook_name, "B")
+    def _O_covariance(self, hook_name): return self._derived_cov(hook_name, "O")
+    def _O_mean(self, hook_name): return self._derived_mean(hook_name, "O")
 
     # ------------------------------------------------------------------
     # Internal: norm derivation (before_final_norm -> after_final_norm)
@@ -1204,20 +1048,17 @@ class DataAccessor:
             entry = self._entry(hook_name)
             has_A_cov = ("A" in entry or "A_eigvecs" in entry)
             has_model = self.model is not None or self._model_name is not None
-            if "B_eigvals" in entry or "B" in entry or "B_eigvecs" in entry:
-                factors.append("B")
-            elif re.match(r"blk\d+\.(up|down|gate)$", hook_name):
-                if has_A_cov and has_model:
-                    factors.append("B")
-            if "O_eigvals" in entry or "O" in entry or "O_eigvecs" in entry:
-                factors.append("O")
-            elif _OV_HEAD_RE.match(hook_name) and has_A_cov and has_model:
-                factors.append("O")
+            derivable = {"B": hn.mlp_proj(hook_name), "O": hn.ov_head(hook_name)}
+            for f in _DERIVED:
+                if any(k in entry for k in (f, f"{f}_eigvals", f"{f}_eigvecs")):
+                    factors.append(f)
+                elif derivable[f] and has_A_cov and has_model:
+                    factors.append(f)
             if factors:
                 result[hook_name] = factors
 
         # Virtual hook: blkN.layer -- whole-layer K-FAC (up.A x down.G)
-        for blk in {h.split(".")[0] for h in result if re.match(r"blk\d+\.", h)}:
+        for blk in {h.split(".")[0] for h in result if hn.block_idx(h) is not None}:
             if "A" in result.get(f"{blk}.up", []) and "G" in result.get(f"{blk}.down", []):
                 result[f"{blk}.layer"] = ["A", "G"]
 
@@ -1230,6 +1071,24 @@ class DataAccessor:
                 result["after_final_norm"] = ["A"]
 
         return result
+
+    def needs_model_weights(self) -> bool:
+        """True if any derivation (B/O/post-norm) is required but not already stored."""
+        for hook_name, entry in self.data.items():
+            if not isinstance(entry, dict):
+                continue
+            has_A = "A" in entry or "A_eigvecs" in entry
+            if hn.mlp_proj(hook_name) and has_A and not any(
+                    k in entry for k in ("B", "B_eigvals", "B_eigvecs")):
+                return True
+            if hn.ov_head(hook_name) and has_A and not any(
+                    k in entry for k in ("O", "O_eigvals", "O_eigvecs")):
+                return True
+        if "before_final_norm" in self.data and "after_final_norm" not in self.data:
+            t = self.data.get("before_final_norm", {}).get("A")
+            if isinstance(t, torch.Tensor) and t.dim() == 2 and t.shape[0] != t.shape[1]:
+                return True
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -1319,19 +1178,12 @@ class HeadsView:
 _RESIDUAL_HOOK_PREFIXES = ("after_final_norm", "before_final_norm")
 
 # Block-boundary hook names: blk{i}.attn.in/out/raw_out, blk{i}.mlp.in/out.
-# These also live on the residual stream (no weight matrix to derive B from).
 _BLOCK_BOUNDARY_RE = re.compile(r"blk\d+\.(attn|mlp)\.")
 
-# Per-OV-head hook names: blk{i}.attn.head{h}. These have a weight (o_proj column
-# block), so a forward "output" cov (O = W_h @ A @ W_h.T) is derivable and is
-# what HookView.B resolves to.
+# Per-OV-head hook names: blk{i}.attn.head{h}; derive O = W_h @ A @ W_h.T.
 _OV_HEAD_RE = re.compile(r"blk\d+\.attn\.head\d+$")
 
-# Read-only aliases for layouts where two semantic names point to the same stored
-# tensor (Pythia parallel-residual block boundaries). Each entry: (regex on the
-# requested name, format string for the canonical stored name; the regex's groups
-# are passed positionally). Only consulted by _canonical_key when the requested
-# key isn't already stored.
+# Read-only aliases for Pythia parallel-residual block boundaries.
 _KEY_ALIASES = [
     (re.compile(r"blk(\d+)\.mlp\.in$"),      "blk{0}.attn.in"),
     (re.compile(r"blk(\d+)\.attn\.raw_out$"), "blk{0}.attn.out"),
@@ -1346,12 +1198,55 @@ def _is_residual_hook(hook_name: str) -> bool:
     if any(hook_name.startswith(p) for p in _RESIDUAL_HOOK_PREFIXES):
         return True
     if _OV_HEAD_RE.match(hook_name):
-        return False  # OV-head has a weight (o_proj column block) → derive O instead
+        return False
     return bool(_BLOCK_BOUNDARY_RE.match(hook_name))
 
 
+# Role node (kind, role, quantity) -> legacy on-disk storage key. None = not wired
+# yet (the slot still exists on the node and reads as absent). These letters are a
+# storage detail to be renamed to role.quantity later; this table is the only place
+# they map to roles.
+#   mlp:      in.acts=A   out.acts=B(derive W@in)   out.grads=G
+#   residual/boundary: value.acts=A   value.grads=G
+#   ov_head:  slice.acts=A   slice.grads=G   contrib.acts=O(derive W_h@slice)
+_NODE_FACTOR = {
+    ("mlp", "in", "acts"): "A",
+    ("mlp", "out", "acts"): "B",
+    ("mlp", "out", "grads"): "G",
+    ("residual", "value", "acts"): "A",
+    ("residual", "value", "grads"): "G",
+    ("boundary", "value", "acts"): "A",
+    ("boundary", "value", "grads"): "G",
+    ("ov_head", "slice", "acts"): "A",
+    ("ov_head", "slice", "grads"): "G",
+    ("ov_head", "contrib", "acts"): "O",
+}
+
+
+def _node_factor(hook_name, role, quantity):
+    return _NODE_FACTOR.get((hn.classify(hook_name), role, quantity))
+
+
+class NodeView:
+    """A representation node. Always exposes .acts and .grads; either reads as
+    absent (None quantities) when no data is wired for that slot."""
+
+    def __init__(self, hook_name, role, acc):
+        self._hook = hook_name
+        self._role = role
+        self._acc = acc
+
+    @property
+    def acts(self):
+        return FactorView(self._hook, _node_factor(self._hook, self._role, "acts"), self._acc)
+
+    @property
+    def grads(self):
+        return FactorView(self._hook, _node_factor(self._hook, self._role, "grads"), self._acc)
+
+
 class HookView:
-    """acc[hook_name] -> HookView. Access factors via .A / .B / .G."""
+    """acc[hook_name] -> HookView. Factors via .A/.B/.O/.G; nodes via .in_/.out/.value/.slice/.contrib."""
 
     def __init__(self, hook_name: str, acc: DataAccessor):
         self._hook = hook_name
@@ -1366,24 +1261,20 @@ class HookView:
 
     @property
     def B(self) -> "FactorView":
-        # Per-OV-head: B resolves to O (the post-W_o residual contribution cov).
         if _is_ov_head(self._hook):
             return self._factor("O")
-        # Residual hooks have no weight matrix -- A and B are the same activations.
         if _is_residual_hook(self._hook):
             return self._factor("A")
         return self._factor("B")
 
     @property
     def O(self) -> "FactorView":
-        """Per-OV-head post-W_o contribution cov, derived from A + o_proj weight."""
         return self._factor("O")
 
     @property
     def G(self) -> "FactorView":
         return self._factor("G")
 
-    # Aliases
     @property
     def input(self) -> "FactorView":
         return self.A
@@ -1395,6 +1286,31 @@ class HookView:
     @property
     def grad(self) -> "FactorView":
         return self.G
+
+    def _node(self, kinds, role) -> "NodeView":
+        if hn.classify(self._hook) not in kinds:
+            raise AttributeError(f"{role!r} role does not apply to {self._hook!r}")
+        return NodeView(self._hook, role, self._acc)
+
+    @property
+    def in_(self) -> "NodeView":
+        return self._node(("mlp",), "in")
+
+    @property
+    def out(self) -> "NodeView":
+        return self._node(("mlp",), "out")
+
+    @property
+    def value(self) -> "NodeView":
+        return self._node(("residual", "boundary"), "value")
+
+    @property
+    def slice(self) -> "NodeView":
+        return self._node(("ov_head",), "slice")
+
+    @property
+    def contrib(self) -> "NodeView":
+        return self._node(("ov_head",), "contrib")
 
     def __repr__(self):
         return f"HookView({self._hook!r})"

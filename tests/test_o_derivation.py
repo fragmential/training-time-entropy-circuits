@@ -217,23 +217,3 @@ def test_saved_O_eigvals_match_in_memory(tmp_path):
         assert torch.allclose(stored, in_mem[h].float(), atol=1e-4)
 
 
-# ---------------------------------------------------------------------------
-# Metadata persistence for weight_cache_patterns
-# ---------------------------------------------------------------------------
-
-def test_weight_cache_patterns_persisted(tmp_path):
-    acc, *_ = _make_per_head_acc(include_mean=True)
-    acc._weight_cache_patterns = ["*.mlp.down_proj.weight", "!*.attention.dense.weight"]
-    out = tmp_path / "p.pt"
-    acc.save(str(out), format="cov")
-    reloaded = torch.load(str(out), map_location="cpu", weights_only=False)
-    assert reloaded.get("__weight_cache_patterns__") == [
-        "*.mlp.down_proj.weight",
-        "!*.attention.dense.weight",
-    ]
-    # Re-opening surfaces them
-    acc2 = DataAccessor(reloaded)
-    assert acc2._weight_cache_patterns == [
-        "*.mlp.down_proj.weight",
-        "!*.attention.dense.weight",
-    ]
