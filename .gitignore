@@ -11,6 +11,7 @@ data/inferences
 data/results
 data/mixes
 data/filtered_texts
+data/weight_cache
 slurm/logs/*
 analysis/transcriptions
 analysis/figures

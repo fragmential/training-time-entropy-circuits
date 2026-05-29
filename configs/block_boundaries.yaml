@@ -1,0 +1,39 @@
+output_dir: data/inferences/block_boundaries
+# Per-block residual-stream boundary collection via pattern-based hook list.
+# Pythia produces 3 keys per block (attn.in, attn.out, mlp.out); the OLMo-2
+# post-norm layout adds attn.raw_out and mlp.in. Pythia's mlp.in / attn.raw_out
+# patterns are silent no-ops (the family-aware resolver doesn't expose those
+# names on Pythia); DataAccessor resolves them via alias on read.
+
+model_name:
+  - "EleutherAI/pythia-14m"
+  - "EleutherAI/pythia-70m"
+  - "EleutherAI/pythia-160m"
+  - "EleutherAI/pythia-410m"
+  - "allenai/OLMo-2-0425-1B"
+
+batch_size: [1024, 1024, 1024, 1024, 460]
+
+packed_data_path:
+  allenai/*: data/mixes/olmo_mix_6M_512.pt
+  EleutherAI/*: data/mixes/pile_6M_512.pt
+
+dataset_name: native
+max_tokens: 4_000_000
+seq_len: 512
+min_length: 32
+max_checkpoints: 10
+packing: packed
+token_selection: all
+
+hooks:
+  - blk*.attn.in
+  - blk*.attn.out
+  - blk*.attn.raw_out   # OLMo-2 only
+  - blk*.mlp.in         # OLMo-2 only
+  - blk*.mlp.out
+# grad_hooks omitted — forward only
+
+max_layers_per_pass: 0           # all blocks in a single forward pass (residual hooks are free)
+storage_format: eigenvalues+m
+compute_metrics: false

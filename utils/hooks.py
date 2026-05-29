@@ -168,6 +168,9 @@ class HookCollector:
     def _fwd_post(self, module, inp, output):
         if not self.active:
             return
+        # Attention modules return (attn_output, attn_weights[, ...]); unwrap to the first tensor.
+        if isinstance(output, tuple):
+            output = output[0]
         out = output.detach()
         self.accumulate(self._apply_mask(out))
 
@@ -274,3 +277,105 @@ def restore_head(model, original, attr_name):
         model.set_output_embeddings(original)
     else:
         setattr(model, attr_name, original)
+
+
+# ---------------------------------------------------------------------------
+# Per-OV-head dispatcher
+# ---------------------------------------------------------------------------
+
+class MultiHeadOVDispatcher:
+    """Collect per-OV-head pre-W_o slices from an attention output projection.
+
+    The attention output projection (o_proj / dense) is always called on a
+    tensor of shape (B, T, num_heads * head_dim) regardless of the attention
+    backend (eager / SDPA / flash). Per head h, the pre-W_o slice is:
+        attended_h = o_proj_input[..., h*d_head:(h+1)*d_head]  # (B, T, d_head)
+    and the residual contribution `contrib_h = attended_h @ W_h.T` can be
+    recovered losslessly from this slice plus the corresponding column block
+    of o_proj.weight (handled at metric time by DataAccessor's .O derivation).
+    Storing the pre-W_o slice is `H²×` smaller than storing the (d_model, d_model)
+    covariance of contrib_h.
+
+    Owns one forward pre-hook on o_proj (plus an optional backward hook) and
+    dispatches per-head slices into per-head d_head-sized HookCollectors keyed by
+    f"blk{block_idx}.attn.head{h}" for each h in `selected_heads`.
+
+    Note on G: the gradient pulled back through W_h is
+        grad_input_h = grad_output @ W_h ∈ R^d_head
+    per head. The backward hook on o_proj receives a single d_model-sized
+    grad_output and projects it through the corresponding W_h slice for each
+    selected head.
+    """
+
+    def __init__(
+        self,
+        o_proj_module: nn.Module,
+        num_heads: int,
+        head_dim: int,
+        block_idx: int,
+        selected_heads=None,
+        mode: str = "cov",
+        collect_means: bool = False,
+        collect_grad: bool = False,
+        accumulation_dtype: str = "fp64",
+        activation_dtype: str = "fp32",
+        token_selection: str = None,
+    ):
+        self.num_heads = num_heads
+        self.head_dim = head_dim
+        self.block_idx = block_idx
+        self.collect_grad = collect_grad
+        if selected_heads is None:
+            selected_heads = list(range(num_heads))
+        self.selected_heads = list(selected_heads)
+        self._weight_ref = o_proj_module.weight  # (d_model, num_heads * head_dim)
+        self.collectors = {
+            h: HookCollector(
+                module=None, mode=mode,
+                collect_means=collect_means,
+                collect_grad=collect_grad,
+                accumulation_dtype=accumulation_dtype,
+                activation_dtype=activation_dtype,
+                token_selection=token_selection,
+            )
+            for h in self.selected_heads
+        }
+        self._handles = [o_proj_module.register_forward_pre_hook(self._fwd_pre)]
+        if collect_grad:
+            self._handles.append(o_proj_module.register_full_backward_hook(self._bwd))
+
+    def set_token_mask(self, mask):
+        for c in self.collectors.values():
+            c.set_token_mask(mask)
+
+    def _fwd_pre(self, module, inp):
+        x = inp[0].detach()  # (B, T, num_heads * head_dim)
+        d = self.head_dim
+        for h, collector in self.collectors.items():
+            attended_h = x[..., h * d : (h + 1) * d]  # (B, T, d_head)
+            collector.accumulate(collector._apply_mask(attended_h))
+
+    def _bwd(self, module, grad_input, grad_output):
+        go = grad_output[0] if grad_output else None
+        if go is None:
+            return
+        W = self._weight_ref.detach()  # (d_model, num_heads * d_head)
+        g = go.detach()  # (B, T, d_model)
+        d = self.head_dim
+        for h, collector in self.collectors.items():
+            W_h = W[:, h * d : (h + 1) * d]  # (d_model, d_head)
+            g_h = g @ W_h  # (B, T, d_head)
+            collector.accumulate_grad(collector._apply_mask(g_h))
+
+    def factors(self) -> dict:
+        return {
+            f"blk{self.block_idx}.attn.head{h}": c.factors()
+            for h, c in self.collectors.items()
+        }
+
+    def close(self):
+        for h in self._handles:
+            h.remove()
+        self._handles.clear()
+        for c in self.collectors.values():
+            c.close()

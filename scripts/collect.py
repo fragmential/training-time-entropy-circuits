@@ -1,13 +1,38 @@
 #!/usr/bin/env python
 """Unified collection pipeline for activations and covariance factors.
 
-Collects data at arbitrary hook points (residual stream, MLP projections) using
-a single configurable script driven by YAML config files. All hook points go
-through the same HookCollector and produce the same output format.
+Collects data at arbitrary hook points using a single configurable script
+driven by YAML config files. All hook points go through the same HookCollector
+and produce the same output format.
 
-Supports:
-    - Residual stream: identity_head, after_final_norm, before_final_norm, per-block hooks
-    - MLP projections: A (input covariance), G (gradient covariance)
+Hook selection is pattern-based via the `hooks` config field (and the
+orthogonal `grad_all` bool). Patterns use fnmatch wildcards. Append `+G` to
+any entry to also collect G at those matches (triggers backward pass).
+
+Examples of valid patterns:
+    blk*.up                   # all MLP up-projections, A only
+    blk*.down+G               # MLP down-proj, A + G (K-FAC)
+    blk*.attn.in              # residual into each block's attention sub-block
+    blk*.attn.out             # attention's contribution to residual
+    blk*.mlp.out              # MLP's contribution
+    blk*.attn.raw_out         # (OLMo-2 only) pre-post-norm attention output
+    blk*.mlp.in               # (OLMo-2 only) residual into MLP sub-block
+    blk*.attn.head*           # per-OV-head contributions, all heads
+    blk3.attn.head0           # just one head
+    after_final_norm          # post-final-norm residual
+    before_final_norm         # pre-final-norm residual
+    identity_head             # fast post-norm via head replacement
+
+Set `grad_all: true` as a shortcut to grad on every matched hook without
+writing "+G" on each entry. Pattern matches are family-aware: patterns
+matching only Pythia-absent names (e.g. blk*.gate, blk*.mlp.in) are silent
+no-ops on Pythia.
+
+Legacy boolean flags (collect_A / collect_G / collect_final_acts /
+collect_final_grads / residual_hook_point) are still accepted; when `hooks`
+is unset they desugar to the equivalent pattern list with inline `+G`.
+
+Other features:
     - Data modes: packed (no padding) or padded
     - Token selection: all tokens or last token (per sequence or per document)
     - Storage formats: acts, cov, cov_svd, eigenvalues (with +m modifier)
@@ -41,14 +66,12 @@ from utils.model_registry import (
     get_checkpoint_schedule,
     load_model,
     load_tokenizer,
-    get_mlp_projections,
     get_num_layers,
-    get_final_layernorm,
-    get_block_layernorms,
     prefetch_checkpoint,
     delete_cached_revision,
 )
-from utils.hooks import HookCollector, setup_identity_head, restore_head
+from utils.hooks import HookCollector, MultiHeadOVDispatcher, setup_identity_head, restore_head
+from utils.hook_specs import resolve as resolve_hook_specs, synthesize_from_flags
 from utils.accessor import DataAccessor, parse_format, parse_format_spec
 from utils.data_utils import (
     get_loader,
@@ -58,9 +81,6 @@ from utils.data_utils import (
     compute_labels,
 )
 
-
-# Maps identity_head hook_point to its semantic storage key (it gives post-norm activations)
-_RESIDUAL_HOOK_STORAGE_KEY = {"identity_head": "after_final_norm"}
 
 # Fields that may vary per model in a sweep (accept scalar, list, or dict).
 VECTORIZABLE_FIELDS = {"batch_size", "max_checkpoints", "max_layers_per_pass", "dataset_name",
@@ -115,6 +135,23 @@ class CollectConfig:
     packed_data_path: "str | dict[str, str] | list[str] | None" = None  # path to pre-built .pt of shape (n_chunks, seq_len)
 
     # --- What to collect ---
+    # Preferred: glob patterns matching hook names directly. Append "+G" to any
+    # entry to also collect G at the matching hooks (triggers backward pass).
+    # Examples:
+    #   - "blk*.up"            (MLP up-proj A, forward only)
+    #   - "blk*.down+G"        (MLP down-proj A AND G — K-FAC)
+    #   - "blk*.attn.in"       (residual into each block's attn sub-block)
+    #   - "blk*.attn.head*"    (per-OV-head contributions, all heads, all blocks)
+    #   - "blk3.attn.head0"    (just one head)
+    #   - "after_final_norm"   (residual after final norm)
+    #   - "identity_head"      (fast post-norm via head replacement)
+    # Set `grad_all: true` as a shortcut to enable G on every matched hook
+    # without writing "+G" on each entry.
+    hooks: "list | None" = None
+    grad_all: bool = False
+
+    # Legacy convenience flags (kept for backward compat with existing configs).
+    # If `hooks` is None they are desugared into a `hooks` list; otherwise ignored.
     collect_final_acts: bool = True
     collect_final_grads: bool = False
     residual_hook_point: str = "identity_head"  # or "both" for before + after final norm
@@ -144,6 +181,12 @@ class CollectConfig:
     # --- Cache ---
     keep_cached: bool = False  # don't delete HF checkpoints after processing
 
+    # Extra gitignore-style globs (state-dict-key patterns) added on top of the
+    # per-family DEFAULT_WEIGHT_CACHE_GLOBS in utils.model_registry. A leading '!'
+    # negates a default include. Persisted to .pt metadata so downstream
+    # compute_metrics / convert see the same set.
+    weight_cache_patterns: "list | None" = None
+
     # --- Continue ---
     continue_from: "str | None" = None  # path to a previous run's output_dir to continue from
 
@@ -153,8 +196,24 @@ class CollectConfig:
     # --- Sweep ---
     array_id: "int | None" = None
 
+    def _resolved_hooks(self) -> tuple:
+        """Return (hooks_list, grad_all) — explicit values or desugared from legacy flags.
+
+        `hooks_list` may contain entries with trailing '+G' (per-pattern grad markers);
+        `grad_all` (bool) is an orthogonal shortcut meaning "G on every matched hook".
+        """
+        if self.hooks is not None:
+            return list(self.hooks), bool(self.grad_all)
+        return synthesize_from_flags(
+            collect_A=self.collect_A,
+            collect_G=self.collect_G,
+            collect_final_acts=self.collect_final_acts,
+            collect_final_grads=self.collect_final_grads,
+            residual_hook_point=self.residual_hook_point,
+        ), False
+
     def __post_init__(self):
-        _LIST_FIELDS = {"target_layers", "boundary_token_ids", "cross_basis_refs", "checkpoints"}
+        _LIST_FIELDS = {"target_layers", "boundary_token_ids", "cross_basis_refs", "checkpoints", "hooks"}
 
         if not isinstance(self.model_name, list):
             # Single model — validate no vectorized fields are lists
@@ -252,33 +311,40 @@ def _batch_iterator(texts, tokenizer, packed_ids, packing, batch_size, max_lengt
             )
 
 
-def _resolve_residual_hook(model, model_config, hook_point):
-    """Resolve a residual hook_point to (module, capture_type) or None for identity_head.
-
-    Returns:
-        (module, "input"|"output") or (None, None) for identity_head.
-    """
-    if hook_point == "identity_head":
-        return None, None
-    elif hook_point == "after_final_norm":
-        return get_final_layernorm(model, model_config), "output"
-    elif hook_point == "before_final_norm":
-        return get_final_layernorm(model, model_config), "input"
-    elif hook_point.startswith("post_attn_"):
-        block_idx = int(hook_point.split("_")[-1])
-        _, post_attn_ln = get_block_layernorms(model, model_config, block_idx)
-        return post_attn_ln, "input"
-    elif hook_point.startswith("pre_block_"):
-        block_idx = int(hook_point.split("_")[-1])
-        input_ln, _ = get_block_layernorms(model, model_config, block_idx)
-        return input_ln, "input"
-    else:
-        raise ValueError(f"Unknown hook_point: {hook_point}")
-
-
 # ---------------------------------------------------------------------------
 # Unified collection
 # ---------------------------------------------------------------------------
+
+def _build_single(spec, storage_mode, collect_means, cfg):
+    """Build a HookCollector from a SingleHookSpec."""
+    return HookCollector(
+        module=spec.module,
+        capture=spec.capture or "output",
+        mode=storage_mode,
+        collect_grad=spec.collect_grad,
+        collect_means=collect_means,
+        accumulation_dtype=cfg.accumulation_dtype,
+        activation_dtype=cfg.activation_dtype,
+        grad_capture=spec.grad_capture,
+        token_selection=spec.token_selection,
+    )
+
+
+def _build_ov(spec, storage_mode, collect_means, cfg):
+    return MultiHeadOVDispatcher(
+        o_proj_module=spec.o_proj,
+        num_heads=spec.num_heads,
+        head_dim=spec.head_dim,
+        block_idx=spec.block_idx,
+        selected_heads=spec.selected_heads,
+        mode=storage_mode,
+        collect_means=collect_means,
+        collect_grad=spec.collect_grad,
+        accumulation_dtype=cfg.accumulation_dtype,
+        activation_dtype=cfg.activation_dtype,
+        token_selection=spec.token_selection,
+    )
+
 
 def _collect_for_checkpoint(
     model, model_config, cfg, texts, tokenizer, packed_ids,
@@ -286,14 +352,13 @@ def _collect_for_checkpoint(
 ):
     """Collect all requested data for one checkpoint.
 
-    Sets up HookCollectors for both residual and MLP hook points, runs
-    forward (+ optional backward) passes, returns a single factors dict.
+    Resolves cfg.hooks (or the legacy-flag-derived equivalent) into concrete
+    SingleHookSpec / OVHeadSpec lists, registers HookCollectors per block-group
+    pass, runs forward (+ optional backward), returns the merged factors dict.
     """
-    collects_mlp = cfg.collect_A or cfg.collect_G
-    needs_grad = cfg.collect_G or cfg.collect_final_grads
+    hook_patterns, grad_all = cfg._resolved_hooks()
     storage_base, storage_flags, storage_drop_flags = parse_format_spec(cfg.storage_format)
     storage_mode = "acts" if storage_base == "acts" else "cov"
-    # +b implies +m (means needed for B derivation)
     if "b" in storage_flags and "m" not in storage_flags and "m" not in storage_drop_flags:
         print("  NOTE: +b implies +m — storing means for B derivation")
     collect_means = (
@@ -301,95 +366,86 @@ def _collect_for_checkpoint(
         and ("m" in storage_flags or "b" in storage_flags or storage_base in ("cov_svd", "eigenvalues"))
     )
 
-    all_factors = {}
+    # Resolve patterns once against the model's hook universe
+    single_specs, ov_specs, _candidates = resolve_hook_specs(
+        model, model_config, target_layers,
+        hook_patterns, grad_all,
+        default_token_selection=cfg.token_selection,
+    )
 
-    # Determine which block groups to iterate over
-    if collects_mlp:
+    needs_grad = any(s.collect_grad for s in single_specs) or any(o.collect_grad for o in ov_specs)
+    has_per_block_work = any(not s.is_global for s in single_specs) or bool(ov_specs)
+    has_identity_head = any(s.module is None and s.name == "identity_head" for s in single_specs)
+    if has_identity_head and any(s.name == "identity_head" and s.collect_grad for s in single_specs):
+        raise ValueError(
+            "identity_head cannot collect gradients (it replaces the head with Identity); "
+            "use after_final_norm / before_final_norm patterns for grad-aware residual collection"
+        )
+
+    global_specs = [s for s in single_specs if s.is_global]
+    perblk_specs = [s for s in single_specs if not s.is_global]
+    perblk_by_block: dict = {}
+    for s in perblk_specs:
+        b = int(s.name.split(".")[0][3:])
+        perblk_by_block.setdefault(b, []).append(s)
+    ov_by_block = {o.block_idx: o for o in ov_specs}
+
+    all_factors: dict = {}
+
+    # Block-group iteration only matters when there is per-block work
+    if has_per_block_work:
         if cfg.max_layers_per_pass == 0:
             block_groups = [target_layers]
         else:
             block_groups = list(chunked(target_layers, cfg.max_layers_per_pass))
     else:
-        # No covariance — single pass with no block groups
         block_groups = [None]
 
-    # --- Set up residual collector(s) once (shared across block groups) ---
+    # --- Global collectors (residual / final-norm) — registered once ---
     identity_head_state = None
-    residual_collector = None  # first collector (used for identity_head feeding)
-    residual_collectors = {}  # rkey -> HookCollector
-    residual_keys = set()
-    if cfg.residual_hook_point == "both":
-        hook_points = ["before_final_norm", "after_final_norm"]
-    else:
-        hook_points = [cfg.residual_hook_point]
-
-    if cfg.collect_final_acts or cfg.collect_final_grads:
-        for hp in hook_points:
-            rkey = _RESIDUAL_HOOK_STORAGE_KEY.get(hp, hp)
-            module, capture = _resolve_residual_hook(model, model_config, hp)
-            if module is not None:
-                rc = HookCollector(
-                    module, capture=capture, mode=storage_mode,
-                    collect_means=collect_means,
-                    collect_grad=cfg.collect_final_grads,
-                    accumulation_dtype=cfg.accumulation_dtype,
-                    activation_dtype=cfg.activation_dtype,
-                    token_selection=cfg.token_selection,
-                )
-                residual_collectors[rkey] = rc
-                residual_keys.add(rkey)
-                if residual_collector is None:
-                    residual_collector = rc
-            else:
-                if cfg.collect_final_grads:
-                    raise ValueError(
-                        "collect_final_grads requires a hook-based residual_hook_point "
-                        "(e.g. after_final_norm or before_final_norm), not identity_head"
-                    )
-                identity_head_state = setup_identity_head(model)
-                rc = HookCollector(
-                    module=None, mode=storage_mode,
-                    collect_means=collect_means,
-                    accumulation_dtype=cfg.accumulation_dtype,
-                    activation_dtype=cfg.activation_dtype,
-                    token_selection=cfg.token_selection,
-                )
-                residual_collectors[rkey] = rc
-                residual_keys.add(rkey)
-                if residual_collector is None:
-                    residual_collector = rc
+    residual_collector_for_id = None
+    global_collectors: dict = {}
+    for spec in global_specs:
+        if spec.module is None:
+            # identity_head: swap output head for nn.Identity() and manually feed
+            identity_head_state = setup_identity_head(model)
+            rc = HookCollector(
+                module=None, mode=storage_mode,
+                collect_means=collect_means,
+                accumulation_dtype=cfg.accumulation_dtype,
+                activation_dtype=cfg.activation_dtype,
+                token_selection=spec.token_selection,
+            )
+            global_collectors["after_final_norm"] = rc  # identity_head stores under this canonical key
+            if residual_collector_for_id is None:
+                residual_collector_for_id = rc
+        else:
+            global_collectors[spec.name] = _build_single(spec, storage_mode, collect_means, cfg)
 
     for blk_group in block_groups:
-        # Include residual collectors only in the first pass
         first_pass = blk_group is block_groups[0] if block_groups else True
-        collectors = dict(residual_collectors) if first_pass else {}
+        # Globals are registered once (first pass); per-block specs each pass
+        collectors = dict(global_collectors) if first_pass else {}
+        ov_dispatchers = []
 
-        # --- Set up MLP collectors ---
         if blk_group is not None:
-            # Freeze everything, then unfreeze only target layers if we need gradients
             for p in model.parameters():
                 p.requires_grad_(False)
-
             for b in blk_group:
-                for name, layer in get_mlp_projections(model, model_config, b):
-                    if needs_grad:
-                        layer.weight.requires_grad_(True)
-                    collectors[name] = HookCollector(
-                        layer, capture="input", mode=storage_mode,
-                        collect_grad=cfg.collect_G,
-                        collect_means=collect_means,
-                        accumulation_dtype=cfg.accumulation_dtype,
-                        activation_dtype=cfg.activation_dtype,
-                        grad_capture="output",
-                        token_selection="all",
-                    )
-
-        # Token selection stored per-collector (residual=cfg.token_selection, MLP="all")
+                for spec in perblk_by_block.get(b, []):
+                    if spec.collect_grad and spec.module is not None and hasattr(spec.module, "weight"):
+                        spec.module.weight.requires_grad_(True)
+                    collectors[spec.name] = _build_single(spec, storage_mode, collect_means, cfg)
+                ov = ov_by_block.get(b)
+                if ov is not None:
+                    if ov.collect_grad and hasattr(ov.o_proj, "weight"):
+                        ov.o_proj.weight.requires_grad_(True)
+                    ov_dispatchers.append(_build_ov(ov, storage_mode, collect_means, cfg))
 
         # --- Run batches ---
         parts = []
-        if first_pass and residual_keys:
-            parts.append("+".join(sorted(residual_keys)))
+        if first_pass and global_collectors:
+            parts.append("+".join(sorted(global_collectors)))
         if blk_group is not None:
             parts.append(f"blk {blk_group}")
         desc = " + ".join(parts) if parts else "Collecting"
@@ -413,8 +469,8 @@ def _collect_for_checkpoint(
         for input_ids, attention_mask in tqdm(batches, **bar_kwargs):
             # Compute one mask per unique token_selection, cache by selection value
             _mask_cache = {}
-            for collector in collectors.values():
-                sel = collector.token_selection or cfg.token_selection
+
+            def _mask_for(sel):
                 if sel not in _mask_cache:
                     _mask_cache[sel] = compute_token_mask(
                         input_ids, attention_mask=attention_mask,
@@ -422,7 +478,12 @@ def _collect_for_checkpoint(
                         skip_positions=cfg.skip_positions,
                         boundary_token_ids=boundary_token_ids,
                     )
-                collector.set_token_mask(_mask_cache[sel])
+                return _mask_cache[sel]
+
+            for collector in collectors.values():
+                collector.set_token_mask(_mask_for(collector.token_selection or cfg.token_selection))
+            for disp in ov_dispatchers:
+                disp.set_token_mask(_mask_for(cfg.token_selection))
 
             # Forward (+ backward) pass
             fwd_kwargs = {"input_ids": input_ids}
@@ -455,23 +516,28 @@ def _collect_for_checkpoint(
                 with torch.no_grad():
                     outputs = model(**fwd_kwargs)
 
-                # For identity_head: manually feed model output to collector
-                if identity_head_state is not None and residual_collector is not None:
-                    acts_masked = residual_collector._apply_mask(outputs.logits.detach())
-                    residual_collector.accumulate(acts_masked)
+                # For identity_head: manually feed model output to the collector
+                if identity_head_state is not None and residual_collector_for_id is not None:
+                    acts_masked = residual_collector_for_id._apply_mask(outputs.logits.detach())
+                    residual_collector_for_id.accumulate(acts_masked)
 
         # --- Collect factors and clean up ---
         for cname, collector in collectors.items():
             if cname not in all_factors:
                 all_factors[cname] = collector.factors()
             collector.close()
+        for disp in ov_dispatchers:
+            for cname, fac in disp.factors().items():
+                if cname not in all_factors:
+                    all_factors[cname] = fac
+            disp.close()
 
         # Restore identity head after first pass
         if first_pass and identity_head_state is not None:
             restore_head(model, *identity_head_state)
             identity_head_state = None
 
-        del collectors
+        del collectors, ov_dispatchers
         torch.cuda.empty_cache()
 
     return all_factors
@@ -594,18 +660,10 @@ def main(cfg: CollectConfig):
 
     print(f"Model: {model_name} (family={model_config.family}, dataset={cfg.dataset_name})")
 
-    needs_covariance = cfg.collect_A or cfg.collect_G
-
     # Output directory — always include model subfolder
     output_dir = cfg.output_dir
     if output_dir is None:
-        has_final = cfg.collect_final_acts or cfg.collect_final_grads
-        if has_final and not needs_covariance:
-            output_dir = os.path.join("activations", cfg.dataset_name, short_name)
-        elif needs_covariance and not has_final:
-            output_dir = os.path.join("covariance_factors", cfg.dataset_name, short_name)
-        else:
-            output_dir = os.path.join("collected", cfg.dataset_name, short_name)
+        output_dir = os.path.join("collected", cfg.dataset_name, short_name)
     else:
         output_dir = os.path.join(output_dir, short_name)
     os.makedirs(output_dir, exist_ok=True)
@@ -725,8 +783,9 @@ def main(cfg: CollectConfig):
     executor = ThreadPoolExecutor(max_workers=1)
 
     print(f"Processing {len(to_process)} remaining checkpoints...")
-    print(f"  collect_final_acts={cfg.collect_final_acts}, collect_final_grads={cfg.collect_final_grads} ({cfg.residual_hook_point})")
-    print(f"  collect_A={cfg.collect_A}, collect_G={cfg.collect_G}")
+    _hooks, _grad_all = cfg._resolved_hooks()
+    print(f"  hooks    = {_hooks}")
+    print(f"  grad_all = {_grad_all}")
     print(f"  packing={cfg.packing}, token_selection={cfg.token_selection}")
     print(f"  sample_labels={cfg.sample_labels}, label_samples={cfg.label_samples}, seed={cfg.seed}")
     print(f"  storage_format={cfg.storage_format}")
@@ -751,7 +810,8 @@ def main(cfg: CollectConfig):
             model = load_model(model_config, step_model, revision)
             model.to(device)
 
-            if cfg.collect_G or cfg.collect_final_grads:
+            _hooks_list, _grad_all = cfg._resolved_hooks()
+            if _grad_all or any(h.endswith("+G") for h in _hooks_list):
                 model.gradient_checkpointing_enable()
                 model.enable_input_require_grads()
                 model.config.use_cache = False
@@ -797,7 +857,8 @@ def main(cfg: CollectConfig):
             if cfg.packing == "packed" and packed_ids is not None:
                 save_n_chunks = n_chunks_done + len(packed_ids)
             acc = DataAccessor(factors, model=model, model_config=model_config,
-                               model_name=step_model, revision=revision)
+                               model_name=step_model, revision=revision,
+                               weight_cache_patterns=cfg.weight_cache_patterns)
             acc.save(out_path, format=cfg.storage_format,
                      cross_basis_refs=cfg.cross_basis_refs,
                      storage_dtype=cfg.storage_dtype, token_filter=token_filter,

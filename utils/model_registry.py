@@ -1,4 +1,5 @@
 """Model-specific logic for checkpoint discovery, model loading, tokenizer setup, and HF cache management."""
+import fnmatch
 import os
 import re
 from dataclasses import dataclass
@@ -197,18 +198,64 @@ def get_final_layernorm(model, config):
     return model.model.norm
 
 
-def get_block_layernorms(model, config, block_idx):
-    """Return (input_layernorm, post_attention_layernorm) for a block.
+def get_block_boundary_hooks(model, config, block_idx):
+    """Return [(name, module, capture), ...] for block-boundary residual-stream hooks.
 
-    These allow hooking:
-    - Before attention: input_layernorm (pre-hook = block input residual)
-    - Between attention and MLP: post_attention_layernorm (pre-hook = post-attention residual)
+    Captures the residual flowing into each sub-block (.in) and the contribution
+    being added back (.out). For OLMo-2, also exposes .raw_out — the raw attention
+    output before the post-norm — which has no Pythia analogue (Pythia has no
+    post-norm on attention output).
+
+    Pythia (GPTNeoX, parallel-residual pre-norm):
+        attn_out = attention(input_layernorm(x))
+        mlp_out  = mlp(post_attention_layernorm(x))       # same input as attention branch
+        x_next   = x + attn_out + mlp_out
+      → only 3 distinct tensors: x (= attn.in == mlp.in), attn_out, mlp_out
+
+    OLMo-2 (post-norm sequential, no input_layernorm):
+        attn_raw  = self_attn(x)
+        attn_out  = post_attention_layernorm(attn_raw)
+        x_mid     = x + attn_out
+        mlp_raw   = mlp(x_mid)
+        mlp_out   = post_feedforward_layernorm(mlp_raw)
+        x_next    = x_mid + mlp_out
+      → 5 distinct tensors.
     """
+    prefix = f"blk{block_idx}"
     if config.family == "pythia":
         block = model.gpt_neox.layers[block_idx]
-        return block.input_layernorm, block.post_attention_layernorm
+        return [
+            (f"{prefix}.attn.in",  block.input_layernorm, "input"),
+            (f"{prefix}.attn.out", block.attention,       "output"),
+            (f"{prefix}.mlp.out",  block.mlp,             "output"),
+        ]
     block = model.model.layers[block_idx]
-    return block.input_layernorm, block.post_attention_layernorm
+    return [
+        (f"{prefix}.attn.in",      block.self_attn,                  "input"),
+        (f"{prefix}.attn.raw_out", block.self_attn,                  "output"),
+        (f"{prefix}.attn.out",     block.post_attention_layernorm,   "output"),
+        (f"{prefix}.mlp.in",       block.mlp,                        "input"),
+        (f"{prefix}.mlp.out",      block.post_feedforward_layernorm, "output"),
+    ]
+
+
+def get_attention_output_proj(model, config, block_idx):
+    """Return (name, o_proj_module, num_heads, head_dim) for the attention output projection.
+
+    Used by per-OV-head decomposition: o_proj is always invoked on a
+    (B, T, num_attention_heads * head_dim) tensor regardless of the attention
+    backend (eager / SDPA / flash), so per-head contributions can be recovered
+    by slicing the input + the corresponding columns of o_proj.weight.
+
+    For OLMo-2 with GQA, num_heads is the query-head count — V is already
+    repeated via repeat_kv before reaching o_proj.
+    """
+    cfg = model.config
+    n_heads = cfg.num_attention_heads
+    head_dim = getattr(cfg, "head_dim", None) or cfg.hidden_size // n_heads
+    if config.family == "pythia":
+        return "dense", model.gpt_neox.layers[block_idx].attention.dense, n_heads, head_dim
+    return "o_proj", model.model.layers[block_idx].self_attn.o_proj, n_heads, head_dim
 
 
 # --- Selective weight loading ---
@@ -219,14 +266,24 @@ _OLMO_PROJ_MAP = {"gate": "gate_proj", "up": "up_proj", "down": "down_proj"}
 
 
 def _hook_to_sd_keys(config, hook_name):
-    """Map hook name (e.g. 'blk14.up') to state dict key prefix."""
-    m = re.match(r"blk(\d+)\.(up|down|gate)", hook_name)
-    if not m:
-        return None
-    idx, proj = m.group(1), m.group(2)
-    if config.family == "pythia":
-        return f"gpt_neox.layers.{idx}.mlp.{_PYTHIA_PROJ_MAP[proj]}"
-    return f"model.layers.{idx}.mlp.{_OLMO_PROJ_MAP[proj]}"
+    """Map hook name (e.g. 'blk14.up' or 'blk3.attn.head5') to state dict key prefix.
+
+    Per-OV-head hooks at the same block index all map to the same o_proj prefix —
+    one weight matrix serves all H heads.
+    """
+    m = re.match(r"blk(\d+)\.(up|down|gate)$", hook_name)
+    if m:
+        idx, proj = m.group(1), m.group(2)
+        if config.family == "pythia":
+            return f"gpt_neox.layers.{idx}.mlp.{_PYTHIA_PROJ_MAP[proj]}"
+        return f"model.layers.{idx}.mlp.{_OLMO_PROJ_MAP[proj]}"
+    m = re.match(r"blk(\d+)\.attn\.head\d+$", hook_name)
+    if m:
+        idx = m.group(1)
+        if config.family == "pythia":
+            return f"gpt_neox.layers.{idx}.attention.dense"
+        return f"model.layers.{idx}.self_attn.o_proj"
+    return None
 
 
 def _norm_sd_prefix(config):
@@ -306,6 +363,84 @@ class _RMSNorm:
         return _RMSNorm(self.weight.float(), self.eps)
 
 
+# --- Weight cache (single-tensor on-disk cache for derived factors) ---
+
+# State-dict-key globs (per family) selecting tensors worth caching to
+# data/weight_cache/. Defaults cover attention output projections, used by
+# .O derivation for per-OV-head entries. Override per-collection via
+# CollectConfig.weight_cache_patterns (gitignore semantics: entries appended,
+# leading '!' negates).
+DEFAULT_WEIGHT_CACHE_GLOBS = {
+    "pythia": ["*.attention.dense.weight"],
+    "olmo":   ["*.self_attn.o_proj.weight"],
+}
+
+
+def _weight_cache_root():
+    return os.environ.get("WEIGHT_CACHE_DIR", os.path.join("data", "weight_cache"))
+
+
+def _model_short_name(hf_repo):
+    return hf_repo.split("/", 1)[-1]
+
+
+def _cache_path(family, hf_repo, revision, sd_key):
+    return os.path.join(
+        _weight_cache_root(), family, _model_short_name(hf_repo), str(revision), f"{sd_key}.pt"
+    )
+
+
+def resolve_cache_globs(family, extras=()):
+    """Return effective glob rules as a list of (pattern, include_bool).
+
+    Defaults (per family) are include-only. Extras are appended; a leading '!'
+    makes the entry an exclusion. Match-time uses last-match-wins, so an extra
+    '!*.attention.dense.weight' can disable a default include.
+    """
+    rules = [(p, True) for p in DEFAULT_WEIGHT_CACHE_GLOBS.get(family, [])]
+    for p in extras or []:
+        if p.startswith("!"):
+            rules.append((p[1:], False))
+        else:
+            rules.append((p, True))
+    return rules
+
+
+def _should_cache(sd_key, rules):
+    decision = False
+    for pat, include in rules:
+        if fnmatch.fnmatchcase(sd_key, pat):
+            decision = include
+    return decision
+
+
+def _cache_lookup(family, hf_repo, revision, sd_key):
+    import torch
+    path = _cache_path(family, hf_repo, revision, sd_key)
+    if not os.path.isfile(path):
+        return None
+    try:
+        return torch.load(path, map_location="cpu", weights_only=True)
+    except Exception:
+        return None  # corrupt → treat as miss; will be rewritten
+
+
+def _cache_store(family, hf_repo, revision, sd_key, tensor):
+    import torch
+    path = _cache_path(family, hf_repo, revision, sd_key)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    try:
+        torch.save(tensor, tmp)
+        os.replace(tmp, path)
+    except Exception:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
 def _get_cached_snap_dir(hf_repo, revision):
     """Return snapshot directory path if already cached locally, else None."""
     hf_home = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
@@ -325,17 +460,19 @@ def _get_cached_snap_dir(hf_repo, revision):
     return None
 
 
-def load_selective_weights(config, hf_repo, revision, hook_names, need_norm=False):
+def load_selective_weights(config, hf_repo, revision, hook_names, need_norm=False, extra_cache_globs=()):
     """Load only the weight tensors needed for specific hooks from safetensors.
 
-    Only downloads the safetensors shards that contain the needed keys (not the full model).
+    Per-key on-disk cache at data/weight_cache/<family>/<short>/<revision>/<sd_key>.pt
+    is consulted first for any key matching the effective cache globs
+    (family defaults + extras, gitignore semantics). Cache misses fall through
+    to the safetensors path and are written back. snapshot_download is skipped
+    entirely when all requested keys come from the cache.
 
     Returns dict:
         {hook_name: SimpleNamespace(weight=Tensor, bias=Tensor|None), ...}
         If need_norm: "__norm__" key with a callable norm (supports .float()).
     """
-    from huggingface_hub import snapshot_download
-
     # Collect all state dict keys we need
     all_keys = set()
     hook_prefixes = {}  # hook_name -> sd_prefix
@@ -352,8 +489,26 @@ def load_selective_weights(config, hf_repo, revision, hook_names, need_norm=Fals
         all_keys.add(f"{norm_prefix}.weight")
         all_keys.add(f"{norm_prefix}.bias")
 
-    snap_dir = snapshot_download(hf_repo, revision=revision)
-    tensors = _load_selective_tensors(snap_dir, all_keys)
+    # Cache-first
+    rules = resolve_cache_globs(config.family, extra_cache_globs)
+    tensors = {}
+    missing = set()
+    for k in all_keys:
+        if _should_cache(k, rules):
+            t = _cache_lookup(config.family, hf_repo, revision, k)
+            if t is not None:
+                tensors[k] = t
+                continue
+        missing.add(k)
+
+    if missing:
+        from huggingface_hub import snapshot_download
+        snap_dir = snapshot_download(hf_repo, revision=revision)
+        loaded = _load_selective_tensors(snap_dir, missing)
+        for k, t in loaded.items():
+            if _should_cache(k, rules):
+                _cache_store(config.family, hf_repo, revision, k, t)
+        tensors.update(loaded)
 
     result = {}
     for h, prefix in hook_prefixes.items():

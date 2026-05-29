@@ -84,10 +84,37 @@ Configs use a `CollectConfig` dataclass (in `scripts/collect.py`). Key fields:
 
 ## Key concepts
 
-### Collection modes
-- **collect_final_acts**: Capture residual stream at `residual_hook_point`. Hook points: `identity_head` (fast, after final norm via head replacement), `after_final_norm` (hook), `before_final_norm` (raw residual), `post_attn_N`, `pre_block_N`
-- **collect_A/G**: Covariance matrices for MLP projections. A=input covariance, G=gradient covariance. G requires backward pass (`sample_labels`, `label_samples`).
-- **collect_final_grads**: Also collect gradient covariance at the final residual hook point.
+### Hook selection (pattern-based)
+
+Hooks to collect are selected via the `hooks` config field — a list of fnmatch patterns matched against the model's hook universe. Append `+G` to any entry to also collect G (triggers backward). Set `grad_all: true` as a shortcut to grad-mark every matched hook without writing `+G` on each entry.
+
+```yaml
+hooks:
+  - blk*.up                # all MLP up-projection A (forward only)
+  - blk*.down+G            # MLP down-proj A + G (K-FAC)
+  - blk*.attn.in           # residual into each block's attn sub-block
+  - blk*.attn.out          # attention's contribution to residual
+  - blk*.attn.raw_out      # OLMo-2 only: pre-post-norm attention output
+  - blk*.mlp.in            # OLMo-2 only: residual into MLP sub-block
+  - blk*.mlp.out           # MLP's contribution
+  - blk*.attn.head*        # per-OV-head contributions (H× data)
+  - blk3.attn.head0        # single head, single block
+  - after_final_norm
+  - identity_head          # fast post-norm via head replacement
+
+grad_all: false            # set true to grad-collect at every matched hook
+```
+
+Pattern matches are family-aware: Pythia exposes 3 boundary names per block (`attn.in`, `attn.out`, `mlp.out`) — `attn.raw_out` and `mlp.in` patterns are silent no-ops there. OLMo-2 exposes all 5. Pythia MLPs have no `gate`. DataAccessor resolves Pythia's `blk{i}.mlp.in` / `attn.raw_out` lookups to the canonical `attn.in` / `attn.out` via alias on read, so cross-family analysis code can use the OLMo-2 superset of names uniformly.
+
+Per-OV-head: `sum_h blk{i}.attn.head{h}` equals `blk{i}.attn.out` (Pythia) or `blk{i}.attn.raw_out` (OLMo-2, since the post-norm mixes heads non-linearly). The identity is exact per-token, not at the covariance level (cross-head terms).
+
+### Legacy collection flags (still supported)
+
+When `hooks` is unset, the older boolean flags are desugared to the equivalent pattern list — existing configs work unchanged:
+- **collect_final_acts** + **residual_hook_point** (`identity_head` / `after_final_norm` / `before_final_norm` / `both`): single residual-stream point.
+- **collect_A** / **collect_G**: MLP projection covariances. `collect_G=True` triggers backward.
+- **collect_final_grads**: also collect G at the residual hook point.
 
 ### Data modes
 - **packing=padded**: Individual sequences, padding to longest. Good for last-token extraction.
@@ -102,7 +129,7 @@ Configs use a `CollectConfig` dataclass (in `scripts/collect.py`). Key fields:
 - **cov**: Raw d×d covariance Σ xxT + count n. Divide by n for E[xxT].
 - **cov_svd**: Eigendecomposition of E[xxT]: eigvecs V(d,k) + eigvals λ(k). Default for multi-checkpoint. Recoverable: V @ diag(λ) @ V.T
 - **eigenvalues**: Just eigenvalues λ(k). Cheapest.
-- **Modifiers**: `+b` derives and stores B (auto-includes means for bias correction); `+m` stores activation means; `-b`/`-m` opt out. Default: keep whatever was already stored. `eigenvalues` base always includes B + means (they're tiny and can't be recovered from eigvals alone).
+- **Modifiers**: `+b` derives and stores B (auto-includes means for bias correction); `+m` stores activation means; `+o` derives and stores O for per-OV-head entries (post-W_o cov, lossy if dropped at `eigenvalues`). `-b`/`-m`/`-o` opt out. Default: keep whatever was already stored. `eigenvalues` base always includes B / means / O (they're tiny and can't be recovered from eigvals alone). `+o` is a no-op for `acts`/`acts_svd` formats (O is derived, not raw).
 - Full name aliases: `activations`=`acts`, `covariance`=`cov`.
 - Cross-basis projections stored additionally alongside primary format.
 
@@ -134,8 +161,42 @@ acc["blk3.up"].A.eigvals        # 1D tensor, descending
 acc["blk3.up"].G.cov            # (d,d) normalized covariance
 acc.after_final_norm.A.eigvals  # final residual stream
 acc.blocks[3].up.A.eigh         # (eigvals, eigvecs) tuple
+
+# Block-boundary hooks (collect_block_boundaries: true)
+acc["blk3.attn.in"].A.eigvals          # residual flowing into attn sub-block
+acc["blk3.attn.out"].A.cov             # attention's contribution to residual
+acc["blk3.mlp.out"].A.eigh             # MLP's contribution to residual
+acc.blocks[3].attn.in_.A.eigvals       # same via blocks[] indexer (in_ because 'in' is a keyword)
+acc.blocks[3].mlp.out.A.cov
+
+# Per-OV-head hooks (pattern: blk*.attn.head*)
+# A is the d_head pre-W_o slice; O = W_h @ A @ W_h.T is derived lazily from o_proj.
+acc["blk3.attn.head0"].A.eigvals       # 0th head, pre-W_o (d_head x d_head)
+acc["blk3.attn.head0"].O.cov           # post-W_o contribution cov (d_model x d_model), derived
+acc["blk3.attn.head0"].B.eigvals       # alias: B → O for OV-heads
+acc.blocks[3].attn.head[0].A.cov
+
 acc.save("step143000_eig.pt", format="eigenvalues")  # conversion through the same interface
 ```
+
+### Weight cache
+On-disk single-tensor cache at `data/weight_cache/<family>/<model_short>/<revision>/<sd_key>.pt`.
+Consulted automatically by `DataAccessor` whenever a derived factor needs a model
+weight (B for MLPs, O for OV-heads), so post-collection metric runs avoid a full
+`snapshot_download` when the relevant weights are cached. Default cache scope is
+attention output projections only (`*.attention.dense.weight` for Pythia,
+`*.self_attn.o_proj.weight` for OLMo-2). Override per-collection via:
+
+```yaml
+weight_cache_patterns:
+  - "*.mlp.down_proj.weight"     # also cache OLMo-2 down-proj
+  - "!*.attention.dense.weight"  # disable the default for Pythia
+```
+
+Gitignore semantics: appended to family defaults, leading `!` negates, last-match-wins.
+Persisted into the `.pt` metadata as `__weight_cache_patterns__` so derivation
+runs (compute_metrics, convert) see the same set. Cache root is overridable via
+the `WEIGHT_CACHE_DIR` env var.
 
 ## Compute metrics
 

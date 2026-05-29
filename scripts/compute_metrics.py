@@ -18,9 +18,11 @@ Results structure:
     {step: {hook_name: {
         "A": {eigenspectrum, rankme, alpha, r2, r2_100},
         "G": {...},
-        "B": {...},             # when available
+        "B": {...},             # when available (MLP output cov)
+        "O": {...},             # when available (per-OV-head post-W_o cov)
         "kfac": {trace, log_det, top_eigvals, sampled_eigvals, rankme, alpha, ...},
-        "gen_GB": {eigvals, rankme, alpha, ...},  # generalized G vs B
+        "gen_GB": {eigvals, rankme, alpha, ...},  # generalized G vs B (MLP)
+        "gen_GO": {eigvals, rankme, alpha, ...},  # generalized G vs O (OV-head)
     }}}
 
 Usage:
@@ -502,12 +504,9 @@ def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False
         gpu_wait += getattr(ctx, "waited", 0.0)
         for hook_name, factors in avail.items():
             t = time.time()
-            has_B = "B" in factors
             for factor in factors:
                 accessor._ensure_eigh(hook_name, factor,
                                       need_vecs=True, need_centered_vecs=True)
-            if has_B:
-                accessor._ensure_B_eigh(hook_name, need_vecs=True, need_centered_vecs=True)
             if verbose:
                 print(f"    prewarm {hook_name}: {time.time()-t:.1f}s")
 
@@ -555,18 +554,19 @@ def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False
         if eA is not None and eG is not None:
             hook_results["kfac"] = kfac_metrics(eA, eG)
 
-        # --- Generalized eigendecomposition G vs B ---
-        if "B" in factors:
+        # --- Generalized eigendecomposition G vs output-cov (B for MLP, O for OV-head) ---
+        out_factor = "O" if "O" in factors else ("B" if "B" in factors else None)
+        if out_factor is not None:
             g_eigh = hook.G.eigh
-            b_eigh = hook.B.eigh
-            if g_eigh is not None and b_eigh is not None:
+            out_eigh = hook._factor(out_factor).eigh
+            if g_eigh is not None and out_eigh is not None:
                 eG_arr, vG = g_eigh
-                eB_arr, vB = b_eigh
+                eOut_arr, vOut = out_eigh
                 with gpu_ctx as ctx:
                     gpu_wait += getattr(ctx, "waited", 0.0)
-                    gen_eigvals = generalized_eigenvalues_GB(eG_arr, vG, eB_arr, vB)
+                    gen_eigvals = generalized_eigenvalues_GB(eG_arr, vG, eOut_arr, vOut)
                 gen_sm = spectral_metrics(gen_eigvals) if len(gen_eigvals) >= 11 else {}
-                hook_results["gen_GB"] = {"eigvals": gen_eigvals, **gen_sm}
+                hook_results[f"gen_G{out_factor}"] = {"eigvals": gen_eigvals, **gen_sm}
 
         if hook_results:
             step_results[hook_name] = hook_results
@@ -598,10 +598,16 @@ def _needs_model_loading(data_path):
     """Check if computing full metrics for this file would require model weights."""
     data = torch.load(data_path, map_location="cpu", weights_only=False)
     for hook_name, entry in data.items():
-        if isinstance(entry, dict) and re.match(r"blk\d+\.(up|down|gate)", hook_name):
-            has_A_cov = "A" in entry or "A_eigvecs" in entry
+        if not isinstance(entry, dict):
+            continue
+        has_A_cov = "A" in entry or "A_eigvecs" in entry
+        if re.match(r"blk\d+\.(up|down|gate)$", hook_name):
             has_B = "B_eigvals" in entry or "B" in entry or "B_eigvecs" in entry
             if has_A_cov and not has_B:
+                return True
+        if re.match(r"blk\d+\.attn\.head\d+$", hook_name):
+            has_O = "O_eigvals" in entry or "O" in entry or "O_eigvecs" in entry
+            if has_A_cov and not has_O:
                 return True
     if "before_final_norm" in data and "after_final_norm" not in data:
         entry = data.get("before_final_norm", {})

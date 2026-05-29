@@ -33,3 +33,10 @@ axis of the histogram of activations instead of weights
 
 6.
 Get OV data.
+[DONE 2026-05]
+- Per-OV-head hooks: blk{N}.attn.head{h}, opt-in via `hooks: [blk*.attn.head*]`.
+- Implementation in utils/hooks.py:MultiHeadOVDispatcher; doesn't require
+  eager attention because o_proj input is the same shape regardless of backend.
+- Per-token identity: sum_h contrib_h = attn.out (Pythia) / attn.raw_out (OLMo-2).
+- See utils/hook_specs.py for the pattern resolver.
+[/DONE]

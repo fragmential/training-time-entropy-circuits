@@ -1,33 +1,71 @@
 HOOK POINTS (keys in .pt files)
 ================================
-Residual stream:
+Residual stream (global, single instance):
   identity_head         final residual (via head replacement, fast)
+                        stored under "after_final_norm"
   after_final_norm      final residual post-norm
   before_final_norm     final residual pre-norm (raw)
-  post_attn_N           residual after attention block N
-  pre_block_N           residual before block N
 
-MLP layers (per block, factors A and/or G):
-  blk{N}.dense_h_to_4h   Pythia up
-  blk{N}.dense_4h_to_h   Pythia down
-  blk{N}.gate_proj       OLMo-2 gate
-  blk{N}.up_proj         OLMo-2 up
-  blk{N}.down_proj       OLMo-2 down
+Per block (collected when matched by `hooks` pattern):
+  MLP linear inputs (factors A and optionally G):
+    blk{N}.up           Pythia dense_h_to_4h / OLMo-2 up_proj input cov
+    blk{N}.down         Pythia dense_4h_to_h / OLMo-2 down_proj input cov
+    blk{N}.gate         OLMo-2 only: gate_proj input cov
+
+  Sub-block boundaries (residual stream, factor A unless grad_hooks selects them):
+    blk{N}.attn.in      residual flowing INTO the attention sub-block
+    blk{N}.attn.out     attention sub-block's contribution being added back
+    blk{N}.attn.raw_out OLMo-2 only: pre-post-norm attention output
+    blk{N}.mlp.in       OLMo-2 only: residual flowing INTO the MLP sub-block
+                        (Pythia: aliased to blk{N}.attn.in by DataAccessor)
+    blk{N}.mlp.out      MLP sub-block's contribution being added back
+
+  Per-OV-head contributions (factor A as (d_head, d_head) pre-W_o cov; H entries per block):
+    blk{N}.attn.head{h} pre-W_o slice cov for query head h at block N.
+                        Post-W_o contribution available as `.O` (or `.B`), derived
+                        lazily from A + o_proj.weight via the weight cache.
+                        Sum_h of post-W_o contributions equals blk{N}.attn.out (Pythia)
+                        or blk{N}.attn.raw_out (OLMo-2; post-norm mixes heads),
+                        but only per-token — cov(sum) ≠ sum(cov) due to cross terms.
+
+Pattern matching (in the `hooks` config field) is family-aware: patterns
+matching only OLMo-2 names (blk*.gate, blk*.attn.raw_out, blk*.mlp.in) are
+silent no-ops on Pythia. DataAccessor read-side aliases blk{N}.mlp.in →
+blk{N}.attn.in and blk{N}.attn.raw_out → blk{N}.attn.out so cross-family
+analysis code can use the OLMo-2 superset uniformly.
+
+Append `+G` to any `hooks` entry to also collect G at those matches (triggers
+backward), e.g. `blk*.down+G`. Set `grad_all: true` as a shortcut to grad-mark
+every matched hook without writing `+G` per entry.
 
 FACTORS (sub-keys per hook)
 ============================
-  A          input covariance E[xx^T]
-  G          gradient covariance E[gg^T]
-  B          output covariance (derived from A + weights)
+  A          input / activation covariance E[xx^T]
+  G          gradient covariance E[gg^T] (only when the entry has `+G` or grad_all is true)
+  B          output covariance — derived from A + weights (MLP hooks only)
+  O          per-OV-head post-W_o contribution covariance — derived from A + the
+             corresponding column block of o_proj.weight (blk*.attn.head{h} only).
+             A is the d_head pre-W_o slice; O = W_h @ A @ W_h^T is (d_model, d_model).
+
+For residual-like hooks (after_final_norm, before_final_norm, blk*.attn.in/out/raw_out,
+blk*.mlp.in/out) there is no associated weight matrix, so A and B are the same
+activations and B derivation is skipped. For per-OV-head hooks (blk*.attn.head{h}),
+HookView.B resolves to O so `.B` is the post-W_o contribution rather than the
+pre-W_o A slice.
 
 METRICS (computed by compute_metrics.py)
 =========================================
-Model agnostic hook points:
-  blk{N}.up             up-proj
-  blk{N}.gate           gate-proj
-  blk{N}.down           down-proj
-  before_final_norm     residual before final layernorm
-  after_final_norm      residual after final layernorm
+The metric script iterates DataAccessor.available() — any stored hook gets
+the standard metrics computed automatically. Examples:
+  blk{N}.up                MLP up-proj
+  blk{N}.gate              OLMo-2 gate-proj
+  blk{N}.down              MLP down-proj
+  blk{N}.attn.in           residual into attn sub-block
+  blk{N}.attn.out          attention contribution
+  blk{N}.attn.head{h}      per-head OV contribution
+  blk{N}.mlp.in / .out     MLP sub-block boundaries
+  before_final_norm        residual before final layernorm
+  after_final_norm         residual after final layernorm
 
 Per factor (A / G / B):
   rankme          effective rank (entropy-based)
@@ -39,7 +77,7 @@ Variants:
   {factor}_centered       mean-subtracted version
   {factor}_cross_{label}  cross-basis projection eigvals
 
-K-FAC (needs both A and G):
+K-FAC (needs both A and G — i.e. MLP hooks with `+G` or `grad_all: true`):
   kfac.trace              tr(G ⊗ A) = tr(G) * tr(A)
   kfac.log_det            damped log-det (array over alphas)
   kfac.log_det_A/G        per-factor contributions
