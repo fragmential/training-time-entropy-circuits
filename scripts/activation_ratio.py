@@ -38,6 +38,7 @@ from tqdm import tqdm
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from utils.model_registry import get_model_config, load_model, load_tokenizer, get_mlp_projections
+from utils import hook_names as _hn
 from utils.hooks import HookCollector
 from utils.accessor import DataAccessor
 from utils.data_utils import get_loader, load_and_cache_texts, pack_sequences, compute_token_mask
@@ -199,7 +200,7 @@ def measure_band_projections(
         for c in collectors.values():
             if c._acts_list is not None:
                 c._acts_list.clear()
-            c.n_A = 0
+            c._n_acts = 0
             c._token_mask = None  # use all tokens
 
         fwd_kwargs = {"input_ids": input_ids}
@@ -228,7 +229,7 @@ def measure_band_projections(
         for c in collectors.values():
             if c._acts_list is not None:
                 c._acts_list.clear()
-            c.n_A = 0
+            c._n_acts = 0
 
     # Compute means
     results = {}
@@ -261,7 +262,7 @@ def main(
     """Measure activation band projections across datasets.
 
     Args:
-        basis_path: .pt file with cov_svd data containing A_eigvecs.
+        basis_path: .pt file with cov_svd data containing acts eigenvectors.
         model_name: Full HuggingFace model name (e.g. allenai/OLMo-2-1B).
         hook_names: Which hook points to analyse. Defaults to all in basis_path.
         revision: Model revision / checkpoint to load.
@@ -288,14 +289,15 @@ def main(
 
     # Build basis dict: {hook_name: (U_tensor, band_indices)}
     basis_dict = {}
-    for hn in hook_names:
-        eigvecs = acc[hn].A.eigvecs
+    for hook in hook_names:
+        acts_signal = next((s for s in _hn.captured_signals(hook) if s.endswith(".acts")), None)
+        eigvecs = acc[hook]._factor(acts_signal).eigvecs if acts_signal else None
         if eigvecs is None:
-            print(f"  WARNING: no A eigenvectors for {hn}, skipping")
+            print(f"  WARNING: no acts eigenvectors for {hook}, skipping")
             continue
         d = eigvecs.size(0)
         band_idx = make_band_indices(d, bands)
-        basis_dict[hn] = (eigvecs, band_idx)
+        basis_dict[hook] = (eigvecs, band_idx)
 
     if not basis_dict:
         print("No valid hook points found in basis file.")

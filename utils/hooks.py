@@ -19,6 +19,19 @@ _DTYPE_MAP = {
 }
 
 
+def _hook_input(args, kwargs):
+    """Primary input tensor to a hooked module, whether passed positionally or by keyword.
+
+    Modules like OLMo-2's self_attn are invoked as `self_attn(hidden_states=...)`,
+    so a forward-pre-hook's positional `args` is empty; the tensor lives in kwargs.
+    """
+    if args:
+        return args[0]
+    if "hidden_states" in kwargs:
+        return kwargs["hidden_states"]
+    return next(iter(kwargs.values()))
+
+
 class HookCollector:
     """Collect activations or covariance at a single hook point.
 
@@ -52,6 +65,8 @@ class HookCollector:
         activation_dtype: str = "fp32",
         grad_capture: str = None,
         token_selection: str = None,
+        acts_key: str = "in.acts",
+        grads_key: str = "out.grads",
     ):
         assert mode in ("cov", "acts"), f"Unknown mode: {mode}"
         assert capture in ("input", "output"), f"Unknown capture: {capture}"
@@ -62,6 +77,8 @@ class HookCollector:
         self.grad_capture = grad_capture if grad_capture is not None else capture
         self.collect_grad = collect_grad
         self.collect_means = collect_means
+        self.acts_key = acts_key      # signal key for the forward (acts) cov
+        self.grads_key = grads_key    # signal key for the backward (grads) cov
         self.active = True
         self._acc_dtype = _DTYPE_MAP.get(accumulation_dtype, torch.float64)
         self._act_dtype = _DTYPE_MAP.get(activation_dtype, torch.float32)
@@ -69,24 +86,24 @@ class HookCollector:
         # Token mask — set externally per batch
         self._token_mask: Optional[torch.BoolTensor] = None
 
-        # Forward signal storage (lazy-initialized on first data)
-        self._A_initialized = False
-        self.A = None       # (d, d) covariance or None
-        self.n_A = 0
-        self.A_sum = None   # (d,) running sum for means
+        # Forward (acts) storage (lazy-initialized on first data)
+        self._acts_init = False
+        self._acts_cov = None    # (d, d) covariance or None
+        self._n_acts = 0
+        self._acts_sum = None    # (d,) running sum for means
         self._acts_list = [] if mode == "acts" else None
 
-        # Gradient storage (lazy-initialized)
-        self._G_initialized = False
-        self.G = None
-        self.n_G = 0
-        self.G_sum = None   # (d,) running sum for gradient means
+        # Backward (grads) storage (lazy-initialized)
+        self._grads_init = False
+        self._grads_cov = None
+        self._n_grads = 0
+        self._grads_sum = None   # (d,) running sum for gradient means
 
         # Register hooks
         self._handles = []
         if module is not None:
             if capture == "input":
-                self._handles.append(module.register_forward_pre_hook(self._fwd_pre))
+                self._handles.append(module.register_forward_pre_hook(self._fwd_pre, with_kwargs=True))
             else:
                 self._handles.append(module.register_forward_hook(self._fwd_post))
             if collect_grad:
@@ -126,43 +143,43 @@ class HookCollector:
 
         if self.mode == "cov":
             d = x_f.size(1)
-            if not self._A_initialized:
-                self.A = torch.zeros(d, d, dtype=self._acc_dtype, device=x_f.device)
+            if not self._acts_init:
+                self._acts_cov = torch.zeros(d, d, dtype=self._acc_dtype, device=x_f.device)
                 if self.collect_means:
-                    self.A_sum = torch.zeros(d, dtype=torch.float32, device=x_f.device)
-                self._A_initialized = True
-            self.A.add_((x_f.T @ x_f).to(dtype=self._acc_dtype))
-            self.n_A += n
+                    self._acts_sum = torch.zeros(d, dtype=torch.float32, device=x_f.device)
+                self._acts_init = True
+            self._acts_cov.add_((x_f.T @ x_f).to(dtype=self._acc_dtype))
+            self._n_acts += n
             if self.collect_means:
-                self.A_sum.add_(x_f.float().sum(dim=0))
+                self._acts_sum.add_(x_f.float().sum(dim=0))
         else:
             self._acts_list.append(x_f.cpu())
-            self.n_A += n
+            self._n_acts += n
 
     def accumulate_grad(self, g_flat: torch.Tensor):
-        """Accumulate a (N, d) gradient tensor into G covariance."""
+        """Accumulate a (N, d) gradient tensor into the grads covariance."""
         if not self.active:
             return
         g_f = g_flat.to(dtype=self._act_dtype)
         d = g_f.size(1)
-        if not self._G_initialized:
-            self.G = torch.zeros(d, d, dtype=self._acc_dtype, device=g_f.device)
+        if not self._grads_init:
+            self._grads_cov = torch.zeros(d, d, dtype=self._acc_dtype, device=g_f.device)
             if self.collect_means:
-                self.G_sum = torch.zeros(d, dtype=torch.float32, device=g_f.device)
-            self._G_initialized = True
-        self.G.add_((g_f.T @ g_f).to(dtype=self._acc_dtype))
-        self.n_G += g_f.size(0)
+                self._grads_sum = torch.zeros(d, dtype=torch.float32, device=g_f.device)
+            self._grads_init = True
+        self._grads_cov.add_((g_f.T @ g_f).to(dtype=self._acc_dtype))
+        self._n_grads += g_f.size(0)
         if self.collect_means:
-            self.G_sum.add_(g_f.float().sum(dim=0))
+            self._grads_sum.add_(g_f.float().sum(dim=0))
 
     # ------------------------------------------------------------------
     # Hook callbacks
     # ------------------------------------------------------------------
 
-    def _fwd_pre(self, module, inp):
+    def _fwd_pre(self, module, args, kwargs):
         if not self.active:
             return
-        x = inp[0].detach()
+        x = _hook_input(args, kwargs).detach()
         self.accumulate(self._apply_mask(x))
 
     def _fwd_post(self, module, inp, output):
@@ -188,37 +205,38 @@ class HookCollector:
     # ------------------------------------------------------------------
 
     def factors(self) -> dict:
-        """Return collected data as CPU tensors.
+        """Return collected data as CPU tensors, keyed by signal.
 
-        Returns dict with:
-            "A": covariance matrix (d,d) in cov mode, or raw activations (N,d) in acts mode
-            "n_A": token count
-            "A_mean": mean vector (d,) if collect_means and cov mode
-            "G": gradient covariance (d,d) if collect_grad
-            "n_G": gradient token count
-            "G_mean": mean gradient vector (d,) if collect_means and collect_grad
-            "n": convenience alias for n_A
+        With acts_key="in.acts", grads_key="out.grads" the dict holds:
+            "in.acts": covariance (d,d) in cov mode, or raw samples (N,d) in acts mode
+            "n_in.acts": token count
+            "in.acts_mean": mean vector (d,) if collect_means and cov mode
+            "out.grads": gradient covariance (d,d) if collect_grad
+            "n_out.grads": gradient token count
+            "out.grads_mean": mean gradient vector (d,) if collect_means and collect_grad
+            "n": convenience alias for n_acts
         """
+        a, g = self.acts_key, self.grads_key
         result = {}
 
         if self.mode == "cov":
-            if self.A is not None:
-                result["A"] = self.A.cpu()
-            if self.collect_means and self.A_sum is not None:
-                result["A_mean"] = (self.A_sum / self.n_A).cpu()
+            if self._acts_cov is not None:
+                result[a] = self._acts_cov.cpu()
+            if self.collect_means and self._acts_sum is not None:
+                result[f"{a}_mean"] = (self._acts_sum / self._n_acts).cpu()
         else:
             if self._acts_list:
-                result["A"] = torch.cat(self._acts_list, dim=0)
+                result[a] = torch.cat(self._acts_list, dim=0)
 
-        result["n_A"] = self.n_A
+        result[f"n_{a}"] = self._n_acts
 
-        if self.collect_grad and self.G is not None:
-            result["G"] = self.G.cpu()
-            result["n_G"] = self.n_G
-            if self.collect_means and self.G_sum is not None:
-                result["G_mean"] = (self.G_sum / self.n_G).cpu()
+        if self.collect_grad and self._grads_cov is not None:
+            result[g] = self._grads_cov.cpu()
+            result[f"n_{g}"] = self._n_grads
+            if self.collect_means and self._grads_sum is not None:
+                result[f"{g}_mean"] = (self._grads_sum / self._n_grads).cpu()
 
-        result["n"] = self.n_A
+        result["n"] = self._n_acts
         return result
 
     # ------------------------------------------------------------------
@@ -228,18 +246,18 @@ class HookCollector:
     def reset(self):
         """Reset accumulators to zero (for reuse across checkpoints)."""
         if self.mode == "cov":
-            if self.A is not None:
-                self.A.zero_()
-            if self.A_sum is not None:
-                self.A_sum.zero_()
+            if self._acts_cov is not None:
+                self._acts_cov.zero_()
+            if self._acts_sum is not None:
+                self._acts_sum.zero_()
         else:
             self._acts_list = []
-        self.n_A = 0
-        if self.G is not None:
-            self.G.zero_()
-        if self.G_sum is not None:
-            self.G_sum.zero_()
-        self.n_G = 0
+        self._n_acts = 0
+        if self._grads_cov is not None:
+            self._grads_cov.zero_()
+        if self._grads_sum is not None:
+            self._grads_sum.zero_()
+        self._n_grads = 0
 
     def close(self):
         """Remove all hooks and free buffers."""
@@ -337,10 +355,11 @@ class MultiHeadOVDispatcher:
                 accumulation_dtype=accumulation_dtype,
                 activation_dtype=activation_dtype,
                 token_selection=token_selection,
+                acts_key="slice.acts", grads_key="slice.grads",
             )
             for h in self.selected_heads
         }
-        self._handles = [o_proj_module.register_forward_pre_hook(self._fwd_pre)]
+        self._handles = [o_proj_module.register_forward_pre_hook(self._fwd_pre, with_kwargs=True)]
         if collect_grad:
             self._handles.append(o_proj_module.register_full_backward_hook(self._bwd))
 
@@ -348,8 +367,8 @@ class MultiHeadOVDispatcher:
         for c in self.collectors.values():
             c.set_token_mask(mask)
 
-    def _fwd_pre(self, module, inp):
-        x = inp[0].detach()  # (B, T, num_heads * head_dim)
+    def _fwd_pre(self, module, args, kwargs):
+        x = _hook_input(args, kwargs).detach()  # (B, T, num_heads * head_dim)
         d = self.head_dim
         for h, collector in self.collectors.items():
             attended_h = x[..., h * d : (h + 1) * d]  # (B, T, d_head)

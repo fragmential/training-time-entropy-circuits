@@ -77,6 +77,52 @@ def is_residual(name):
     return classify(name) in ("residual", "boundary")
 
 
+# ---------------------------------------------------------------------------
+# node.signal vocabulary — the ONLY factor identity in the codebase.
+#
+# A signal is "<node>.<quantity>" where node is the role at this hook and
+# quantity is acts|grads. Storage keys, FactorView ids, available(), and result
+# keys all use these strings. There is no A/B/G/O anywhere.
+#
+#   captured: written by the collector / read from disk
+#   derived:  computed on read by applying a linear map to a source signal
+# ---------------------------------------------------------------------------
+
+# kind -> (captured acts signal, captured grads signal)
+_CAPTURED = {
+    "mlp":      ("in.acts", "out.grads"),
+    "ov_head":  ("slice.acts", "slice.grads"),
+    "boundary": ("value.acts", "value.grads"),
+    "residual": ("value.acts", "value.grads"),
+}
+
+# kind -> {derived signal: (source captured signal, weight kind)}
+_DERIVED = {
+    "mlp":     {"out.acts": ("in.acts", "mlp")},
+    "ov_head": {"contrib.acts": ("slice.acts", "head")},
+}
+
+
+def captured_signals(name):
+    """The acts/grads signal keys the collector writes for this hook's kind."""
+    return _CAPTURED.get(classify(name), ())
+
+
+def derived_signals(name):
+    """{derived signal: (source signal, weight kind)} for this hook, possibly empty."""
+    return _DERIVED.get(classify(name), {})
+
+
+def signals(name):
+    """All valid node.signal keys for this hook (captured + derived)."""
+    return tuple(captured_signals(name)) + tuple(derived_signals(name))
+
+
+def signal_node(signal):
+    """The node part of a 'node.acts'/'node.grads' signal key, e.g. 'in.acts' -> 'in'."""
+    return signal.rsplit(".", 1)[0]
+
+
 def canonical(name, available):
     """Resolve a Pythia alias to its stored name when the requested one isn't present."""
     if name in available:

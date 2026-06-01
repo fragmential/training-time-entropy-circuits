@@ -43,20 +43,25 @@ def make_powerlaw_eigvals():
     return _make
 
 
+# Synthetic residual-hook entry: signals are value.acts / value.grads.
+HOOK = "after_final_norm"
+ACTS = "value.acts"
+GRADS = "value.grads"
+
+
 @pytest.fixture
 def make_factors_dict():
     """Factors dict as HookCollector.factors() would produce (unnormalized cov)."""
     def _make(d=64, N=200, with_means=True, with_grad=True):
         acts = torch.randn(N, d, dtype=torch.float64)
-        A_cov = acts.T @ acts  # unnormalized
-        result = {"hook0": {"A": A_cov, "n_A": N, "n": N}}
+        entry = {ACTS: acts.T @ acts, f"n_{ACTS}": N, "n": N}  # unnormalized
         if with_means:
-            result["hook0"]["A_mean"] = acts.float().mean(0)
+            entry[f"{ACTS}_mean"] = acts.float().mean(0)
         if with_grad:
             grads = torch.randn(N, d, dtype=torch.float64)
-            result["hook0"]["G"] = grads.T @ grads
-            result["hook0"]["n_G"] = N
+            entry[GRADS] = grads.T @ grads
+            entry[f"n_{GRADS}"] = N
             if with_means:
-                result["hook0"]["G_mean"] = grads.float().mean(0)
-        return result
+                entry[f"{GRADS}_mean"] = grads.float().mean(0)
+        return {HOOK: entry}
     return _make

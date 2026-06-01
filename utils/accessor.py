@@ -3,22 +3,22 @@
 Combines the DataAccessor (format-agnostic read/write interface), storage
 format handling, and eigendecomposition helpers into a single module.
 
-DataAccessor provides a chainable property-based API:
+The factor identity is the `<node>.<quantity>` signal string itself (see
+utils.hook_names). DataAccessor provides a chainable property-based API:
 
     acc = DataAccessor(data)
 
-    acc["blk3.up"].A.eigvals           # 1D float Tensor, descending
-    acc["blk3.up"].B.cov               # (d_out, d_out) Tensor, derived if model given
-    acc["blk3.up"].G.eigh              # (eigvals Tensor, eigvecs Tensor)
-    acc["blk3.up"].A.mean              # stored mean (+m modifier)
-    acc["blk3.up"].A.svd               # (S, V) from eigdecomp, or (U, S, V) from acts
-    acc.blocks[3].up.A.eigvals         # same as above, block-indexed
+    acc["blk3.up"].in_.acts.eigvals    # 1D float Tensor, descending
+    acc["blk3.up"].out.acts.cov        # (d_out, d_out) Tensor, derived if model given
+    acc["blk3.up"].out.grads.eigh      # (eigvals Tensor, eigvecs Tensor)
+    acc["blk3.up"].in_.acts.mean       # stored mean (+m modifier)
+    acc["blk3.up"].in_.acts.svd        # (S, V) from eigdecomp, or (U, S, V) from acts
+    acc.blocks[3].up.in_.acts.eigvals  # same as above, block-indexed
 
-    acc.after_final_norm.A.eigvals     # final residual stream, post-norm
-    acc.before_final_norm.A.eigvals    # final residual stream, pre-norm
-    acc["blk3.up"].input.eigvals       # alias: input = A
-    acc["blk3.up"].output.cov          # alias: output = B
-    acc["blk3.up"].grad.eigvals        # alias: grad = G
+    acc.after_final_norm.value.acts.eigvals  # final residual stream, post-norm
+    acc.before_final_norm.value.acts.eigvals # final residual stream, pre-norm
+    acc["blk3.attn.head0"].slice.acts.eigvals  # OV-head pre-W_o slice
+    acc["blk3.attn.head0"].contrib.acts.cov    # OV-head post-W_o contribution
 
 Storage formats (from most to least data):
     acts        — raw per-token activation vectors (N, d). Largest.
@@ -127,9 +127,8 @@ def get_eigenspectrum(acts=None, cov=None, mu=None, topk=None):
 # Section 3: Storage constants and helpers
 # ===========================================================================
 
-_FACTOR_KEYS = ("A", "G")
-_DERIVED = ("B", "O")
-_DERIVED_FLAG = {"B": "b", "O": "o"}
+# Format modifier flag controlling whether each derived signal is stored.
+_DERIVED_FLAG = {"out.acts": "b", "contrib.acts": "o"}
 
 _FORMAT_ALIASES = {
     "activations": "acts",
@@ -275,8 +274,8 @@ class DataAccessor:
         self._selective_weights: Optional[dict] = None
         self.abort_on_model_load = abort_on_model_load
         self._layer_cache: dict = {}
-        self._eigh_cache: dict = {}  # (hook, factor) -> (centered_eigvals, uncentered_eigvals, eigvecs_or_None, centered_eigvecs_or_None)
-        self._derived_cov_cache: dict = {}  # (hook, factor) -> derived covariance (B or O)
+        self._eigh_cache: dict = {}  # (hook, signal) -> (centered_eigvals, uncentered_eigvals, eigvecs_or_None, centered_eigvecs_or_None)
+        self._derived_cov_cache: dict = {}  # (hook, signal) -> derived covariance
 
     def _ensure_weights(self):
         """Ensure model weights are available (full model or selective loading)."""
@@ -339,109 +338,104 @@ class DataAccessor:
                 if k.startswith("n_") or "cross_eigvals" in k:
                     out_entry[k] = v
 
-            factors = list(_FACTOR_KEYS)
-            for factor in _DERIVED:
-                if self._should_store_derived(entry, factor, base_format, plus, minus):
-                    factors.append(factor)
+            signals = list(hn.captured_signals(hook_name))
+            for signal in hn.derived_signals(hook_name):
+                if self._should_store_derived(entry, signal, base_format, plus, minus):
+                    signals.append(signal)
 
-            for factor in factors:
-                store_mean = self._should_store_mean(hook_name, factor, base_format, plus, minus)
-                self._write_factor(out_entry, hook_name, factor, base_format, store_mean, storage_dtype)
+            for signal in signals:
+                store_mean = self._should_store_mean(hook_name, signal, base_format, plus, minus)
+                self._write_signal(out_entry, hook_name, signal, base_format, store_mean, storage_dtype)
 
             result[hook_name] = out_entry
 
         return result
 
-    def _should_store_derived(self, entry, factor, base_format, plus, minus) -> bool:
-        flag = _DERIVED_FLAG[factor]
+    def _should_store_derived(self, entry, signal, base_format, plus, minus) -> bool:
+        flag = _DERIVED_FLAG[signal]
+        # `contrib.acts` (the +o signal) is raw-less: never stored for acts formats.
+        if signal == "contrib.acts" and base_format in ("acts", "acts_svd"):
+            return False
         if flag in minus:
             return False
         if flag in plus or base_format == "eigenvalues":
             return True
-        return any(k in entry for k in (factor, f"{factor}_eigvals", f"{factor}_eigvecs"))
+        return any(k in entry for k in (signal, f"{signal}_eigvals", f"{signal}_eigvecs"))
 
-    def _should_store_b(self, entry, base_format, plus, minus) -> bool:
-        return self._should_store_derived(entry, "B", base_format, plus, minus)
-
-    def _should_store_o(self, entry, base_format, plus, minus) -> bool:
-        if base_format in ("acts", "acts_svd"):
-            return False
-        return self._should_store_derived(entry, "O", base_format, plus, minus)
-
-    def _should_store_mean(self, hook_name, factor, base_format, plus, minus) -> bool:
+    def _should_store_mean(self, hook_name, signal, base_format, plus, minus) -> bool:
         if "m" in minus:
             return False
         if "m" in plus or "b" in plus or "o" in plus or base_format == "eigenvalues":
             return True
         entry = self._entry(hook_name)
-        if f"{factor}_mean" in entry:
+        if f"{signal}_mean" in entry:
             return True
-        return base_format == "cov_svd" and self._has_raw_activations(entry, factor)
+        return base_format == "cov_svd" and self._has_raw_activations(entry, signal)
 
     @staticmethod
-    def _has_raw_activations(entry, factor) -> bool:
-        t = entry.get(factor)
+    def _has_raw_activations(entry, signal) -> bool:
+        t = entry.get(signal)
         return isinstance(t, torch.Tensor) and t.dim() == 2 and t.shape[0] != t.shape[1]
 
-    def _write_factor(self, out_entry, hook_name, factor, base_format, store_means, storage_dtype):
-        view = self[hook_name]._factor(factor)
+    def _write_signal(self, out_entry, hook_name, signal, base_format, store_means, storage_dtype):
+        view = self[hook_name]._factor(signal)
         n = view.n
 
         if base_format == "acts":
-            acts = view.acts_raw
+            acts = view.samples_raw
             if acts is not None:
-                out_entry[factor] = _cast_for(acts.cpu(), "acts", storage_dtype)
-                out_entry[f"n_{factor}"] = acts.shape[0]
-                self._copy_mask(out_entry, hook_name, factor)
+                out_entry[signal] = _cast_for(acts.cpu(), "acts", storage_dtype)
+                out_entry[f"n_{signal}"] = acts.shape[0]
+                self._copy_mask(out_entry, hook_name, signal)
 
         elif base_format == "acts_svd":
             svd = view.svd
             if svd is not None and len(svd) == 3:
                 U, S, V = svd
-                out_entry[f"{factor}_U"] = _cast_for(U.cpu(), "acts", storage_dtype)
-                out_entry[f"{factor}_S"] = _cast_for(S.cpu(), "eigvals", storage_dtype)
-                out_entry[f"{factor}_V"] = _cast_for(V.cpu(), "eigvecs", storage_dtype)
+                out_entry[f"{signal}_U"] = _cast_for(U.cpu(), "acts", storage_dtype)
+                out_entry[f"{signal}_S"] = _cast_for(S.cpu(), "eigvals", storage_dtype)
+                out_entry[f"{signal}_V"] = _cast_for(V.cpu(), "eigvecs", storage_dtype)
                 if n is not None:
-                    out_entry[f"n_{factor}"] = n
-                self._copy_mask(out_entry, hook_name, factor)
+                    out_entry[f"n_{signal}"] = n
+                self._copy_mask(out_entry, hook_name, signal)
 
         elif base_format == "cov":
             cov = view.cov
             if cov is not None and n is not None:
-                out_entry[factor] = _cast_for((cov.cpu() * n), "cov", storage_dtype)
-                out_entry[f"n_{factor}"] = n
+                out_entry[signal] = _cast_for((cov.cpu() * n), "cov", storage_dtype)
+                out_entry[f"n_{signal}"] = n
 
         elif base_format == "cov_svd":
             eigh = view.eigh
             if eigh is not None:
                 eigvals, eigvecs = eigh
-                out_entry[f"{factor}_eigvals"] = _cast_for(eigvals.cpu(), "eigvals", storage_dtype)
-                out_entry[f"{factor}_eigvecs"] = _cast_for(eigvecs.cpu(), "eigvecs", storage_dtype)
+                out_entry[f"{signal}_eigvals"] = _cast_for(eigvals.cpu(), "eigvals", storage_dtype)
+                out_entry[f"{signal}_eigvecs"] = _cast_for(eigvecs.cpu(), "eigvecs", storage_dtype)
                 if n is not None:
-                    out_entry[f"n_{factor}"] = n
+                    out_entry[f"n_{signal}"] = n
                 centered = view.eigvals_centered
                 if centered is not None:
-                    out_entry[f"{factor}_eigvals_centered"] = _cast_for(centered.cpu(), "eigvals", storage_dtype)
+                    out_entry[f"{signal}_eigvals_centered"] = _cast_for(centered.cpu(), "eigvals", storage_dtype)
 
         elif base_format == "eigenvalues":
             eigvals = view.eigvals
             if eigvals is not None:
-                out_entry[f"{factor}_eigvals"] = _cast_for(eigvals.cpu(), "eigvals", storage_dtype)
+                out_entry[f"{signal}_eigvals"] = _cast_for(eigvals.cpu(), "eigvals", storage_dtype)
                 if n is not None:
-                    out_entry[f"n_{factor}"] = n
+                    out_entry[f"n_{signal}"] = n
                 centered = view.eigvals_centered
                 if centered is not None:
-                    out_entry[f"{factor}_eigvals_centered"] = _cast_for(centered.cpu(), "eigvals", storage_dtype)
+                    out_entry[f"{signal}_eigvals_centered"] = _cast_for(centered.cpu(), "eigvals", storage_dtype)
 
         if store_means:
             mean = view.mean
             if mean is not None:
-                out_entry[f"{factor}_mean"] = _cast_for(mean.cpu(), "mean", storage_dtype)
+                out_entry[f"{signal}_mean"] = _cast_for(mean.cpu(), "mean", storage_dtype)
 
-    def _copy_mask(self, out_entry, hook_name, factor):
-        mask = self._entry(hook_name).get(f"{factor}_mask")
+    def _copy_mask(self, out_entry, hook_name, signal):
+        mask = self._entry(hook_name).get(f"{signal}_mask")
         if mask is not None:
-            out_entry[f"{factor}_mask"] = mask.cpu().bool()
+            out_entry[f"{signal}_mask"] = mask.cpu().bool()
 
     def _write_metadata(self, result, format, token_filter=None, n_chunks=None):
         source_filter = self.data.get("__token_filter__")
@@ -529,32 +523,51 @@ class DataAccessor:
         return self._save_in_place(output_path)
 
     def project_same_layer(self, onto: str = "both", output_path: str = None) -> str:
-        """Project gradient G against the same hook's forward factor and save.
+        """Project the grads signal against the same hook's forward-acts signal and save.
 
-        The forward factor is B for MLP hooks (derived from weights if needed) and
-        A for residual hooks — exactly what `hook.B` resolves to. onto: "B" projects
-        G onto the forward basis, "G" the reverse, "both" both directions."""
-        do_fwd = onto in ("B", "both", "BG", "GB")
-        do_G = onto in ("G", "both", "BG", "GB")
+        The forward-acts signal is the derived `out.acts` for MLP hooks (from
+        weights if needed), the captured `value.acts` for residual/boundary hooks,
+        and the derived `contrib.acts` for OV-heads. onto: "fwd" projects grads
+        onto the forward basis, "rev" the reverse, "both" both directions."""
+        do_fwd = onto in ("fwd", "both")
+        do_G = onto in ("rev", "both")
         for hook in self.hook_names():
-            G, fwd = self[hook].G, self[hook].B
-            if _is_ov_head(hook):
-                label = "O"
-            elif _is_residual_hook(hook):
-                label = "A"
-            else:
-                label = "B"
+            grads_signal = self._grads_signal(hook)
+            fwd_signal = self._forward_acts_signal(hook)
+            if grads_signal is None or fwd_signal is None:
+                continue
+            G = self[hook]._factor(grads_signal)
+            fwd = self[hook]._factor(fwd_signal)
             try:
                 fwd_vecs, G_vecs = fwd.eigvecs, G.eigvecs
             except ValueError:
-                continue  # MLP B needs A_mean (bias term) that wasn't stored
+                continue  # MLP out.acts needs in.acts mean (bias term) that wasn't stored
             if fwd_vecs is None or G_vecs is None or fwd_vecs.shape != G_vecs.shape:
                 continue
             if do_fwd:
-                self._entry(hook)[f"G_cross_eigvals_{label}"] = cross_eigvals(G.cov, fwd_vecs)
+                self._entry(hook)[f"{grads_signal}_cross_eigvals_{fwd_signal}"] = cross_eigvals(G.cov, fwd_vecs)
             if do_G:
-                self._entry(hook)[f"{label}_cross_eigvals_G"] = cross_eigvals(fwd.cov, G_vecs)
+                self._entry(hook)[f"{fwd_signal}_cross_eigvals_{grads_signal}"] = cross_eigvals(fwd.cov, G_vecs)
         return self._save_in_place(output_path)
+
+    @staticmethod
+    def _grads_signal(hook):
+        """The captured grads signal for this hook, or None if its kind has none."""
+        for s in hn.captured_signals(hook):
+            if s.endswith(".grads"):
+                return s
+        return None
+
+    @staticmethod
+    def _forward_acts_signal(hook):
+        """The output-acts signal at this hook: derived if any, else captured acts."""
+        for s in hn.derived_signals(hook):
+            if s.endswith(".acts"):
+                return s
+        for s in hn.captured_signals(hook):
+            if s.endswith(".acts"):
+                return s
+        return None
 
     def project_onto_basis(self, basis_path: str, output_path: str = None) -> str:
         """Project this data onto another file's eigenbasis (cross-checkpoint) and save."""
@@ -562,18 +575,18 @@ class DataAccessor:
         return self._save_in_place(output_path)
 
     def _project_onto(self, basis_path: str) -> None:
-        """Add `{factor}_cross_eigvals_{ref}` from the reference file's eigenbasis. In place."""
+        """Add `{signal}_cross_eigvals_{ref}` from the reference file's eigenbasis. In place."""
         ref = DataAccessor(basis_path)
         label = os.path.splitext(os.path.basename(basis_path))[0]
         for hook in self.hook_names():
             if hook not in ref.data:
                 continue
-            for factor in _FACTOR_KEYS:
-                basis = getattr(ref[hook], factor).eigvecs
-                cov = getattr(self[hook], factor).cov
+            for signal in hn.captured_signals(hook):
+                basis = ref[hook]._factor(signal).eigvecs
+                cov = self[hook]._factor(signal).cov
                 if basis is None or cov is None or cov.shape[0] != basis.shape[0]:
                     continue
-                self._entry(hook)[f"{factor}_cross_eigvals_{label}"] = cross_eigvals(cov, basis)
+                self._entry(hook)[f"{signal}_cross_eigvals_{label}"] = cross_eigvals(cov, basis)
 
     def _save_in_place(self, output_path: str = None) -> str:
         """Persist self.data unchanged in format, refreshing metadata."""
@@ -672,19 +685,19 @@ class DataAccessor:
     # Internal: computation methods (used by FactorView properties)
     # ------------------------------------------------------------------
 
-    def _ensure_eigh(self, hook_name: str, factor: str, need_vecs: bool = False, need_centered_vecs: bool = False):
-        """Ensure eigendecomposition is cached for (hook, factor).
+    def _ensure_eigh(self, hook_name: str, signal: str, need_vecs: bool = False, need_centered_vecs: bool = False):
+        """Ensure eigendecomposition is cached for (hook, signal).
 
         Stores (centered_eigvals, uncentered_eigvals, eigvecs_or_None, centered_eigvecs_or_None) in _eigh_cache.
         If need_vecs and we only have eigvals cached, recomputes with full eigh.
         """
         if need_centered_vecs:
             need_vecs = True
-        # blkN.layer virtual hook: redirect A->up.A, G->down.G
-        orig_key = (hook_name, factor)
+        # blkN.layer virtual hook: redirect in.acts->up.in.acts, out.grads->down.out.grads
+        orig_key = (hook_name, signal)
         if hook_name.endswith(".layer"):
-            hook_name = hook_name[:-6] + (".up" if factor == "A" else ".down")
-        cache_key = (hook_name, factor)
+            hook_name = hook_name[:-6] + (".up" if signal == "in.acts" else ".down")
+        cache_key = (hook_name, signal)
         if orig_key != cache_key:
             # Alias so callers can look up by either name
             if cache_key in self._eigh_cache:
@@ -705,20 +718,20 @@ class DataAccessor:
             centered, uncentered, eigvecs, centered_eigvecs = cached
 
         # Stored eigvals (eigenvalues / cov_svd format)
-        if f"{factor}_eigvals" in entry and (not need_vecs or f"{factor}_eigvecs" in entry):
+        if f"{signal}_eigvals" in entry and (not need_vecs or f"{signal}_eigvecs" in entry):
             if uncentered is None:
-                uncentered = entry[f"{factor}_eigvals"]
+                uncentered = entry[f"{signal}_eigvals"]
             if eigvecs is None:
-                eigvecs = entry.get(f"{factor}_eigvecs")
-            stored_centered = entry.get(f"{factor}_eigvals_centered")
+                eigvecs = entry.get(f"{signal}_eigvecs")
+            stored_centered = entry.get(f"{signal}_eigvals_centered")
             if stored_centered is not None and centered is None:
                 centered = stored_centered
             # Recover centered eigvals/eigvecs from stored eigvecs + mean if needed
-            if (centered is None or need_centered_vecs) and f"{factor}_eigvecs" in entry:
-                mu_t = self._mean(hook_name, factor)
+            if (centered is None or need_centered_vecs) and f"{signal}_eigvecs" in entry:
+                mu_t = self._mean(hook_name, signal)
                 if mu_t is not None:
-                    V = entry[f"{factor}_eigvecs"].to(dev)
-                    S = entry[f"{factor}_eigvals"].to(dev)
+                    V = entry[f"{signal}_eigvecs"].to(dev)
+                    S = entry[f"{signal}_eigvals"].to(dev)
                     mu_d = mu_t.to(device=dev, dtype=V.dtype)
                     cov_centered = reconstruct_cov(S.to(dev), V.to(dev)) - torch.outer(mu_d, mu_d)
                     if need_centered_vecs and centered_eigvecs is None:
@@ -732,12 +745,12 @@ class DataAccessor:
             return
 
         # Compute from cov
-        if (uncentered is None or (need_vecs and eigvecs is None)) and factor in entry:
-            t = entry[factor]
+        if (uncentered is None or (need_vecs and eigvecs is None)) and signal in entry:
+            t = entry[signal]
             if isinstance(t, torch.Tensor) and t.dim() == 2 and t.shape[0] == t.shape[1]:
-                n = entry.get(f"n_{factor}", entry.get("n", 1))
+                n = entry.get(f"n_{signal}", entry.get("n", 1))
                 cov = (t.to(dev) / n)
-                mu_t = self._mean(hook_name, factor)
+                mu_t = self._mean(hook_name, signal)
                 mu = mu_t.to(device=dev, dtype=cov.dtype) if mu_t is not None else None
                 if need_vecs:
                     uncentered, eigvecs = _eigh_full(cov)
@@ -754,12 +767,12 @@ class DataAccessor:
                     centered = c.cpu() if c is not None else None
                     uncentered = u.cpu()
 
-        # Derived factor (B / O): build cov via the linear map, then same eigh logic
-        if (uncentered is None or (need_vecs and eigvecs is None)) and factor in _DERIVED:
-            cov = self._derived_cov(hook_name, factor)
+        # Derived signal (out.acts / contrib.acts): build cov via the linear map, then same eigh logic
+        if (uncentered is None or (need_vecs and eigvecs is None)) and signal in hn.derived_signals(hook_name):
+            cov = self._derived_cov(hook_name, signal)
             if cov is not None:
                 cov = cov.to(dev)
-                mu_t = self._derived_mean(hook_name, factor)
+                mu_t = self._derived_mean(hook_name, signal)
                 mu = mu_t.to(device=dev, dtype=cov.dtype) if mu_t is not None else None
                 if need_vecs:
                     uncentered, eigvecs = _eigh_full(cov)
@@ -778,10 +791,10 @@ class DataAccessor:
 
         # Fallback: raw activations
         if uncentered is None or (need_vecs and eigvecs is None):
-            acts = self._activations(hook_name, factor)
+            acts = self._activations(hook_name, signal)
             if acts is not None:
                 if need_vecs:
-                    cov = self._covariance(hook_name, factor)
+                    cov = self._covariance(hook_name, signal)
                     if cov is not None:
                         uncentered, eigvecs = _eigh_full(cov.to(dev))
                         uncentered, eigvecs = uncentered.cpu(), eigvecs.cpu()
@@ -794,110 +807,111 @@ class DataAccessor:
         if orig_key != cache_key:
             self._eigh_cache[orig_key] = self._eigh_cache[cache_key]
 
-    def _eigenvalues(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
-        self._ensure_eigh(hook_name, factor)
-        return self._eigh_cache[(hook_name, factor)][1]
+    def _eigenvalues(self, hook_name: str, signal: str) -> Optional[torch.Tensor]:
+        self._ensure_eigh(hook_name, signal)
+        return self._eigh_cache[(hook_name, signal)][1]
 
-    def _eigenvalues_centered(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
-        self._ensure_eigh(hook_name, factor)
-        return self._eigh_cache[(hook_name, factor)][0]
+    def _eigenvalues_centered(self, hook_name: str, signal: str) -> Optional[torch.Tensor]:
+        self._ensure_eigh(hook_name, signal)
+        return self._eigh_cache[(hook_name, signal)][0]
 
-    def _eigenvectors(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
-        self._ensure_eigh(hook_name, factor, need_vecs=True)
-        return self._eigh_cache[(hook_name, factor)][2]
+    def _eigenvectors(self, hook_name: str, signal: str) -> Optional[torch.Tensor]:
+        self._ensure_eigh(hook_name, signal, need_vecs=True)
+        return self._eigh_cache[(hook_name, signal)][2]
 
-    def _eigenvectors_centered(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
-        self._ensure_eigh(hook_name, factor, need_centered_vecs=True)
-        return self._eigh_cache[(hook_name, factor)][3]
+    def _eigenvectors_centered(self, hook_name: str, signal: str) -> Optional[torch.Tensor]:
+        self._ensure_eigh(hook_name, signal, need_centered_vecs=True)
+        return self._eigh_cache[(hook_name, signal)][3]
 
-    def _covariance(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
-        if factor in _DERIVED:
-            c = self._derived_cov(hook_name, factor)
+    def _covariance(self, hook_name: str, signal: str) -> Optional[torch.Tensor]:
+        if signal in hn.derived_signals(hook_name):
+            c = self._derived_cov(hook_name, signal)
             return c.cpu() if c is not None else None
 
         entry = self._entry(hook_name)
 
-        if factor in entry:
-            t = entry[factor]
+        if signal in entry:
+            t = entry[signal]
             if isinstance(t, torch.Tensor) and t.dim() == 2 and t.shape[0] == t.shape[1]:
-                n = entry.get(f"n_{factor}", entry.get("n", 1))
+                n = entry.get(f"n_{signal}", entry.get("n", 1))
                 return t.float() / n
 
-        vk, sk = f"{factor}_eigvecs", f"{factor}_eigvals"
+        vk, sk = f"{signal}_eigvecs", f"{signal}_eigvals"
         if vk in entry and sk in entry:
             return reconstruct_cov(entry[sk].float(), entry[vk].float())
 
-        if factor in entry:
-            t = entry[factor]
+        if signal in entry:
+            t = entry[signal]
             if isinstance(t, torch.Tensor) and t.dim() == 2:
                 X = t.float()
-                mask = entry.get(f"{factor}_mask")
+                mask = entry.get(f"{signal}_mask")
                 if mask is not None:
                     X = X[mask.bool()]
                 return (X.T @ X) / X.shape[0]
 
         return None
 
-    def _activations(self, hook_name: str, factor: str, apply_mask: bool = True) -> Optional[torch.Tensor]:
+    def _activations(self, hook_name: str, signal: str, apply_mask: bool = True) -> Optional[torch.Tensor]:
         # Virtual hook: after_final_norm from before_final_norm + norm layer
-        if hook_name == "after_final_norm" and factor == "A" and hook_name not in self.data:
+        if hook_name == "after_final_norm" and signal == "value.acts" and hook_name not in self.data:
             return self._post_norm_activations()
 
         entry = self._entry(hook_name)
 
         raw = None
-        if factor in entry:
-            t = entry[factor]
+        if signal in entry:
+            t = entry[signal]
             if isinstance(t, torch.Tensor) and t.dim() == 2 and t.shape[0] != t.shape[1]:
                 raw = t
 
         if raw is None:
-            uk = f"{factor}_U"
+            uk = f"{signal}_U"
             if uk in entry:
                 U = entry[uk].float()
-                S = entry[f"{factor}_S"].float()
-                V = entry[f"{factor}_V"].float()
+                S = entry[f"{signal}_S"].float()
+                V = entry[f"{signal}_V"].float()
                 raw = (U * S.unsqueeze(0)) @ V.T
 
-        if raw is None and factor in _DERIVED:
-            deriv = self._derivation(hook_name, factor)
-            A_acts = self._activations(hook_name, "A", apply_mask=apply_mask)
-            if deriv is not None and A_acts is not None:
+        if raw is None and signal in hn.derived_signals(hook_name):
+            deriv = self._derivation(hook_name, signal)
+            src_signal = hn.derived_signals(hook_name)[signal][0]
+            src_acts = self._activations(hook_name, src_signal, apply_mask=apply_mask)
+            if deriv is not None and src_acts is not None:
                 W, b = deriv
-                out = A_acts.to(W.device).float() @ W.T
+                out = src_acts.to(W.device).float() @ W.T
                 return (out + b if b is not None else out).cpu()
 
         if raw is None:
             return None
 
         if apply_mask:
-            mask = entry.get(f"{factor}_mask")
+            mask = entry.get(f"{signal}_mask")
             if mask is not None:
                 return raw[mask.bool()]
         return raw
 
-    def _mean(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
-        if factor in _DERIVED:
-            return self._derived_mean(hook_name, factor)
+    def _mean(self, hook_name: str, signal: str) -> Optional[torch.Tensor]:
+        if signal in hn.derived_signals(hook_name):
+            return self._derived_mean(hook_name, signal)
         entry = self._entry(hook_name)
-        stored = entry.get(f"{factor}_mean")
+        stored = entry.get(f"{signal}_mean")
         if stored is not None:
             return stored
-        acts = self._activations(hook_name, factor)
+        acts = self._activations(hook_name, signal)
         return acts.float().mean(0) if acts is not None else None
 
-    def _svd(self, hook_name: str, factor: str):
+    def _svd(self, hook_name: str, signal: str):
         """(U, S, V) from acts if available, else (S, V) from eigdecomp."""
-        acts = self._activations(hook_name, factor)
+        acts = self._activations(hook_name, signal)
         if acts is not None:
             U, S, Vt = torch.linalg.svd(acts.float(), full_matrices=False)
             return U, S, Vt.T
 
-        eigvals = self._eigenvalues(hook_name, factor)
-        eigvecs = self._eigenvectors(hook_name, factor)
+        eigvals = self._eigenvalues(hook_name, signal)
+        eigvecs = self._eigenvectors(hook_name, signal)
         if eigvals is not None and eigvecs is not None:
             entry = self._entry(hook_name)
-            n = entry.get(f"n_{factor}", entry.get("n", 1))
+            n = entry.get(f"n_{signal}", entry.get("n", 1))
             S = (eigvals.clamp(min=0) * n).sqrt().float()
             return S, eigvecs
 
@@ -907,74 +921,79 @@ class DataAccessor:
     # Internal: generic linear derivation (B = MLP out, O = per-OV-head contrib)
     # ------------------------------------------------------------------
 
-    def _derivation(self, hook_name: str, factor: str):
-        """(W, bias) on the compute device for derived `factor`, or None."""
-        dev = "cuda" if torch.cuda.is_available() else "cpu"
-        if factor == "B":
-            if not hn.mlp_proj(hook_name):
-                return None
-            layer = self._get_layer(hook_name)
-            if layer is None:
-                return None
-            W = layer.weight.detach().to(dev).float()
-            b = layer.bias.detach().to(dev).float() if layer.bias is not None else None
-            return W, b
-        ov = hn.ov_head(hook_name)
-        if not ov:
+    def _derivation(self, hook_name: str, signal: str):
+        """(W, bias) on the compute device for a derived `signal`, or None.
+
+        weight_kind "mlp" -> full projection weight (+bias); "head" -> o_proj
+        weight sliced to this head's columns (no bias)."""
+        spec = hn.derived_signals(hook_name).get(signal)
+        if spec is None:
             return None
+        src_signal, weight_kind = spec
+        dev = "cuda" if torch.cuda.is_available() else "cpu"
         layer = self._get_layer(hook_name)
         if layer is None:
             return None
-        A = self._covariance(hook_name, "A")
-        mu = self._mean(hook_name, "A")
-        ref = A if A is not None else mu
+        if weight_kind == "mlp":
+            W = layer.weight.detach().to(dev).float()
+            b = layer.bias.detach().to(dev).float() if layer.bias is not None else None
+            return W, b
+        # "head": slice o_proj columns to this head using d_head from the source cov/mean
+        src_cov = self._covariance(hook_name, src_signal)
+        mu = self._mean(hook_name, src_signal)
+        ref = src_cov if src_cov is not None else mu
         if ref is None:
             return None
         d_head = ref.shape[0]
-        h = ov[1]
+        h = hn.ov_head(hook_name)[1]
         W = layer.weight.detach().to(dev).float()[:, h * d_head:(h + 1) * d_head]
         return W, None
 
-    def _derived_cov(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
-        cache_key = (hook_name, factor)
+    def _derived_cov(self, hook_name: str, signal: str) -> Optional[torch.Tensor]:
+        cache_key = (hook_name, signal)
         if cache_key in self._derived_cov_cache:
             return self._derived_cov_cache[cache_key]
         entry = self._entry(hook_name)
         dev = "cuda" if torch.cuda.is_available() else "cpu"
 
-        if factor in entry:
-            t = entry[factor]
+        if signal in entry:
+            t = entry[signal]
             if t.dim() == 2 and t.shape[0] == t.shape[1]:
-                n = entry.get(f"n_{factor}", entry.get("n", 1))
+                n = entry.get(f"n_{signal}", entry.get("n", 1))
                 return t.to(dev).float() / n
-        if f"{factor}_eigvecs" in entry and f"{factor}_eigvals" in entry:
-            return reconstruct_cov(entry[f"{factor}_eigvals"].to(dev).float(),
-                                   entry[f"{factor}_eigvecs"].to(dev).float())
+        if f"{signal}_eigvecs" in entry and f"{signal}_eigvals" in entry:
+            return reconstruct_cov(entry[f"{signal}_eigvals"].to(dev).float(),
+                                   entry[f"{signal}_eigvecs"].to(dev).float())
 
-        deriv = self._derivation(hook_name, factor)
-        A_cov = self._covariance(hook_name, "A")
-        if deriv is None or A_cov is None:
+        deriv = self._derivation(hook_name, signal)
+        src_signal = hn.derived_signals(hook_name)[signal][0]
+        src_cov = self._covariance(hook_name, src_signal)
+        if deriv is None or src_cov is None:
             return None
         W, b = deriv
-        cov = W @ A_cov.to(dev) @ W.T
+        cov = W @ src_cov.to(dev) @ W.T
         if b is not None:
-            mu = self._mean(hook_name, "A")
+            mu = self._mean(hook_name, src_signal)
             if mu is None:
                 raise ValueError(
-                    f"Cannot derive B for '{hook_name}': layer has a bias but no A_mean is stored. "
-                    f"Re-collect with a storage format that includes the '+m' modifier (e.g. cov_svd+m)."
+                    f"Cannot derive '{signal}' for '{hook_name}': layer has a bias but no "
+                    f"'{src_signal}_mean' is stored. Re-collect with a storage format that "
+                    f"includes the '+m' modifier (e.g. cov_svd+m)."
                 )
             Wmu = W @ mu.to(device=dev, dtype=W.dtype)
             cov = cov + torch.outer(Wmu, b) + torch.outer(b, Wmu) + torch.outer(b, b)
         self._derived_cov_cache[cache_key] = cov
         return cov
 
-    def _derived_mean(self, hook_name: str, factor: str) -> Optional[torch.Tensor]:
+    def _derived_mean(self, hook_name: str, signal: str) -> Optional[torch.Tensor]:
         entry = self._entry(hook_name)
-        if f"{factor}_mean" in entry:
-            return entry[f"{factor}_mean"]
-        mu = self._mean(hook_name, "A")
-        deriv = self._derivation(hook_name, factor)
+        if f"{signal}_mean" in entry:
+            return entry[f"{signal}_mean"]
+        spec = hn.derived_signals(hook_name).get(signal)
+        if spec is None:
+            return None
+        mu = self._mean(hook_name, spec[0])
+        deriv = self._derivation(hook_name, signal)
         if mu is None or deriv is None:
             return None
         W, b = deriv
@@ -983,17 +1002,13 @@ class DataAccessor:
             m = m + b
         return m.cpu()
 
-    def _B_covariance(self, hook_name): return self._derived_cov(hook_name, "B")
-    def _O_covariance(self, hook_name): return self._derived_cov(hook_name, "O")
-    def _O_mean(self, hook_name): return self._derived_mean(hook_name, "O")
-
     # ------------------------------------------------------------------
     # Internal: norm derivation (before_final_norm -> after_final_norm)
     # ------------------------------------------------------------------
 
     def _post_norm_activations(self) -> Optional[torch.Tensor]:
         """Derive after_final_norm acts from before_final_norm raw acts + norm layer."""
-        acts = self._activations("before_final_norm", "A")
+        acts = self._activations("before_final_norm", "value.acts")
         if acts is None:
             return None
         if not self._ensure_weights():
@@ -1012,80 +1027,86 @@ class DataAccessor:
     # Public: available hooks and factors
     # ------------------------------------------------------------------
 
-    def _has_eigenvalues(self, hook_name: str, factor: str) -> bool:
+    def _has_eigenvalues(self, hook_name: str, signal: str) -> bool:
         """Check if eigenvalues are obtainable without computing them."""
         entry = self._entry(hook_name)
-        if f"{factor}_eigvals" in entry:
+        if f"{signal}_eigvals" in entry:
             return True
         # Raw cov (square matrix) -> eigendecomposable
-        if factor in entry:
-            t = entry[factor]
+        if signal in entry:
+            t = entry[signal]
             if isinstance(t, torch.Tensor) and t.dim() == 2 and t.shape[0] == t.shape[1]:
                 return True
         # Eigvecs + eigvals stored (cov_svd)
-        if f"{factor}_eigvecs" in entry:
+        if f"{signal}_eigvecs" in entry:
             return True
         # Raw activations (non-square matrix) -> PCA-able
-        if factor in entry:
-            t = entry[factor]
+        if signal in entry:
+            t = entry[signal]
             if isinstance(t, torch.Tensor) and t.dim() == 2 and t.shape[0] != t.shape[1]:
                 return True
         return False
 
-    def available(self) -> dict:
-        """Return {hook_name: [factor_names]} for all obtainable data.
+    @staticmethod
+    def _src_acts_signal(hook_name: str) -> Optional[str]:
+        """The captured acts signal feeding this hook's derivations, or None."""
+        for s in hn.captured_signals(hook_name):
+            if s.endswith(".acts"):
+                return s
+        return None
 
-        Includes stored hooks and derivable virtual hooks (e.g. after_final_norm
-        from before_final_norm, B from A + model weights).
+    def available(self) -> dict:
+        """Return {hook_name: [signal, ...]} for all obtainable data.
+
+        Includes captured signals with data, derived signals obtainable when the
+        source data + model weights are available, and the layer / after_final_norm
+        virtual hooks.
         """
         result = {}
         for hook_name in self.hook_names():
-            factors = []
-            for f in ("A", "G"):
-                if self._has_eigenvalues(hook_name, f):
-                    factors.append(f)
-            # B / O: check stored first, then derivability without triggering model load
+            signals = [s for s in hn.captured_signals(hook_name)
+                       if self._has_eigenvalues(hook_name, s)]
+            # Derived signals: stored, or derivable from source acts + model weights.
             entry = self._entry(hook_name)
-            has_A_cov = ("A" in entry or "A_eigvecs" in entry)
+            src = self._src_acts_signal(hook_name)
+            has_src_cov = bool(src) and (src in entry or f"{src}_eigvecs" in entry)
             has_model = self.model is not None or self._model_name is not None
-            derivable = {"B": hn.mlp_proj(hook_name), "O": hn.ov_head(hook_name)}
-            for f in _DERIVED:
-                if any(k in entry for k in (f, f"{f}_eigvals", f"{f}_eigvecs")):
-                    factors.append(f)
-                elif derivable[f] and has_A_cov and has_model:
-                    factors.append(f)
-            if factors:
-                result[hook_name] = factors
+            for ds in hn.derived_signals(hook_name):
+                if any(k in entry for k in (ds, f"{ds}_eigvals", f"{ds}_eigvecs")):
+                    signals.append(ds)
+                elif has_src_cov and has_model:
+                    signals.append(ds)
+            if signals:
+                result[hook_name] = signals
 
-        # Virtual hook: blkN.layer -- whole-layer K-FAC (up.A x down.G)
+        # Virtual hook: blkN.layer -- whole-layer K-FAC (up.in.acts x down.out.grads)
         for blk in {h.split(".")[0] for h in result if hn.block_idx(h) is not None}:
-            if "A" in result.get(f"{blk}.up", []) and "G" in result.get(f"{blk}.down", []):
-                result[f"{blk}.layer"] = ["A", "G"]
+            if "in.acts" in result.get(f"{blk}.up", []) and "out.grads" in result.get(f"{blk}.down", []):
+                result[f"{blk}.layer"] = ["in.acts", "out.grads"]
 
         # Virtual hook: after_final_norm from before_final_norm acts
         if "after_final_norm" not in result and "before_final_norm" in result:
             entry = self._entry("before_final_norm")
-            has_acts = "A" in entry and isinstance(entry["A"], torch.Tensor) and entry["A"].dim() == 2 and entry["A"].shape[0] != entry["A"].shape[1]
+            t = entry.get("value.acts")
+            has_acts = isinstance(t, torch.Tensor) and t.dim() == 2 and t.shape[0] != t.shape[1]
             has_model = self.model is not None or self._model_name is not None
             if has_acts and has_model:
-                result["after_final_norm"] = ["A"]
+                result["after_final_norm"] = ["value.acts"]
 
         return result
 
     def needs_model_weights(self) -> bool:
-        """True if any derivation (B/O/post-norm) is required but not already stored."""
+        """True if any derivation (derived acts / post-norm) is required but not stored."""
         for hook_name, entry in self.data.items():
             if not isinstance(entry, dict):
                 continue
-            has_A = "A" in entry or "A_eigvecs" in entry
-            if hn.mlp_proj(hook_name) and has_A and not any(
-                    k in entry for k in ("B", "B_eigvals", "B_eigvecs")):
-                return True
-            if hn.ov_head(hook_name) and has_A and not any(
-                    k in entry for k in ("O", "O_eigvals", "O_eigvecs")):
-                return True
+            src = self._src_acts_signal(hook_name)
+            has_src = bool(src) and (src in entry or f"{src}_eigvecs" in entry)
+            for ds in hn.derived_signals(hook_name):
+                if has_src and not any(k in entry for k in (ds, f"{ds}_eigvals", f"{ds}_eigvecs")):
+                    return True
         if "before_final_norm" in self.data and "after_final_norm" not in self.data:
-            t = self.data.get("before_final_norm", {}).get("A")
+            t = self.data.get("before_final_norm", {}).get("value.acts")
             if isinstance(t, torch.Tensor) and t.dim() == 2 and t.shape[0] != t.shape[1]:
                 return True
         return False
@@ -1174,15 +1195,6 @@ class HeadsView:
         return self._acc[f"blk{self._idx}.attn.head{head_idx}"]
 
 
-# Residual-stream hook names: no weight matrix, so A = B (forward acts = output acts).
-_RESIDUAL_HOOK_PREFIXES = ("after_final_norm", "before_final_norm")
-
-# Block-boundary hook names: blk{i}.attn.in/out/raw_out, blk{i}.mlp.in/out.
-_BLOCK_BOUNDARY_RE = re.compile(r"blk\d+\.(attn|mlp)\.")
-
-# Per-OV-head hook names: blk{i}.attn.head{h}; derive O = W_h @ A @ W_h.T.
-_OV_HEAD_RE = re.compile(r"blk\d+\.attn\.head\d+$")
-
 # Read-only aliases for Pythia parallel-residual block boundaries.
 _KEY_ALIASES = [
     (re.compile(r"blk(\d+)\.mlp\.in$"),      "blk{0}.attn.in"),
@@ -1190,107 +1202,38 @@ _KEY_ALIASES = [
 ]
 
 
-def _is_ov_head(hook_name: str) -> bool:
-    return bool(_OV_HEAD_RE.match(hook_name))
-
-
-def _is_residual_hook(hook_name: str) -> bool:
-    if any(hook_name.startswith(p) for p in _RESIDUAL_HOOK_PREFIXES):
-        return True
-    if _OV_HEAD_RE.match(hook_name):
-        return False
-    return bool(_BLOCK_BOUNDARY_RE.match(hook_name))
-
-
-# Role node (kind, role, quantity) -> legacy on-disk storage key. None = not wired
-# yet (the slot still exists on the node and reads as absent). These letters are a
-# storage detail to be renamed to role.quantity later; this table is the only place
-# they map to roles.
-#   mlp:      in.acts=A   out.acts=B(derive W@in)   out.grads=G
-#   residual/boundary: value.acts=A   value.grads=G
-#   ov_head:  slice.acts=A   slice.grads=G   contrib.acts=O(derive W_h@slice)
-_NODE_FACTOR = {
-    ("mlp", "in", "acts"): "A",
-    ("mlp", "out", "acts"): "B",
-    ("mlp", "out", "grads"): "G",
-    ("residual", "value", "acts"): "A",
-    ("residual", "value", "grads"): "G",
-    ("boundary", "value", "acts"): "A",
-    ("boundary", "value", "grads"): "G",
-    ("ov_head", "slice", "acts"): "A",
-    ("ov_head", "slice", "grads"): "G",
-    ("ov_head", "contrib", "acts"): "O",
-}
-
-
-def _node_factor(hook_name, role, quantity):
-    return _NODE_FACTOR.get((hn.classify(hook_name), role, quantity))
-
-
 class NodeView:
     """A representation node. Always exposes .acts and .grads; either reads as
-    absent (None quantities) when no data is wired for that slot."""
+    absent (None quantities) when this hook has no such signal."""
 
-    def __init__(self, hook_name, role, acc):
+    def __init__(self, hook_name, node, acc):
         self._hook = hook_name
-        self._role = role
+        self._node = node  # in | out | value | slice | contrib
         self._acc = acc
 
     @property
     def acts(self):
-        return FactorView(self._hook, _node_factor(self._hook, self._role, "acts"), self._acc)
+        return FactorView(self._hook, f"{self._node}.acts", self._acc)
 
     @property
     def grads(self):
-        return FactorView(self._hook, _node_factor(self._hook, self._role, "grads"), self._acc)
+        return FactorView(self._hook, f"{self._node}.grads", self._acc)
 
 
 class HookView:
-    """acc[hook_name] -> HookView. Factors via .A/.B/.O/.G; nodes via .in_/.out/.value/.slice/.contrib."""
+    """acc[hook_name] -> HookView. Nodes via .in_/.out/.value/.slice/.contrib."""
 
     def __init__(self, hook_name: str, acc: DataAccessor):
         self._hook = hook_name
         self._acc = acc
 
-    def _factor(self, key: str) -> "FactorView":
-        return FactorView(self._hook, key, self._acc)
+    def _factor(self, signal: str) -> "FactorView":
+        return FactorView(self._hook, signal, self._acc)
 
-    @property
-    def A(self) -> "FactorView":
-        return self._factor("A")
-
-    @property
-    def B(self) -> "FactorView":
-        if _is_ov_head(self._hook):
-            return self._factor("O")
-        if _is_residual_hook(self._hook):
-            return self._factor("A")
-        return self._factor("B")
-
-    @property
-    def O(self) -> "FactorView":
-        return self._factor("O")
-
-    @property
-    def G(self) -> "FactorView":
-        return self._factor("G")
-
-    @property
-    def input(self) -> "FactorView":
-        return self.A
-
-    @property
-    def output(self) -> "FactorView":
-        return self.B
-
-    @property
-    def grad(self) -> "FactorView":
-        return self.G
-
-    def _node(self, kinds, role) -> "NodeView":
+    def _node(self, kinds, node) -> "NodeView":
         if hn.classify(self._hook) not in kinds:
-            raise AttributeError(f"{role!r} role does not apply to {self._hook!r}")
-        return NodeView(self._hook, role, self._acc)
+            raise AttributeError(f"{node!r} node does not apply to {self._hook!r}")
+        return NodeView(self._hook, node, self._acc)
 
     @property
     def in_(self) -> "NodeView":
@@ -1317,52 +1260,54 @@ class HookView:
 
 
 class FactorView:
-    """acc[hook].A -> FactorView. All properties are lazily computed."""
+    """acc[hook]._factor(signal) -> FactorView. Identity is the signal string
+    (e.g. 'in.acts', 'out.grads'). All properties are lazily computed and read as
+    None when the signal has no data."""
 
-    def __init__(self, hook_name: str, factor: str, acc: DataAccessor):
+    def __init__(self, hook_name: str, signal: str, acc: DataAccessor):
         self._hook = hook_name
-        self._factor = factor
+        self._signal = signal
         self._acc = acc
 
     @property
     def eigvals(self) -> Optional[torch.Tensor]:
         """Eigenvalues (uncentered) as 1D float tensor, descending order."""
-        return self._acc._eigenvalues(self._hook, self._factor)
+        return self._acc._eigenvalues(self._hook, self._signal)
 
     @property
     def eigvals_centered(self) -> Optional[torch.Tensor]:
         """Centered eigenvalues (of Cov[x] = E[xxT] - E[x]E[x]T), descending."""
-        return self._acc._eigenvalues_centered(self._hook, self._factor)
+        return self._acc._eigenvalues_centered(self._hook, self._signal)
 
     @property
     def eigvecs(self) -> Optional[torch.Tensor]:
         """Eigenvectors as columns (d, k), descending order."""
-        return self._acc._eigenvectors(self._hook, self._factor)
+        return self._acc._eigenvectors(self._hook, self._signal)
 
     @property
     def eigvecs_centered(self) -> Optional[torch.Tensor]:
         """Centered eigenvectors (of Cov[x] = E[xxT] - E[x]E[x]T), columns (d, k), descending."""
-        return self._acc._eigenvectors_centered(self._hook, self._factor)
+        return self._acc._eigenvectors_centered(self._hook, self._signal)
 
     @property
     def cov(self) -> Optional[torch.Tensor]:
         """Normalized covariance E[xx^T] as (d, d) float tensor."""
-        return self._acc._covariance(self._hook, self._factor)
+        return self._acc._covariance(self._hook, self._signal)
 
     @property
-    def acts(self) -> Optional[torch.Tensor]:
-        """Selected activations (N, d). Applies stored mask if present."""
-        return self._acc._activations(self._hook, self._factor)
+    def samples(self) -> Optional[torch.Tensor]:
+        """Selected raw sample matrix (N, d). Applies stored mask if present."""
+        return self._acc._activations(self._hook, self._signal)
 
     @property
-    def acts_raw(self) -> Optional[torch.Tensor]:
-        """All activations (N_total, d) without applying stored mask."""
-        return self._acc._activations(self._hook, self._factor, apply_mask=False)
+    def samples_raw(self) -> Optional[torch.Tensor]:
+        """All raw samples (N_total, d) without applying stored mask."""
+        return self._acc._activations(self._hook, self._signal, apply_mask=False)
 
     @property
     def mean(self) -> Optional[torch.Tensor]:
-        """Mean activation vector (d,) if stored via +m modifier."""
-        return self._acc._mean(self._hook, self._factor)
+        """Mean vector (d,) if stored via +m modifier or derivable."""
+        return self._acc._mean(self._hook, self._signal)
 
     @property
     def eigh(self) -> Optional[tuple]:
@@ -1384,28 +1329,28 @@ class FactorView:
 
     @property
     def svd(self):
-        """(U, S, V) from acts if available, else (S, V) from eigdecomp."""
-        return self._acc._svd(self._hook, self._factor)
+        """(U, S, V) from samples if available, else (S, V) from eigdecomp."""
+        return self._acc._svd(self._hook, self._signal)
 
     @property
     def n(self) -> Optional[int]:
-        """Number of tokens/samples this factor was accumulated over.
+        """Number of tokens/samples this signal was accumulated over.
 
-        For covariance formats: reads stored n_{factor} or n count.
-        For raw acts (N, d): reads from tensor shape.
+        For covariance formats: reads stored n_{signal} or n count.
+        For raw samples (N, d): reads from tensor shape.
         """
         entry = self._acc._entry(self._hook)
-        v = entry.get(f"n_{self._factor}") or entry.get("n")
+        v = entry.get(f"n_{self._signal}") or entry.get("n")
         if v is not None:
             return int(v)
-        # Fallback: raw acts tensor shape
-        t = entry.get(self._factor)
+        # Fallback: raw samples tensor shape
+        t = entry.get(self._signal)
         if isinstance(t, torch.Tensor) and t.dim() == 2 and t.shape[0] != t.shape[1]:
             return int(t.shape[0])
         return None
 
     def __repr__(self):
-        return f"FactorView({self._hook!r}, {self._factor!r})"
+        return f"FactorView({self._hook!r}, {self._signal!r})"
 
 
 # ===========================================================================
@@ -1463,8 +1408,9 @@ if __name__ == "__main__":
     p = sub.add_parser("project", help="Add cross-basis eigenvalue projections")
     p.add_argument("--input", required=True, metavar="PATH")
     g = p.add_mutually_exclusive_group(required=True)
-    g.add_argument("--onto", choices=["B", "G", "both", "BG", "GB"],
-                   help="Same-layer cross-factor: G->B/A basis, B/A->G basis, or both")
+    g.add_argument("--onto", choices=["fwd", "rev", "both"],
+                   help="Same-layer cross-projection: grads->forward basis (fwd), "
+                        "forward->grads basis (rev), or both")
     g.add_argument("--onto-file", dest="onto_file", metavar="FILE",
                    help="Cross-checkpoint: project each file onto eigenbasis from this reference file")
     p.add_argument("--output", default=None, metavar="PATH", help="Output path (only valid for single-file input)")

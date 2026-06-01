@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from compute_metrics import (
     spectral_metrics, mean_metrics, kfac_metrics,
-    generalized_eigenvalues_GB, _top_k_outer_products,
+    generalized_eigenvalues, _top_k_outer_products,
 )
 
 
@@ -29,7 +29,7 @@ def test_metrics_accept_fp64_eigvals():
     assert kfac_metrics(ev, ev * 2.0)["trace"] > 0
     d = 200  # >100 so the alpha-fit window (trange 11..100) is valid
     vec = torch.eye(d, dtype=torch.float64)
-    gen = generalized_eigenvalues_GB(ev, vec, ev, vec)  # fp64 -> spectral_metrics
+    gen = generalized_eigenvalues(ev, vec, ev, vec)  # fp64 -> spectral_metrics
     assert spectral_metrics(gen)["d"] == d
 
 
@@ -75,10 +75,10 @@ def test_mean_metrics_aligned_top_eigvec():
 # --- kfac_metrics ---
 
 def test_kfac_trace_product():
-    eA = torch.tensor([10.0, 5.0, 2.0])
-    eG = torch.tensor([4.0, 3.0])
-    out = kfac_metrics(eA, eG, top_k=10, sample_k=6)
-    expected_trace = sum(eA) * sum(eG)
+    e_acts = torch.tensor([10.0, 5.0, 2.0])
+    e_grads = torch.tensor([4.0, 3.0])
+    out = kfac_metrics(e_acts, e_grads, top_k=10, sample_k=6)
+    expected_trace = sum(e_acts) * sum(e_grads)
     assert abs(out["trace"] - expected_trace) < 1e-6
 
 
@@ -102,15 +102,15 @@ def test_generalized_eigvals_identity():
     d = 16
     eigvals = torch.tensor([10.0 / (i + 1) for i in range(d)])
     eigvecs = torch.eye(d)
-    # G = B → generalized eigenvalues should all be 1
-    gen = generalized_eigenvalues_GB(eigvals, eigvecs, eigvals, eigvecs)
+    # grads == acts → generalized eigenvalues should all be 1
+    gen = generalized_eigenvalues(eigvals, eigvecs, eigvals, eigvecs)
     assert torch.allclose(gen, torch.ones_like(gen), atol=0.05)
 
 
 def test_generalized_eigvals_scaled():
     d = 16
-    eigvals_B = torch.tensor([10.0 / (i + 1) for i in range(d)])
-    eigvals_G = eigvals_B * 3.0
+    eigvals_acts = torch.tensor([10.0 / (i + 1) for i in range(d)])
+    eigvals_grads = eigvals_acts * 3.0
     eigvecs = torch.eye(d)
-    gen = generalized_eigenvalues_GB(eigvals_G, eigvecs, eigvals_B, eigvecs)
+    gen = generalized_eigenvalues(eigvals_grads, eigvecs, eigvals_acts, eigvecs)
     assert torch.allclose(gen, torch.full_like(gen, 3.0), atol=0.1)

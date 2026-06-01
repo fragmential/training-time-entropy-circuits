@@ -72,6 +72,7 @@ from utils.model_registry import (
 )
 from utils.hooks import HookCollector, MultiHeadOVDispatcher, setup_identity_head, restore_head
 from utils.hook_specs import resolve as resolve_hook_specs, synthesize_from_flags
+from utils import hook_names as hn
 from utils.accessor import DataAccessor, parse_format, parse_format_spec
 from utils.data_utils import (
     get_loader,
@@ -186,6 +187,8 @@ class CollectConfig:
 
     # --- Profiling ---
     profile_vram: bool = False  # print peak CUDA memory after collection
+    profile_metrics: bool = False  # print per-hook eigendecomp prewarm timings
+    hf_progress_bars: bool = True  # show transformers/hub weight-loading + download bars; set false to silence
 
     # --- Sweep ---
     array_id: "int | None" = None
@@ -309,8 +312,15 @@ def _batch_iterator(texts, tokenizer, packed_ids, packing, batch_size, max_lengt
 # Unified collection
 # ---------------------------------------------------------------------------
 
+def _signal_keys(name):
+    """(acts_key, grads_key) signals for a hook name; defaults for the identity-head feed."""
+    captured = hn.captured_signals(name)
+    return captured if captured else ("value.acts", "value.grads")
+
+
 def _build_single(spec, storage_mode, collect_means, cfg):
     """Build a HookCollector from a SingleHookSpec."""
+    acts_key, grads_key = _signal_keys(spec.name)
     return HookCollector(
         module=spec.module,
         capture=spec.capture or "output",
@@ -321,6 +331,7 @@ def _build_single(spec, storage_mode, collect_means, cfg):
         activation_dtype=cfg.activation_dtype,
         grad_capture=spec.grad_capture,
         token_selection=spec.token_selection,
+        acts_key=acts_key, grads_key=grads_key,
     )
 
 
@@ -409,6 +420,7 @@ def _collect_for_checkpoint(
                 accumulation_dtype=cfg.accumulation_dtype,
                 activation_dtype=cfg.activation_dtype,
                 token_selection=spec.token_selection,
+                acts_key="value.acts", grads_key="value.grads",
             )
             global_collectors["after_final_norm"] = rc  # identity_head stores under this canonical key
             if residual_collector_for_id is None:
@@ -554,40 +566,43 @@ def _reconstruct_raw_factors(existing_data: dict) -> dict:
         if hook_name.startswith("__"):
             continue
         raw_entry = {}
-        for fk in ("A", "G"):
-            n_key = f"n_{fk}"
-            if n_key not in entry:
-                continue
+        for sig in _entry_signals(entry):
+            n_key = f"n_{sig}"
             n = entry[n_key]
             if base_format == "acts":
-                if fk in entry:
-                    raw_entry[fk] = entry[fk]  # (N, d) — will concat
+                if sig in entry:
+                    raw_entry[sig] = entry[sig]  # (N, d) — will concat
             elif base_format == "cov":
-                if fk in entry:
-                    raw_entry[fk] = entry[fk].double()  # raw unnormalized cov
+                if sig in entry:
+                    raw_entry[sig] = entry[sig].double()  # raw unnormalized cov
             elif base_format in ("cov_svd", "acts_svd"):
-                vec_key, val_key = f"{fk}_eigvecs", f"{fk}_eigvals"
+                vec_key, val_key = f"{sig}_eigvecs", f"{sig}_eigvals"
                 if val_key not in entry:
                     continue
                 if vec_key not in entry:
                     raise ValueError(
-                        f"Cannot continue {hook_name}.{fk}: eigvecs missing "
+                        f"Cannot continue {hook_name}.{sig}: eigvecs missing "
                         f"(eigenvalues-only format cannot be merged)"
                     )
                 V = entry[vec_key].double()    # (d, k)
                 lam = entry[val_key].double()  # (k,)
-                raw_entry[fk] = (V * lam) @ V.T * n  # unnormalized cov (d, d)
+                raw_entry[sig] = (V * lam) @ V.T * n  # unnormalized cov (d, d)
             else:
                 raise ValueError(
                     f"Cannot continue with storage format '{base_format}': "
                     f"eigenvalues-only format has no eigvecs to reconstruct from"
                 )
             raw_entry[n_key] = n
-            mean_key = f"{fk}_mean"
+            mean_key = f"{sig}_mean"
             if mean_key in entry:
                 raw_entry[mean_key] = entry[mean_key].float()  # normalized mean (d,)
         raw[hook_name] = raw_entry
     return raw
+
+
+def _entry_signals(entry: dict):
+    """Signal keys present in a stored entry: each k with a matching n_{k} count."""
+    return [k[2:] for k in entry if k.startswith("n_") and k != "n"]
 
 
 def _merge_with_existing(existing_raw: dict, new_factors: dict) -> dict:
@@ -596,31 +611,33 @@ def _merge_with_existing(existing_raw: dict, new_factors: dict) -> dict:
         if hook_name not in new_factors:
             continue
         new = new_factors[hook_name]
-        for fk in ("A", "G"):
-            n_key = f"n_{fk}"
-            if fk not in old or n_key not in old:
+        for sig in _entry_signals(old):
+            n_key = f"n_{sig}"
+            if sig not in old:
                 continue
             old_n = old[n_key]
             new_n = new.get(n_key, 0)
             merged_n = old_n + new_n
-            if fk in new:
-                if old[fk].dim() == 2 and old[fk].shape[0] != old[fk].shape[1]:
+            if sig in new:
+                if old[sig].dim() == 2 and old[sig].shape[0] != old[sig].shape[1]:
                     # Acts mode: concat along token dim
-                    new[fk] = torch.cat([old[fk], new[fk]], dim=0)
+                    new[sig] = torch.cat([old[sig], new[sig]], dim=0)
                 else:
                     # Cov mode: add unnormalized accumulators
-                    new[fk] = old[fk].to(dtype=new[fk].dtype) + new[fk]
+                    new[sig] = old[sig].to(dtype=new[sig].dtype) + new[sig]
             else:
-                new[fk] = old[fk]
+                new[sig] = old[sig]
             # Merge means (weighted average of normalized means)
-            mean_key = f"{fk}_mean"
+            mean_key = f"{sig}_mean"
             if mean_key in old:
                 if mean_key in new and new_n > 0:
                     new[mean_key] = (old[mean_key] * old_n + new[mean_key] * new_n) / merged_n
                 else:
                     new[mean_key] = old[mean_key]
             new[n_key] = merged_n
-        new["n"] = new.get("n_A", 0)
+        if new_factors[hook_name]:
+            first_n = next((new[f"n_{s}"] for s in _entry_signals(new)), 0)
+            new["n"] = first_n
     return new_factors
 
 
@@ -629,6 +646,12 @@ def _merge_with_existing(existing_raw: dict, new_factors: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 def main(cfg: CollectConfig):
+    if not cfg.hf_progress_bars:
+        from huggingface_hub.utils import disable_progress_bars
+        from transformers.utils import logging as hf_logging
+        disable_progress_bars()
+        hf_logging.disable_progress_bar()
+
     if cfg.profile_vram and torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
         torch.cuda.empty_cache()
@@ -745,10 +768,11 @@ def main(cfg: CollectConfig):
             raise ValueError(f"storage_format must match continued data (existing={old_fmt!r}, new={cfg.storage_format!r})")
 
         if cfg.packing == "padded":
-            # n_A == n_sequences for last-token padded collection
+            # sample count == n_sequences for last-token padded collection
             n_done = next(
-                v["n_A"] for k, v in ref_data.items()
-                if not k.startswith("__") and "n_A" in v
+                v[f"n_{s}"]
+                for k, v in ref_data.items() if not k.startswith("__")
+                for s in _entry_signals(v)
             )
             print(f"  continue_from: existing run has {n_done} sequences; skipping to texts[{n_done}:]")
             texts = texts[n_done:]
@@ -863,7 +887,7 @@ def main(cfg: CollectConfig):
                 _t0 = time.time()
                 import numpy as np
                 from scripts.compute_metrics import compute_metrics_for_checkpoint
-                step_metrics = compute_metrics_for_checkpoint(acc, verbose=True)
+                step_metrics = compute_metrics_for_checkpoint(acc, verbose=cfg.profile_metrics)
                 metrics_dir = os.path.join(cfg.output_dir.replace("inferences", "results", 1)
                                            if cfg.output_dir else "data/results")
                 os.makedirs(metrics_dir, exist_ok=True)

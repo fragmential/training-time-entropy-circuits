@@ -116,9 +116,9 @@ def test_covariance_shapes(model_and_config, texts_and_packed):
     factors = collector.factors()
     collector.close()
 
-    assert factors["A"].shape == (d_in, d_in)
-    # G captured on same side as A (capture="input"), so also d_in x d_in
-    assert factors["G"].shape == (d_in, d_in)
+    assert factors["in.acts"].shape == (d_in, d_in)
+    # grads captured on same side as acts (capture="input"), so also d_in x d_in
+    assert factors["out.grads"].shape == (d_in, d_in)
     assert factors["n"] > 0
 
 
@@ -136,11 +136,12 @@ def test_storage_roundtrip_real_data(model_and_config, texts_and_packed):
     # Collect activations
     ln = get_final_layernorm(model, config)
     mask = compute_token_mask(x, token_selection="all")
-    collector = HookCollector(ln, capture="output", mode="cov", collect_means=True)
+    collector = HookCollector(ln, capture="output", mode="cov", collect_means=True,
+                              acts_key="value.acts", grads_key="value.grads")
     collector.set_token_mask(mask)
     with torch.no_grad():
         model(x)
-    factors = {"residual": collector.factors()}
+    factors = {"after_final_norm": collector.factors()}
     collector.close()
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -153,13 +154,13 @@ def test_storage_roundtrip_real_data(model_and_config, texts_and_packed):
 
         # Read via accessor
         acc = DataAccessor(svd_path)
-        eigvals = acc["residual"].A.eigvals
+        eigvals = acc["after_final_norm"].value.acts.eigvals
         assert eigvals is not None
         assert len(eigvals) > 0
         assert (eigvals[:-1] >= eigvals[1:]).all()
 
         # Verify mean is stored
-        mean = acc["residual"].A.mean
+        mean = acc["after_final_norm"].value.acts.mean
         assert mean is not None
 
 
@@ -223,16 +224,16 @@ def test_B_equals_WAWt(model_and_config, texts_and_packed):
         oc.close()
 
         n = a_factors["n"]
-        A_cov = a_factors["A"].float() / n
-        B_cov = b_factors["A"].float() / n  # output collector's "A" is B
+        in_cov = a_factors["in.acts"].float() / n
+        out_cov = b_factors["in.acts"].float() / n  # output collector's captured acts = the MLP output
         W = layer.weight.detach().float()
         b = layer.bias.detach().float() if layer.bias is not None else None
-        mu = a_factors["A_mean"]
+        mu = a_factors["in.acts_mean"]
 
-        B_derived = W @ A_cov @ W.T
+        out_derived = W @ in_cov @ W.T
         if b is not None:
             Wmu = W @ mu
-            B_derived = B_derived + torch.outer(Wmu, b) + torch.outer(b, Wmu) + torch.outer(b, b)
+            out_derived = out_derived + torch.outer(Wmu, b) + torch.outer(b, Wmu) + torch.outer(b, b)
 
-        rel_err = (B_cov - B_derived).norm().item() / B_cov.norm().item() * 100
-        assert rel_err < 0.01, f"{name}: B recovery error {rel_err:.4f}% > 0.01%"
+        rel_err = (out_cov - out_derived).norm().item() / out_cov.norm().item() * 100
+        assert rel_err < 0.01, f"{name}: out.acts recovery error {rel_err:.4f}% > 0.01%"

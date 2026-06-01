@@ -7,11 +7,11 @@ Handles all storage formats uniformly via DataAccessor:
     - cov_svd (.pt): eigenvalues already stored → metrics
     - eigenvalues (.pt): eigenvalues already stored → metrics
 
-Output keys are role.quantity per hook kind (see _ROLE_KEY):
+Output keys are the node.signal strings DataAccessor.available() returns, per hook kind:
     mlp:      in.acts, out.acts (derived), out.grads, out.gen
     residual/boundary: value.acts, value.grads, value.gen
     ov_head:  slice.acts, slice.grads, slice.gen, contrib.acts (derived)
-plus per-quantity _centered / _mean_metrics / _cross_<label>, and hook-level kfac.
+plus per-signal _centered / _mean_metrics / _cross_<label>, and hook-level kfac.
 
 Results structure:
     {step: {hook_name: {
@@ -41,20 +41,23 @@ from utils.accessor import DataAccessor
 from utils import hook_names as hn
 
 
-# Stored factor letter -> role.quantity output key, by hook kind. The node that
-# carries both acts+grads (and so gets a `.gen`) is named per kind in _GEN_ROLE.
-_ROLE_KEY = {
-    "mlp":      {"A": "in.acts",    "B": "out.acts",   "G": "out.grads"},
-    "layer":    {"A": "in.acts",    "G": "out.grads"},
-    "residual": {"A": "value.acts", "G": "value.grads"},
-    "boundary": {"A": "value.acts", "G": "value.grads"},
-    "ov_head":  {"A": "slice.acts", "G": "slice.grads", "O": "contrib.acts"},
-}
-_GEN_ROLE = {"mlp": "out", "residual": "value", "boundary": "value", "ov_head": "slice"}
+# The node that carries both acts and grads in the same space (and so gets a
+# `.gen` generalized-eigenvalue metric), per hook kind.
+_GEN_NODE = {"mlp": "out", "residual": "value", "boundary": "value", "ov_head": "slice"}
 
 
-def _role_key(hook_name, factor):
-    return _ROLE_KEY.get(hn.classify(hook_name), {}).get(factor, factor)
+def _kfac_acts_signal(hook_name):
+    """The input-acts signal feeding this hook's K-FAC block (layer: up's in.acts)."""
+    if hn.classify(hook_name) == "layer":
+        return "in.acts"
+    return next((s for s in hn.captured_signals(hook_name) if s.endswith(".acts")), None)
+
+
+def _kfac_grads_signal(hook_name):
+    """The output-grads signal of this hook's K-FAC block (layer: down's out.grads)."""
+    if hn.classify(hook_name) == "layer":
+        return "out.grads"
+    return next((s for s in hn.captured_signals(hook_name) if s.endswith(".grads")), None)
 
 
 # ---------------------------------------------------------------------------
@@ -399,56 +402,56 @@ def _check_negative_eigenvalues(eigvals: torch.Tensor, label: str):
 
 
 def kfac_metrics(
-    eigvals_A: torch.Tensor,
-    eigvals_G: torch.Tensor,
+    eigvals_acts: torch.Tensor,
+    eigvals_grads: torch.Tensor,
     top_k: int = 20000,
     sample_k: int = 1000,
     damping: float = 1e-6,
 ) -> dict:
-    """K-FAC metrics from A and G eigenvalues (torch tensors).
+    """K-FAC metrics from the acts and grads eigenvalues (torch tensors).
 
     Returns:
-        trace:          trace(G ⊗ A) = trace(G) * trace(A)
-        log_det:        damped log-determinant: d_A * logdet(G + ε_G I) + d_G * logdet(A + ε_A I)
-                        where ε_X = damping * trace(X) / d_X
-        top_eigvals:    top-k exact products λ_A^i * λ_G^j
+        trace:          trace(grads ⊗ acts) = trace(grads) * trace(acts)
+        log_det:        damped log-determinant: d_acts * logdet(grads + ε I) + d_grads * logdet(acts + ε I)
+                        where ε = damping * trace / d
+        top_eigvals:    top-k exact products λ_acts^i * λ_grads^j
         sampled_eigvals: sample_k products linearly spaced across full distribution
         + spectral metrics on top_eigvals (rankme, alpha, r2, r2_100)
     """
     # Convert to numpy for numpy-only helper functions
-    eA_np = eigvals_A.numpy()
-    eG_np = eigvals_G.numpy()
+    e_acts_np = eigvals_acts.numpy()
+    e_grads_np = eigvals_grads.numpy()
 
-    d_in, d_out = len(eigvals_A), len(eigvals_G)
+    d_in, d_out = len(eigvals_acts), len(eigvals_grads)
 
-    trace_A = float(eigvals_A.sum())
-    trace_G = float(eigvals_G.sum())
-    trace = trace_A * trace_G
+    trace_acts = float(eigvals_acts.sum())
+    trace_grads = float(eigvals_grads.sum())
+    trace = trace_acts * trace_grads
 
-    eps_A = damping * trace_A / max(d_in, 1)
-    eps_G = damping * trace_G / max(d_out, 1)
-    ld_A = float(torch.sum(torch.log(eigvals_A + eps_A)))
-    ld_G = float(torch.sum(torch.log(eigvals_G + eps_G)))
-    log_det = d_in * ld_G + d_out * ld_A
+    eps_acts = damping * trace_acts / max(d_in, 1)
+    eps_grads = damping * trace_grads / max(d_out, 1)
+    ld_acts = float(torch.sum(torch.log(eigvals_acts + eps_acts)))
+    ld_grads = float(torch.sum(torch.log(eigvals_grads + eps_grads)))
+    log_det = d_in * ld_grads + d_out * ld_acts
 
     k_top = min(top_k, d_in * d_out)
-    top_eigvals = torch.from_numpy(_top_k_outer_products(eA_np, eG_np, k_top)).clamp(min=0)
+    top_eigvals = torch.from_numpy(_top_k_outer_products(e_acts_np, e_grads_np, k_top)).clamp(min=0)
 
     k_samp = min(sample_k, d_in * d_out)
-    sampled_eigvals = torch.from_numpy(_sample_outer_products_linspace(eA_np, eG_np, k_samp)).clamp(min=0)
+    sampled_eigvals = torch.from_numpy(_sample_outer_products_linspace(e_acts_np, e_grads_np, k_samp)).clamp(min=0)
 
     sm = spectral_metrics(top_eigvals) if len(top_eigvals) >= 11 else {}
 
-    hist = _histogram_outer_product(eA_np, eG_np, bins=1024)
+    hist = _histogram_outer_product(e_acts_np, e_grads_np, bins=1024)
 
     return {
         **sm,
         "trace": trace,
-        "trace_acts": trace_A,
-        "trace_grads": trace_G,
+        "trace_acts": trace_acts,
+        "trace_grads": trace_grads,
         "log_det": log_det,
-        "log_det_acts": ld_A,
-        "log_det_grads": ld_G,
+        "log_det_acts": ld_acts,
+        "log_det_grads": ld_grads,
         "top_eigvals": top_eigvals,
         "sampled_eigvals": sampled_eigvals,
         "d": d_in * d_out,
@@ -459,46 +462,43 @@ def kfac_metrics(
 
 
 # ---------------------------------------------------------------------------
-# Generalized eigendecomposition G vs B
+# Generalized eigendecomposition: grads w.r.t. acts (same space)
 # ---------------------------------------------------------------------------
 
-def generalized_eigenvalues_GB(
-    eigvals_G: torch.Tensor,
-    eigvecs_G: torch.Tensor,
-    eigvals_B: torch.Tensor,
-    eigvecs_B: torch.Tensor,
+def generalized_eigenvalues(
+    eigvals_grads: torch.Tensor,
+    eigvecs_grads: torch.Tensor,
+    eigvals_acts: torch.Tensor,
+    eigvecs_acts: torch.Tensor,
     eps_factor: float = 1e-6,
 ) -> torch.Tensor:
-    """Generalized eigenvalues of G w.r.t. B: solve Gv = λBv.
+    """Generalized eigenvalues of grads w.r.t. acts: solve (grads) v = λ (acts) v.
 
-    Both G and B must be in the same space (d_out × d_out).
-    Returns the generalized eigenvalues (descending), which are
-    ratios v^T G v / v^T B v — directions where gradient variance is
-    most/least disproportionate to output activation variance.
+    Both covariances must be in the same space (d × d). Returns the generalized
+    eigenvalues (descending) = ratios v^T grads v / v^T acts v — directions where
+    gradient variance is most/least disproportionate to activation variance.
 
-    Formula: eigenvalues of B^{-1/2} G B^{-1/2}.
+    Formula: eigenvalues of acts^{-1/2} grads acts^{-1/2}.
     Efficient via cross-basis:
-        Q = V_B^T V_G
-        M = Λ_B^{-1/2} Q Λ_G Q^T Λ_B^{-1/2}  (= C C^T where C = Λ_B^{-1/2} Q Λ_G^{1/2})
-    eigenvalues of M = generalized eigenvalues of G w.r.t. B.
+        Q = V_acts^T V_grads
+        M = Λ_acts^{-1/2} Q Λ_grads Q^T Λ_acts^{-1/2}  (= C C^T, C = Λ_acts^{-1/2} Q Λ_grads^{1/2})
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    eG = eigvals_G.to(dtype=torch.float32, device=device)
-    vG = eigvecs_G.to(dtype=torch.float32, device=device)
-    eB = eigvals_B.to(dtype=torch.float32, device=device)
-    vB = eigvecs_B.to(dtype=torch.float32, device=device)
+    e_grads = eigvals_grads.to(dtype=torch.float32, device=device)
+    v_grads = eigvecs_grads.to(dtype=torch.float32, device=device)
+    e_acts = eigvals_acts.to(dtype=torch.float32, device=device)
+    v_acts = eigvecs_acts.to(dtype=torch.float32, device=device)
 
-    eps = max(eB.max().item() * eps_factor, 1e-10)
-    lb_inv_sqrt = (eB + eps).rsqrt()          # (d,)
-    lg_sqrt = eG.clamp(min=0).sqrt()          # (d,)
+    eps = max(e_acts.max().item() * eps_factor, 1e-10)
+    acts_inv_sqrt = (e_acts + eps).rsqrt()        # (d,)
+    grads_sqrt = e_grads.clamp(min=0).sqrt()      # (d,)
 
-    Q = vB.T @ vG                             # (d, d) cross-basis
-    C = lb_inv_sqrt.unsqueeze(1) * Q * lg_sqrt.unsqueeze(0)  # (d, d)
-    M = C @ C.T                               # symmetric PSD
+    Q = v_acts.T @ v_grads                        # (d, d) cross-basis
+    C = acts_inv_sqrt.unsqueeze(1) * Q * grads_sqrt.unsqueeze(0)  # (d, d)
+    M = C @ C.T                                   # symmetric PSD
 
     from utils.accessor import eigvalsh_descending
-    gen_eigvals = eigvalsh_descending(M).cpu()
-    return gen_eigvals
+    return eigvalsh_descending(M).cpu()
 
 def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False, gpu_lock=None):
     import time
@@ -532,60 +532,58 @@ def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False
         hook = accessor[hook_name]
         entry = accessor._entry(hook_name)
 
-        eA = eG = None  # cache for K-FAC (input acts x output grads)
-        for factor in factors:
-            fv = hook._factor(factor)
+        eigvals_by_signal = {}  # signal -> clamped eigvals, for K-FAC
+        for signal in factors:
+            fv = hook._factor(signal)
             eigvals = fv.eigvals
             if eigvals is None:
                 continue
-            key = _role_key(hook_name, factor)
-            _check_negative_eigenvalues(eigvals, f"{hook_name}.{key}")
+            _check_negative_eigenvalues(eigvals, f"{hook_name}.{signal}")
             eigvals = eigvals.clamp(min=0)
-            hook_results[key] = spectral_metrics(eigvals, mean=fv.mean)
-            if factor == "A":
-                eA = eigvals
-            elif factor == "G":
-                eG = eigvals
+            hook_results[signal] = spectral_metrics(eigvals, mean=fv.mean)
+            eigvals_by_signal[signal] = eigvals
 
             # Centered eigenvalues
             centered = fv.eigvals_centered
             if centered is not None:
                 centered = centered.clamp(min=0)
-                hook_results[f"{key}_centered"] = spectral_metrics(centered)
+                hook_results[f"{signal}_centered"] = spectral_metrics(centered)
 
             # Mean overlaps
             if fv.mean is not None and fv.eigh_centered is not None:
-                hook_results[f"{key}_mean_metrics"] = mean_metrics(fv.eigvecs_centered, fv.eigvals_centered, fv.mean)
+                hook_results[f"{signal}_mean_metrics"] = mean_metrics(fv.eigvecs_centered, fv.eigvals_centered, fv.mean)
 
             # Cross-basis eigenvalues stored alongside
             for ek, ev in entry.items():
-                if ek.startswith(f"{factor}_cross_eigvals_") and isinstance(ev, torch.Tensor):
-                    cross_label = ek[len(f"{factor}_cross_eigvals_"):]
+                if ek.startswith(f"{signal}_cross_eigvals_") and isinstance(ev, torch.Tensor):
+                    cross_label = ek[len(f"{signal}_cross_eigvals_"):]
                     cross_eigvals = torch.clamp(ev, min=0)
-                    hook_results[f"{key}_cross_{cross_label}"] = spectral_metrics(cross_eigvals)
+                    hook_results[f"{signal}_cross_{cross_label}"] = spectral_metrics(cross_eigvals)
 
-        # --- K-FAC metrics (input acts x output grads) ---
-        if eA is not None and eG is not None:
-            hook_results["kfac"] = kfac_metrics(eA, eG)
+        # --- K-FAC: input-acts x output-grads (the captured acts/grads of this hook) ---
+        e_acts = eigvals_by_signal.get(_kfac_acts_signal(hook_name))
+        e_grads = eigvals_by_signal.get(_kfac_grads_signal(hook_name))
+        if e_acts is not None and e_grads is not None:
+            hook_results["kfac"] = kfac_metrics(e_acts, e_grads)
 
         # --- Generalized eigenvalues: gradient vs activation at the node carrying both ---
-        gen_role = _GEN_ROLE.get(hn.classify(hook_name))
-        if gen_role is not None:
-            node = getattr(hook, gen_role)
+        gen_node = _GEN_NODE.get(hn.classify(hook_name))
+        if gen_node is not None:
+            node = getattr(hook, gen_node)
             a_eigh, g_eigh = node.acts.eigh, node.grads.eigh
             if a_eigh is not None and g_eigh is not None:
-                eA_arr, vA = a_eigh
-                eG_arr, vG = g_eigh
+                e_a, v_a = a_eigh
+                e_g, v_g = g_eigh
                 with gpu_ctx as ctx:
                     gpu_wait += getattr(ctx, "waited", 0.0)
-                    gen_eigvals = generalized_eigenvalues_GB(eG_arr, vG, eA_arr, vA)
+                    gen_eigvals = generalized_eigenvalues(e_g, v_g, e_a, v_a)
                 gen_sm = spectral_metrics(gen_eigvals) if len(gen_eigvals) >= 11 else {}
-                hook_results[f"{gen_role}.gen"] = {"eigvals": gen_eigvals, **gen_sm}
+                hook_results[f"{gen_node}.gen"] = {"eigvals": gen_eigvals, **gen_sm}
 
         if hook_results:
             step_results[hook_name] = hook_results
             if verbose:
-                print(f"    {hook_name} ({', '.join(factors)}): {time.time()-t_hook:.1f}s")
+                print(f"    {hook_name} ({', '.join(sorted(hook_results))}): {time.time()-t_hook:.1f}s")
 
     if verbose:
         print(f"    metrics total: {time.time()-t0:.1f}s ({len(step_results)} hooks)")

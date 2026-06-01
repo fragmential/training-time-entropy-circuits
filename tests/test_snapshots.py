@@ -13,7 +13,7 @@ These tests exercise every component that the refactor touches:
     - powerlaw: eigendecomposition, power-law fitting, RankMe
     - storage: DataAccessor.save in each format, conversion chain
     - accessor: derivation chains (cov_svd → eigvals, cov → eigvals, centered eigvals)
-    - compute_metrics: spectral_metrics, mean_metrics, kfac_metrics, generalized_eigenvalues_GB
+    - compute_metrics: spectral_metrics, mean_metrics, kfac_metrics, generalized_eigenvalues
     - hooks: covariance and acts accumulation
     - data_utils: token masks, labels
 
@@ -125,15 +125,16 @@ def test_snapshot_storage_cov_svd(request, tmp_path):
     from utils.accessor import DataAccessor
     d, N = 32, 200
     X = torch.randn(N, d, dtype=torch.float64)
-    factors = {"hook0": {"A": X.T @ X, "n_A": N, "n": N, "A_mean": X.float().mean(0)}}
+    factors = {"after_final_norm": {"value.acts": X.T @ X, "n_value.acts": N, "n": N,
+                                    "value.acts_mean": X.float().mean(0)}}
     path = str(tmp_path / "svd.pt")
     DataAccessor(factors).save(path, format="cov_svd+m")
     data = torch.load(path, map_location="cpu", weights_only=False)
-    entry = data["hook0"]
+    entry = data["after_final_norm"]
     _compare_or_update("storage_cov_svd", {
-        "eigvals": entry["A_eigvals"],
-        "eigvals_centered": entry.get("A_eigvals_centered", torch.tensor([])),
-        "mean": entry["A_mean"],
+        "eigvals": entry["value.acts_eigvals"],
+        "eigvals_centered": entry.get("value.acts_eigvals_centered", torch.tensor([])),
+        "mean": entry["value.acts_mean"],
     }, request)
 
 
@@ -142,7 +143,7 @@ def test_snapshot_storage_convert_chain(request, tmp_path):
     from utils.accessor import DataAccessor
     d, N = 32, 200
     X = torch.randn(N, d, dtype=torch.float64)
-    factors = {"hook0": {"A": X.T @ X, "n_A": N, "n": N}}
+    factors = {"after_final_norm": {"value.acts": X.T @ X, "n_value.acts": N, "n": N}}
 
     cov_path = str(tmp_path / "cov.pt")
     DataAccessor(factors).save(cov_path, format="cov")
@@ -153,7 +154,7 @@ def test_snapshot_storage_convert_chain(request, tmp_path):
 
     eig_data = torch.load(eig_path, map_location="cpu", weights_only=False)
     _compare_or_update("storage_convert_chain", {
-        "eigvals": eig_data["hook0"]["A_eigvals"],
+        "eigvals": eig_data["after_final_norm"]["value.acts_eigvals"],
     }, request)
 
 
@@ -167,11 +168,11 @@ def test_snapshot_accessor_from_cov(request):
     cov = (X.T @ X / N).float()
     mu = X.float().mean(0)
     data = {
-        "hook0": {"A": cov * N, "n_A": N, "n": N, "A_mean": mu},
+        "after_final_norm": {"value.acts": cov * N, "n_value.acts": N, "n": N, "value.acts_mean": mu},
         "__format__": "cov",
     }
     acc = DataAccessor(data)
-    eigvals = acc["hook0"].A.eigvals
+    eigvals = acc["after_final_norm"].value.acts.eigvals
     _compare_or_update("accessor_from_cov", {"eigvals": eigvals}, request)
 
 
@@ -187,14 +188,14 @@ def test_snapshot_accessor_centered(request):
     eigvecs = vecs.flip(1)
     mu = torch.randn(d).float()
     data = {
-        "hook0": {
-            "A_eigvals": eigvals, "A_eigvecs": eigvecs.float(),
-            "A_mean": mu, "n_A": 200, "n": 200,
+        "after_final_norm": {
+            "value.acts_eigvals": eigvals, "value.acts_eigvecs": eigvecs.float(),
+            "value.acts_mean": mu, "n_value.acts": 200, "n": 200,
         },
         "__format__": "cov_svd",
     }
     acc = DataAccessor(data)
-    centered = acc["hook0"].A.eigvals_centered
+    centered = acc["after_final_norm"].value.acts.eigvals_centered
     _compare_or_update("accessor_centered", {"centered": centered}, request)
 
 
@@ -240,13 +241,13 @@ def test_snapshot_kfac_metrics(request):
 
 def test_snapshot_generalized_eigvals(request):
     _fixed_seed()
-    from compute_metrics import generalized_eigenvalues_GB
+    from compute_metrics import generalized_eigenvalues
     d = 16
     eigvals = torch.tensor([10.0 / (i + 1) for i in range(d)])
     # Use random orthogonal bases
     Q1 = torch.from_numpy(np.linalg.qr(np.random.randn(d, d))[0])
     Q2 = torch.from_numpy(np.linalg.qr(np.random.randn(d, d))[0])
-    gen = generalized_eigenvalues_GB(eigvals * 2, Q1, eigvals, Q2)
+    gen = generalized_eigenvalues(eigvals * 2, Q1, eigvals, Q2)
     _compare_or_update("generalized_eigvals", {"gen": gen}, request)
 
 
@@ -260,7 +261,7 @@ def test_snapshot_hook_cov(request):
     c.accumulate(X)
     factors = c.factors()
     _compare_or_update("hook_cov", {
-        "A": factors["A"], "n": factors["n"], "A_mean": factors["A_mean"],
+        "acts": factors["in.acts"], "n": factors["n"], "acts_mean": factors["in.acts_mean"],
     }, request)
 
 
