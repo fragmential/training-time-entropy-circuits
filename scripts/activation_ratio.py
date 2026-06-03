@@ -38,7 +38,6 @@ from tqdm import tqdm
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from utils.model_registry import get_model_config, load_model, load_tokenizer, get_mlp_projections
-from utils import hook_names as _hn
 from utils.hooks import HookCollector
 from utils.accessor import DataAccessor
 from utils.data_utils import get_loader, load_and_cache_texts, pack_sequences, compute_token_mask
@@ -285,13 +284,13 @@ def main(
     acc = DataAccessor(basis_data)
 
     if hook_names is None:
-        hook_names = acc.hook_names()
+        hook_names = acc.leaves()
 
-    # Build basis dict: {hook_name: (U_tensor, band_indices)}
+    # Build basis dict: {leaf: (U_tensor, band_indices)} from each leaf's acts eigvecs
     basis_dict = {}
     for hook in hook_names:
-        acts_signal = next((s for s in _hn.captured_signals(hook) if s.endswith(".acts")), None)
-        eigvecs = acc[hook]._factor(acts_signal).eigvecs if acts_signal else None
+        fv = acc.factor(hook, "acts")
+        eigvecs = fv.eigvecs if fv is not None else None
         if eigvecs is None:
             print(f"  WARNING: no acts eigenvectors for {hook}, skipping")
             continue

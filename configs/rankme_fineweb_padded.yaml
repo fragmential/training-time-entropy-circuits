@@ -1,6 +1,6 @@
 output_dir: data/inferences/rankme_fineweb_padded
 # Residual activation collection for all Pythia and OLMo models.
-# Uses identity head replacement (fast path, post-layernorm residual), padded fineweb, last token.
+# Uses fast_final_norm (output-head replacement, post-layernorm residual), padded fineweb, last token.
 
 model_name:
   - "EleutherAI/pythia-14m"
@@ -34,8 +34,7 @@ min_length: 32
 max_checkpoints: 50
 packing: padded
 token_selection: last
-collect_final_acts: true
-residual_hook_point: identity_head
-collect_A: false
-collect_G: false
+hooks:
+  - after_final_norm:acts
+fast_final_norm: true
 storage_format: acts

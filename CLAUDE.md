@@ -84,37 +84,35 @@ Configs use a `CollectConfig` dataclass (in `scripts/collect.py`). Key fields:
 
 ## Key concepts
 
-### Hook selection (pattern-based)
+### Hook selection — a hook IS a leaf
 
-Hooks to collect are selected via the `hooks` config field — a list of fnmatch patterns matched against the model's hook universe. Append `+G` to any entry to also collect G (triggers backward). Set `grad_all: true` as a shortcut to grad-mark every matched hook without writing `+G` on each entry.
+Every hook is a **leaf**: one physical capture-point in the network (a dotted path). The `hooks` config field is a list of `<leaf-pattern>[:acts|:grads|:both]` entries (default `:acts`) or `preset:<name>` macros. `:quantity` means the same thing at every leaf — capture acts and/or grads there. `:both`/`:grads` trigger a backward pass. There are no node targets and no `+G`.
+
+Collectable leaves: `blk{i}.mlp.{up,down,gate}.{in,out}`, `blk{i}.{attn,mlp}.{in,out,raw_out}`, `blk{i}.attn.head{h}.slice`, `after_final_norm`, `before_final_norm`.
 
 ```yaml
 hooks:
-  - blk*.up                # all MLP up-projection A (forward only)
-  - blk*.down+G            # MLP down-proj A + G (K-FAC)
-  - blk*.attn.in           # residual into each block's attn sub-block
-  - blk*.attn.out          # attention's contribution to residual
+  - preset:kfac            # MLP K-FAC: blk*.mlp.{up,down,gate}.in:acts + .out:grads
+  - blk*.mlp.up.in:acts    # one projection leaf (input acts)
+  - blk*.attn.in           # residual into each block's attn sub-block (acts)
+  - blk*.attn.out:both      # attention's contribution, acts + grads
   - blk*.attn.raw_out      # OLMo-2 only: pre-post-norm attention output
   - blk*.mlp.in            # OLMo-2 only: residual into MLP sub-block
   - blk*.mlp.out           # MLP's contribution
-  - blk*.attn.head*        # per-OV-head contributions (H× data)
-  - blk3.attn.head0        # single head, single block
-  - after_final_norm
-  - identity_head          # fast post-norm via head replacement
+  - blk*.attn.head*.slice  # per-OV-head pre-W_o slice (H× data)
+  - blk3.attn.head0.slice  # single head, single block
+  - before_final_norm:both
 
-grad_all: false            # set true to grad-collect at every matched hook
+fast_final_norm: true      # capture after_final_norm acts via output-head replacement
 ```
 
-Pattern matches are family-aware: Pythia exposes 3 boundary names per block (`attn.in`, `attn.out`, `mlp.out`) — `attn.raw_out` and `mlp.in` patterns are silent no-ops there. OLMo-2 exposes all 5. Pythia MLPs have no `gate`. DataAccessor resolves Pythia's `blk{i}.mlp.in` / `attn.raw_out` lookups to the canonical `attn.in` / `attn.out` via alias on read, so cross-family analysis code can use the OLMo-2 superset of names uniformly.
+A K-FAC pair is just two ordinary leaves (`…up.in:acts` + `…up.out:grads`); the projection's output acts (old B) are **derived** later by the accessor — collection never special-cases projections. An MLP projection *node* (`blk*.up`, `blk*.mlp.up`) is NOT a leaf and hard-errors with a fix-it message.
 
-Per-OV-head: `sum_h blk{i}.attn.head{h}` equals `blk{i}.attn.out` (Pythia) or `blk{i}.attn.raw_out` (OLMo-2, since the post-norm mixes heads non-linearly). The identity is exact per-token, not at the covariance level (cross-head terms).
+`fast_final_norm: true` is an orthogonal optimization: it swaps the output head for `nn.Identity()` so the model output *is* the post-final-norm residual, capturing `after_final_norm` acts without a norm hook. It breaks the backward pass, so it errors if any hook needs grads (use it only with all-`:acts` runs).
 
-### Legacy collection flags (still supported)
+Pattern matches are family-aware: Pythia exposes 3 boundary leaves per block (`attn.in`, `attn.out`, `mlp.out`) — `attn.raw_out` / `mlp.in` / `mlp.raw_out` patterns are silent no-ops there, and Pythia MLPs have no `gate`. DataAccessor resolves Pythia's `blk{i}.mlp.in` / `attn.raw_out` lookups to the canonical `attn.in` / `attn.out` via alias on read, so cross-family analysis can use the OLMo-2 superset uniformly.
 
-When `hooks` is unset, the older boolean flags are desugared to the equivalent pattern list — existing configs work unchanged:
-- **collect_final_acts** + **residual_hook_point** (`identity_head` / `after_final_norm` / `before_final_norm` / `both`): single residual-stream point.
-- **collect_A** / **collect_G**: MLP projection covariances. `collect_G=True` triggers backward.
-- **collect_final_grads**: also collect G at the residual hook point.
+Per-OV-head: `sum_h blk{i}.attn.head{h}.contrib` equals `blk{i}.attn.out` (Pythia) or `blk{i}.attn.raw_out` (OLMo-2). The identity is exact per-token, not at the covariance level (cross-head terms).
 
 ### Data modes
 - **packing=padded**: Individual sequences, padding to longest. Good for last-token extraction.
@@ -154,27 +152,26 @@ python -m utils.accessor set-filter --input <dir> --token-selection last
 In-place by default. Add `--output-dir <DIR>` (or `--output <FILE>` for a single file) to write results elsewhere; `slurm/storage.sh` accepts the same `--output-dir` and mirrors per-model subdirs under it.
 
 ### DataAccessor
+
+Address axis: **`leaf` . `quantity` . `format`** — `quantity` ∈ {acts, grads}, `format` ∈ {cov, eigvals, eigvecs, eigh, eigvals_centered, mean, samples, n}. `resolve` greedily produces any format from what's stored (stored → reformat → derive).
+
 ```python
 from utils.accessor import DataAccessor
-acc = DataAccessor("data/inferences/full_limited/pythia-14m/step143000.pt")
-acc["blk3.up"].A.eigvals        # 1D tensor, descending
-acc["blk3.up"].G.cov            # (d,d) normalized covariance
-acc.after_final_norm.A.eigvals  # final residual stream
-acc.blocks[3].up.A.eigh         # (eigvals, eigvecs) tuple
+acc = DataAccessor("data/inferences/block_representations/pythia-14m/step143000.pt")
 
-# Block-boundary hooks (collect_block_boundaries: true)
-acc["blk3.attn.in"].A.eigvals          # residual flowing into attn sub-block
-acc["blk3.attn.out"].A.cov             # attention's contribution to residual
-acc["blk3.mlp.out"].A.eigh             # MLP's contribution to residual
-acc.blocks[3].attn.in_.A.eigvals       # same via blocks[] indexer (in_ because 'in' is a keyword)
-acc.blocks[3].mlp.out.A.cov
+acc.v.blk3.mlp.up.in.acts.eigvals       # attribute style: 1D tensor, descending
+acc["blk3.mlp.up.in"].acts.cov          # index style: (d,d) normalized covariance
+acc["blk3.mlp.up.out"].grads.eigh       # (eigvals, eigvecs); grads captured at .out
+acc["blk3.mlp.up.out"].acts.cov         # derived: W @ (up.in acts) @ W.T (+ bias correction)
 
-# Per-OV-head hooks (pattern: blk*.attn.head*)
-# A is the d_head pre-W_o slice; O = W_h @ A @ W_h.T is derived lazily from o_proj.
-acc["blk3.attn.head0"].A.eigvals       # 0th head, pre-W_o (d_head x d_head)
-acc["blk3.attn.head0"].O.cov           # post-W_o contribution cov (d_model x d_model), derived
-acc["blk3.attn.head0"].B.eigvals       # alias: B → O for OV-heads
-acc.blocks[3].attn.head[0].A.cov
+# Residual + sub-block boundaries (all plain leaves)
+acc["after_final_norm"].acts.eigvals    # derived from before_final_norm if not captured
+acc["blk3.attn.in"].acts.cov            # residual flowing into attn sub-block
+acc["blk3.mlp.out"].acts.eigh           # MLP's contribution to residual
+
+# Per-OV-head: .slice = d_head pre-W_o capture; .contrib = W_h @ slice @ W_h.T (derived)
+acc["blk3.attn.head0.slice"].acts.eigvals   # pre-W_o (d_head x d_head)
+acc["blk3.attn.head0.contrib"].acts.cov     # post-W_o contribution (d_model x d_model)
 
 acc.save("step143000_eig.pt", format="eigenvalues")  # conversion through the same interface
 ```
@@ -211,9 +208,17 @@ python scripts/compute_metrics.py --model_name pythia-14m \
 ## Testing
 
 ```bash
-# Run the test suite (replaced scripts/verify.py)
-pytest tests/
+# Unit suite (fast, CPU — login node OK). e2e tests are marked and excluded here.
+pytest tests/ -m "not e2e"
+
+# e2e tests (real forward/backward on Pythia + OLMo-2-1B) need a GPU — run via srun:
+export HF_HOME="/projects/prjs1815/hf_cache"
+srun --partition=gpu_a100 --gpus=1 --ntasks=1 --cpus-per-task=18 --time=00:40:00 \
+    uv run pytest tests/ -m e2e
 ```
+
+Run the whole suite (no filtering) — there's no selective-test tooling. First e2e
+run downloads weights to `$HF_HOME` (optionally prewarm: `uv run python -m tests.prefetch_e2e_models`).
 
 ## On the SLURM cluster
 
@@ -227,7 +232,7 @@ cd ~/Tracing-representation-geometry-reproduction
 
 - Staging partition: CPU-only, I/O bound work (metrics, storage conversions)
 - gpu_a100 partition: any collection job (forward/backward pass)
-- VRAM estimator only gives forward-pass GPU VRAM; backward pass (collect_G=True) is typically 2–3× higher due to retained computation graph
+- VRAM estimator only gives forward-pass GPU VRAM; backward pass (any `:grads`/`:both` hook) is typically 2–3× higher due to retained computation graph
 
 ## Dependencies
 torch, transformers, numpy, sklearn, datasets, tqdm, jsonargparse, matplotlib, seaborn

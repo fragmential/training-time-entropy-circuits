@@ -1,17 +1,10 @@
-"""Tests for the pattern-based hook resolver and the backward-compat shim."""
+"""Tests for the leaf-pattern hook resolver: candidates, :quantity, preset, node-error."""
 import pytest
 import torch
 import torch.nn as nn
 from types import SimpleNamespace
 
-from utils import hook_specs as hs
-from utils.hook_specs import (
-    candidate_hook_names,
-    resolve,
-    synthesize_from_flags,
-    SingleHookSpec,
-    OVHeadSpec,
-)
+from utils.hook_specs import candidate_leaves, resolve, SingleHookSpec, OVHeadSpec
 
 
 # ---------------------------------------------------------------------------
@@ -80,252 +73,163 @@ def _cfg(family):
     return SimpleNamespace(family=family)
 
 
+def _resolve(model, family, layers, hooks, sel="all"):
+    return resolve(model, _cfg(family), layers, hooks, default_token_selection=sel)
+
+
 # ---------------------------------------------------------------------------
-# candidate_hook_names
+# candidate_leaves — leaves only, no projection nodes
 # ---------------------------------------------------------------------------
 
-def test_pythia_candidates_exclude_olmo_only_names():
+def test_pythia_candidates_are_leaves_only():
     m = _FakeModel("pythia", n_layers=2, n_heads=3)
-    cand = candidate_hook_names(m, _cfg("pythia"), [0, 1], num_heads_per_block=3)
+    cand = candidate_leaves(m, _cfg("pythia"), [0, 1], num_heads_per_block=3)
+    # projection NODES never appear — only .in/.out leaves
+    assert "blk0.mlp.up" not in cand and "blk0.mlp.down" not in cand
+    for k in ["blk0.mlp.up.in", "blk0.mlp.up.out", "blk0.mlp.down.in", "blk0.mlp.down.out",
+              "blk0.attn.in", "blk0.attn.out", "blk0.mlp.out"]:
+        assert k in cand
     # Pythia: no gate, no attn.raw_out, no mlp.in
-    assert "blk0.gate" not in cand
-    assert "blk0.attn.raw_out" not in cand
-    assert "blk0.mlp.in" not in cand
-    # Should have the canonical Pythia set
-    for k in ["blk0.up", "blk0.down", "blk0.attn.in", "blk0.attn.out", "blk0.mlp.out"]:
-        assert k in cand
+    assert not any(".gate." in c for c in cand)
+    assert "blk0.attn.raw_out" not in cand and "blk0.mlp.in" not in cand
     for h in range(3):
-        assert f"blk0.attn.head{h}" in cand
+        assert f"blk0.attn.head{h}.slice" in cand
 
 
-def test_olmo_candidates_include_all_post_norm_names():
+def test_olmo_candidates_include_all_post_norm_leaves():
     m = _FakeModel("olmo", n_layers=1, n_heads=2)
-    cand = candidate_hook_names(m, _cfg("olmo"), [0], num_heads_per_block=2)
-    for k in [
-        "blk0.gate", "blk0.up", "blk0.down",
-        "blk0.attn.in", "blk0.attn.raw_out", "blk0.attn.out",
-        "blk0.mlp.in", "blk0.mlp.out",
-        "blk0.attn.head0", "blk0.attn.head1",
-    ]:
+    cand = candidate_leaves(m, _cfg("olmo"), [0], num_heads_per_block=2)
+    for k in ["blk0.mlp.gate.in", "blk0.mlp.gate.out", "blk0.mlp.up.in", "blk0.mlp.down.out",
+              "blk0.attn.in", "blk0.attn.raw_out", "blk0.attn.out",
+              "blk0.mlp.in", "blk0.mlp.out", "blk0.attn.head0.slice", "blk0.attn.head1.slice"]:
         assert k in cand
 
 
-def test_candidates_include_global_residual_names():
+def test_candidates_include_residual_but_not_identity_head():
     m = _FakeModel("pythia", n_layers=1, n_heads=1)
-    cand = candidate_hook_names(m, _cfg("pythia"), [0], num_heads_per_block=1)
-    assert "after_final_norm" in cand
-    assert "before_final_norm" in cand
-    assert "identity_head" in cand
+    cand = candidate_leaves(m, _cfg("pythia"), [0], num_heads_per_block=1)
+    assert "after_final_norm" in cand and "before_final_norm" in cand
+    assert "identity_head" not in cand
 
 
 # ---------------------------------------------------------------------------
-# resolve: pattern → SingleHookSpec / OVHeadSpec
+# resolve: leaf patterns + :quantity
 # ---------------------------------------------------------------------------
 
-def test_resolve_mlp_pattern_pythia_skips_gate():
-    m = _FakeModel("pythia", n_layers=2, n_heads=2)
-    singles, ovs, _ = resolve(m, _cfg("pythia"), [0, 1],
-                              hooks=["blk*.up", "blk*.down", "blk*.gate"],
-                              grad_all=False,
-                              default_token_selection="last")
-    names = sorted(s.name for s in singles)
-    assert names == ["blk0.down", "blk0.up", "blk1.down", "blk1.up"]
-    assert ovs == []
-    # MLP hooks should force token_selection="all" regardless of default
+def test_default_quantity_is_acts():
+    m = _FakeModel("pythia", n_layers=1, n_heads=1)
+    singles, _, _ = _resolve(m, "pythia", [0], ["blk*.mlp.up.in", "blk*.attn.in"])
+    for s in singles:
+        assert s.quantities == {"acts"}
+
+
+def test_mlp_leaf_capture_sides_and_token_selection():
+    m = _FakeModel("pythia", n_layers=1, n_heads=1)
+    singles, _, _ = _resolve(m, "pythia", [0],
+                             ["blk*.mlp.up.in:acts", "blk*.mlp.up.out:grads"], sel="last")
+    by_leaf = {s.leaf: s for s in singles}
+    assert by_leaf["blk0.mlp.up.in"].capture == "input"
+    assert by_leaf["blk0.mlp.up.in"].quantities == {"acts"}
+    assert by_leaf["blk0.mlp.up.out"].capture == "output"
+    assert by_leaf["blk0.mlp.up.out"].quantities == {"grads"}
+    # MLP leaves force token_selection="all" regardless of default
     for s in singles:
         assert s.token_selection == "all"
-        assert s.capture == "input"
-        assert s.grad_capture == "output"
         assert not s.is_global
 
 
-def test_resolve_olmo_includes_gate_and_raw_out():
-    m = _FakeModel("olmo", n_layers=1, n_heads=2)
-    singles, ovs, _ = resolve(m, _cfg("olmo"), [0],
-                              hooks=["blk*.gate", "blk*.attn.raw_out", "blk*.mlp.in"],
-                              grad_all=False,
-                              default_token_selection="last")
-    names = sorted(s.name for s in singles)
-    assert names == ["blk0.attn.raw_out", "blk0.gate", "blk0.mlp.in"]
+def test_both_unions_to_acts_and_grads():
+    m = _FakeModel("pythia", n_layers=1, n_heads=1)
+    singles, _, _ = _resolve(m, "pythia", [0], ["blk*.attn.in:both"])
+    assert singles[0].quantities == {"acts", "grads"}
 
 
-def test_resolve_groups_ov_heads_per_block():
+def test_repeated_patterns_union_quantities():
+    m = _FakeModel("pythia", n_layers=1, n_heads=1)
+    singles, _, _ = _resolve(m, "pythia", [0],
+                             ["blk*.attn.in:acts", "blk*.attn.in:grads"])
+    assert len(singles) == 1 and singles[0].quantities == {"acts", "grads"}
+
+
+def test_bad_quantity_errors():
+    m = _FakeModel("pythia", n_layers=1, n_heads=1)
+    with pytest.raises(ValueError, match="quantity"):
+        _resolve(m, "pythia", [0], ["blk*.attn.in:foo"])
+
+
+# ---------------------------------------------------------------------------
+# node targets hard-error
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("node", ["blk*.up", "blk*.mlp.up", "blk3.down", "blk*.mlp.gate"])
+def test_projection_node_target_errors(node):
+    m = _FakeModel("pythia", n_layers=1, n_heads=1)
+    with pytest.raises(ValueError, match="projection node"):
+        _resolve(m, "pythia", [0], [node])
+
+
+# ---------------------------------------------------------------------------
+# preset:kfac
+# ---------------------------------------------------------------------------
+
+def test_preset_kfac_expands_to_in_acts_out_grads():
+    m = _FakeModel("pythia", n_layers=1, n_heads=1)
+    singles, _, _ = _resolve(m, "pythia", [0], ["preset:kfac"])
+    by_leaf = {s.leaf: s.quantities for s in singles}
+    # pythia has up/down (gate is a silent no-op)
+    assert by_leaf["blk0.mlp.up.in"] == {"acts"}
+    assert by_leaf["blk0.mlp.up.out"] == {"grads"}
+    assert by_leaf["blk0.mlp.down.in"] == {"acts"}
+    assert by_leaf["blk0.mlp.down.out"] == {"grads"}
+
+
+def test_preset_kfac_includes_gate_on_olmo():
+    m = _FakeModel("olmo", n_layers=1, n_heads=1)
+    singles, _, _ = _resolve(m, "olmo", [0], ["preset:kfac"])
+    leaves = {s.leaf for s in singles}
+    assert "blk0.mlp.gate.in" in leaves and "blk0.mlp.gate.out" in leaves
+
+
+def test_unknown_preset_errors():
+    m = _FakeModel("pythia", n_layers=1, n_heads=1)
+    with pytest.raises(ValueError, match="preset"):
+        _resolve(m, "pythia", [0], ["preset:nope"])
+
+
+# ---------------------------------------------------------------------------
+# OV heads (.slice) + residual is_global
+# ---------------------------------------------------------------------------
+
+def test_ov_head_slice_groups_per_block():
     m = _FakeModel("pythia", n_layers=2, n_heads=4)
-    singles, ovs, _ = resolve(m, _cfg("pythia"), [0, 1],
-                              hooks=["blk*.attn.head*"],
-                              grad_all=False,
-                              default_token_selection="last")
-    assert singles == []
-    assert len(ovs) == 2
+    singles, ovs, _ = _resolve(m, "pythia", [0, 1], ["blk*.attn.head*.slice"])
+    assert singles == [] and len(ovs) == 2
     by_block = {o.block_idx: o for o in ovs}
-    assert sorted(by_block) == [0, 1]
     assert by_block[0].selected_heads == [0, 1, 2, 3]
     assert by_block[0].num_heads == 4
-    assert not by_block[0].collect_grad
+    assert by_block[0].quantities == {"acts"}
 
 
-def test_resolve_single_head_pattern():
+def test_ov_head_single_and_grads():
     m = _FakeModel("pythia", n_layers=2, n_heads=4)
-    _, ovs, _ = resolve(m, _cfg("pythia"), [0, 1],
-                        hooks=["blk0.attn.head2", "blk1.attn.head3"],
-                        grad_all=False,
-                        default_token_selection="last")
+    _, ovs, _ = _resolve(m, "pythia", [0, 1],
+                         ["blk0.attn.head2.slice:both", "blk1.attn.head3.slice:grads"])
     by_block = {o.block_idx: o for o in ovs}
-    assert by_block[0].selected_heads == [2]
-    assert by_block[1].selected_heads == [3]
+    assert by_block[0].selected_heads == [2] and by_block[0].quantities == {"acts", "grads"}
+    assert by_block[1].selected_heads == [3] and by_block[1].quantities == {"grads"}
 
 
-def test_resolve_inline_grad_modifier_marks_only_matching():
+def test_residual_marked_global():
+    m = _FakeModel("pythia", n_layers=1, n_heads=1)
+    singles, _, _ = _resolve(m, "pythia", [0], ["after_final_norm", "blk*.mlp.up.in"])
+    by_leaf = {s.leaf: s for s in singles}
+    assert by_leaf["after_final_norm"].is_global is True
+    assert by_leaf["after_final_norm"].capture == "output"
+    assert by_leaf["blk0.mlp.up.in"].is_global is False
+
+
+def test_olmo_only_leaves_silent_no_op_on_pythia():
     m = _FakeModel("pythia", n_layers=2, n_heads=2)
-    singles, ovs, _ = resolve(m, _cfg("pythia"), [0, 1],
-                              hooks=["blk*.up", "blk*.down+G"],
-                              grad_all=False,
-                              default_token_selection="last")
-    by_name = {s.name: s for s in singles}
-    assert by_name["blk0.up"].collect_grad is False
-    assert by_name["blk0.down"].collect_grad is True
-    assert by_name["blk1.down"].collect_grad is True
-
-
-def test_resolve_inline_grad_on_ov_head_pattern():
-    m = _FakeModel("pythia", n_layers=1, n_heads=2)
-    _, ovs, _ = resolve(m, _cfg("pythia"), [0],
-                        hooks=["blk*.attn.head*+G"],
-                        grad_all=False,
-                        default_token_selection="all")
-    assert all(o.collect_grad for o in ovs)
-
-
-def test_resolve_grad_all_enables_grad_everywhere():
-    m = _FakeModel("pythia", n_layers=1, n_heads=2)
-    singles, ovs, _ = resolve(m, _cfg("pythia"), [0],
-                              hooks=["blk*.up", "blk*.attn.head*"],
-                              grad_all=True,
-                              default_token_selection="all")
-    assert all(s.collect_grad for s in singles)
-    assert all(o.collect_grad for o in ovs)
-
-
-def test_resolve_grad_all_overrides_missing_inline_marker():
-    """grad_all=True should grad-mark hooks even when no entry had +G."""
-    m = _FakeModel("pythia", n_layers=1, n_heads=2)
-    singles, _, _ = resolve(m, _cfg("pythia"), [0],
-                            hooks=["blk*.up", "blk*.down"],
-                            grad_all=True,
-                            default_token_selection="all")
-    assert all(s.collect_grad for s in singles)
-
-
-def test_resolve_residual_marked_global():
-    m = _FakeModel("pythia", n_layers=1, n_heads=1)
-    singles, _, _ = resolve(m, _cfg("pythia"), [0],
-                            hooks=["after_final_norm", "blk*.up"],
-                            grad_all=False,
-                            default_token_selection="last")
-    by_name = {s.name: s for s in singles}
-    assert by_name["after_final_norm"].is_global is True
-    assert by_name["blk0.up"].is_global is False
-
-
-def test_resolve_identity_head_has_no_module():
-    m = _FakeModel("pythia", n_layers=1, n_heads=1)
-    singles, _, _ = resolve(m, _cfg("pythia"), [0],
-                            hooks=["identity_head"],
-                            grad_all=False,
-                            default_token_selection="last")
-    assert len(singles) == 1
-    assert singles[0].name == "identity_head"
-    assert singles[0].module is None
-    assert singles[0].is_global is True
-
-
-def test_resolve_block_boundary_uses_default_token_selection():
-    m = _FakeModel("pythia", n_layers=1, n_heads=1)
-    singles, _, _ = resolve(m, _cfg("pythia"), [0],
-                            hooks=["blk*.attn.in", "blk*.mlp.out"],
-                            grad_all=False,
-                            default_token_selection="last")
-    for s in singles:
-        assert s.token_selection == "last"
-
-
-# ---------------------------------------------------------------------------
-# Backward-compat shim
-# ---------------------------------------------------------------------------
-
-def test_shim_collect_A_only_no_grad_marker():
-    h = synthesize_from_flags(
-        collect_A=True, collect_G=False,
-        collect_final_acts=False, collect_final_grads=False,
-        residual_hook_point="identity_head",
-    )
-    assert h == ["blk*.up", "blk*.down", "blk*.gate"]
-    # No "+G" anywhere
-    assert all(not entry.endswith("+G") for entry in h)
-
-
-def test_shim_collect_AG_adds_inline_grad_on_mlp():
-    h = synthesize_from_flags(
-        collect_A=True, collect_G=True,
-        collect_final_acts=False, collect_final_grads=False,
-        residual_hook_point="identity_head",
-    )
-    assert h == ["blk*.up+G", "blk*.down+G", "blk*.gate+G"]
-
-
-def test_shim_collect_final_acts_identity_head():
-    h = synthesize_from_flags(
-        collect_A=False, collect_G=False,
-        collect_final_acts=True, collect_final_grads=False,
-        residual_hook_point="identity_head",
-    )
-    assert h == ["identity_head"]
-
-
-def test_shim_residual_both_with_final_grads():
-    h = synthesize_from_flags(
-        collect_A=False, collect_G=False,
-        collect_final_acts=True, collect_final_grads=True,
-        residual_hook_point="both",
-    )
-    # Both residual points present, both grad-marked
-    assert h == ["before_final_norm+G", "after_final_norm+G"]
-
-
-def test_shim_after_final_norm_no_grad():
-    h = synthesize_from_flags(
-        collect_A=False, collect_G=False,
-        collect_final_acts=True, collect_final_grads=False,
-        residual_hook_point="after_final_norm",
-    )
-    assert h == ["after_final_norm"]
-
-
-def test_shim_mixed_mlp_grad_no_residual_grad():
-    """collect_A=collect_G=True, collect_final_acts=True (no grad on residual)
-    — MLP gets +G, residual hook does not."""
-    h = synthesize_from_flags(
-        collect_A=True, collect_G=True,
-        collect_final_acts=True, collect_final_grads=False,
-        residual_hook_point="after_final_norm",
-    )
-    assert "blk*.up+G" in h
-    assert "blk*.down+G" in h
-    assert "after_final_norm" in h
-    assert "after_final_norm+G" not in h
-
-
-def test_shim_pythia_gate_pattern_is_silent_no_op():
-    # shim always emits blk*.gate, which won't match on Pythia (no gate proj).
-    # The resolver should just produce no specs for it; not an error.
-    m = _FakeModel("pythia", n_layers=2, n_heads=2)
-    h = synthesize_from_flags(
-        collect_A=True, collect_G=False,
-        collect_final_acts=False, collect_final_grads=False,
-        residual_hook_point="identity_head",
-    )
-    singles, _, _ = resolve(m, _cfg("pythia"), [0, 1], h, grad_all=False, default_token_selection="all")
-    names = sorted(s.name for s in singles)
-    assert "blk0.gate" not in names
-    assert "blk0.up" in names
-    assert "blk0.down" in names
+    singles, _, _ = _resolve(m, "pythia", [0, 1],
+                             ["blk*.mlp.gate.in", "blk*.mlp.in", "blk*.attn.raw_out"])
+    assert singles == []

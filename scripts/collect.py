@@ -1,42 +1,36 @@
 #!/usr/bin/env python
-"""Unified collection pipeline for activations and covariance factors.
+"""Unified collection pipeline for activations and gradients at leaf hook points.
 
-Collects data at arbitrary hook points using a single configurable script
-driven by YAML config files. All hook points go through the same HookCollector
-and produce the same output format.
+Every hook is a leaf — one physical capture-point — selected via the `hooks`
+config field. Each entry is `<leaf-pattern>[:acts|:grads|:both]` (default `:acts`)
+or `preset:<name>`. `:quantity` means the same thing at every leaf: capture acts
+and/or grads there (`:both`/`:grads` trigger a backward pass).
 
-Hook selection is pattern-based via the `hooks` config field (and the
-orthogonal `grad_all` bool). Patterns use fnmatch wildcards. Append `+G` to
-any entry to also collect G at those matches (triggers backward pass).
-
-Examples of valid patterns:
-    blk*.up                   # all MLP up-projections, A only
-    blk*.down+G               # MLP down-proj, A + G (K-FAC)
+Examples of valid entries:
+    preset:kfac               # blk*.mlp.{up,down,gate}.in:acts + .out:grads
+    blk*.mlp.up.in:acts       # MLP up-proj input
+    blk*.mlp.down.out:grads   # MLP down-proj output gradient
     blk*.attn.in              # residual into each block's attention sub-block
-    blk*.attn.out             # attention's contribution to residual
+    blk*.attn.out:both        # attention's contribution, acts + grads
     blk*.mlp.out              # MLP's contribution
     blk*.attn.raw_out         # (OLMo-2 only) pre-post-norm attention output
     blk*.mlp.in               # (OLMo-2 only) residual into MLP sub-block
-    blk*.attn.head*           # per-OV-head contributions, all heads
-    blk3.attn.head0           # just one head
+    blk*.attn.head*.slice     # per-OV-head pre-W_o slice, all heads
     after_final_norm          # post-final-norm residual
-    before_final_norm         # pre-final-norm residual
-    identity_head             # fast post-norm via head replacement
+    before_final_norm:both    # pre-final-norm residual, acts + grads
 
-Set `grad_all: true` as a shortcut to grad on every matched hook without
-writing "+G" on each entry. Pattern matches are family-aware: patterns
-matching only Pythia-absent names (e.g. blk*.gate, blk*.mlp.in) are silent
-no-ops on Pythia.
+Pattern matches are family-aware: patterns matching only Pythia-absent leaves
+(e.g. blk*.mlp.gate.in, blk*.mlp.in) are silent no-ops on Pythia. An MLP
+projection node (`blk*.up`, `blk*.mlp.up`) is NOT a leaf and hard-errors.
 
-Legacy boolean flags (collect_A / collect_G / collect_final_acts /
-collect_final_grads / residual_hook_point) are still accepted; when `hooks`
-is unset they desugar to the equivalent pattern list with inline `+G`.
+`fast_final_norm: true` captures after_final_norm acts by swapping the output
+head for nn.Identity() (cheaper than a norm hook). It breaks the backward pass,
+so it errors if any hook needs grads.
 
 Other features:
     - Data modes: packed (no padding) or padded
     - Token selection: all tokens or last token (per sequence or per document)
     - Storage formats: acts, cov, cov_svd, eigenvalues (with +m modifier)
-    - Answer-only gradient collection for downstream tasks
     - Cross-basis projections at save time
 
 Usage:
@@ -71,8 +65,7 @@ from utils.model_registry import (
     delete_cached_revision,
 )
 from utils.hooks import HookCollector, MultiHeadOVDispatcher, setup_identity_head, restore_head
-from utils.hook_specs import resolve as resolve_hook_specs, synthesize_from_flags
-from utils import hook_names as hn
+from utils.hook_specs import resolve as resolve_hook_specs
 from utils.accessor import DataAccessor, parse_format, parse_format_spec
 from utils.data_utils import (
     get_loader,
@@ -136,28 +129,18 @@ class CollectConfig:
     packed_data_path: "str | dict[str, str] | list[str] | None" = None  # path to pre-built .pt of shape (n_chunks, seq_len)
 
     # --- What to collect ---
-    # Preferred: glob patterns matching hook names directly. Append "+G" to any
-    # entry to also collect G at the matching hooks (triggers backward pass).
-    # Examples:
-    #   - "blk*.up"            (MLP up-proj A, forward only)
-    #   - "blk*.down+G"        (MLP down-proj A AND G — K-FAC)
-    #   - "blk*.attn.in"       (residual into each block's attn sub-block)
-    #   - "blk*.attn.head*"    (per-OV-head contributions, all heads, all blocks)
-    #   - "blk3.attn.head0"    (just one head)
-    #   - "after_final_norm"   (residual after final norm)
-    #   - "identity_head"      (fast post-norm via head replacement)
-    # Set `grad_all: true` as a shortcut to enable G on every matched hook
-    # without writing "+G" on each entry.
+    # Glob leaf-patterns, each `<leaf>[:acts|:grads|:both]` (default :acts) or
+    # `preset:<name>`. See module docstring. Examples:
+    #   - "preset:kfac"            (MLP K-FAC: in:acts + out:grads for every projection)
+    #   - "blk*.mlp.up.in:acts"    (MLP up-proj input)
+    #   - "blk*.attn.in"           (residual into each block's attn sub-block, acts)
+    #   - "blk*.attn.out:both"     (attention's contribution, acts + grads)
+    #   - "blk*.attn.head*.slice"  (per-OV-head pre-W_o slice, all heads, all blocks)
+    #   - "after_final_norm"       (residual after final norm)
     hooks: "list | None" = None
-    grad_all: bool = False
-
-    # Legacy convenience flags (kept for backward compat with existing configs).
-    # If `hooks` is None they are desugared into a `hooks` list; otherwise ignored.
-    collect_final_acts: bool = True
-    collect_final_grads: bool = False
-    residual_hook_point: str = "identity_head"  # or "both" for before + after final norm
-    collect_A: bool = False
-    collect_G: bool = False
+    # Capture after_final_norm acts via output-head replacement (forward-only;
+    # errors if any hook needs grads).
+    fast_final_norm: bool = False
     sample_labels: bool = True
     label_samples: int = 1
     seed: int = 42
@@ -192,22 +175,6 @@ class CollectConfig:
 
     # --- Sweep ---
     array_id: "int | None" = None
-
-    def _resolved_hooks(self) -> tuple:
-        """Return (hooks_list, grad_all) — explicit values or desugared from legacy flags.
-
-        `hooks_list` may contain entries with trailing '+G' (per-pattern grad markers);
-        `grad_all` (bool) is an orthogonal shortcut meaning "G on every matched hook".
-        """
-        if self.hooks is not None:
-            return list(self.hooks), bool(self.grad_all)
-        return synthesize_from_flags(
-            collect_A=self.collect_A,
-            collect_G=self.collect_G,
-            collect_final_acts=self.collect_final_acts,
-            collect_final_grads=self.collect_final_grads,
-            residual_hook_point=self.residual_hook_point,
-        ), False
 
     def __post_init__(self):
         _LIST_FIELDS = {"target_layers", "boundary_token_ids", "cross_basis_refs", "checkpoints", "hooks"}
@@ -312,26 +279,18 @@ def _batch_iterator(texts, tokenizer, packed_ids, packing, batch_size, max_lengt
 # Unified collection
 # ---------------------------------------------------------------------------
 
-def _signal_keys(name):
-    """(acts_key, grads_key) signals for a hook name; defaults for the identity-head feed."""
-    captured = hn.captured_signals(name)
-    return captured if captured else ("value.acts", "value.grads")
-
-
 def _build_single(spec, storage_mode, collect_means, cfg):
     """Build a HookCollector from a SingleHookSpec."""
-    acts_key, grads_key = _signal_keys(spec.name)
     return HookCollector(
         module=spec.module,
-        capture=spec.capture or "output",
+        capture=spec.capture,
+        quantities=spec.quantities,
         mode=storage_mode,
-        collect_grad=spec.collect_grad,
         collect_means=collect_means,
         accumulation_dtype=cfg.accumulation_dtype,
         activation_dtype=cfg.activation_dtype,
-        grad_capture=spec.grad_capture,
         token_selection=spec.token_selection,
-        acts_key=acts_key, grads_key=grads_key,
+        leaf=spec.leaf,
     )
 
 
@@ -342,13 +301,26 @@ def _build_ov(spec, storage_mode, collect_means, cfg):
         head_dim=spec.head_dim,
         block_idx=spec.block_idx,
         selected_heads=spec.selected_heads,
+        quantities=spec.quantities,
         mode=storage_mode,
         collect_means=collect_means,
-        collect_grad=spec.collect_grad,
         accumulation_dtype=cfg.accumulation_dtype,
         activation_dtype=cfg.activation_dtype,
         token_selection=spec.token_selection,
     )
+
+
+def _prepare_model_for_grad(model):
+    """Enable the gradient path for collection. enable_input_require_grads is what
+    lets input-side hooks (attn.in, mlp.in, residual) see gradients at all — without
+    it those points silently collect no grads."""
+    model.gradient_checkpointing_enable()
+    model.enable_input_require_grads()
+    model.config.use_cache = False
+    model.train()
+    for m in model.modules():
+        if isinstance(m, nn.Dropout):
+            m.p = 0.0
 
 
 def _collect_for_checkpoint(
@@ -357,42 +329,42 @@ def _collect_for_checkpoint(
 ):
     """Collect all requested data for one checkpoint.
 
-    Resolves cfg.hooks (or the legacy-flag-derived equivalent) into concrete
-    SingleHookSpec / OVHeadSpec lists, registers HookCollectors per block-group
-    pass, runs forward (+ optional backward), returns the merged factors dict.
+    Resolves cfg.hooks into concrete SingleHookSpec / OVHeadSpec lists, registers
+    HookCollectors per block-group pass, runs forward (+ optional backward),
+    returns the merged factors dict.
     """
-    hook_patterns, grad_all = cfg._resolved_hooks()
     storage_base, storage_flags, storage_drop_flags = parse_format_spec(cfg.storage_format)
     storage_mode = "acts" if storage_base == "acts" else "cov"
     if "b" in storage_flags and "m" not in storage_flags and "m" not in storage_drop_flags:
-        print("  NOTE: +b implies +m — storing means for B derivation")
+        print("  NOTE: +b implies +m — storing means for derived .out acts")
     collect_means = (
         "m" not in storage_drop_flags
         and ("m" in storage_flags or "b" in storage_flags or storage_base in ("cov_svd", "eigenvalues"))
     )
 
-    # Resolve patterns once against the model's hook universe
+    # Resolve patterns once against the model's leaf universe
     single_specs, ov_specs, _candidates = resolve_hook_specs(
         model, model_config, target_layers,
-        hook_patterns, grad_all,
-        default_token_selection=cfg.token_selection,
+        cfg.hooks, default_token_selection=cfg.token_selection,
     )
 
-    needs_grad = any(s.collect_grad for s in single_specs) or any(o.collect_grad for o in ov_specs)
-    has_per_block_work = any(not s.is_global for s in single_specs) or bool(ov_specs)
-    has_identity_head = any(s.module is None and s.name == "identity_head" for s in single_specs)
-    if has_identity_head and any(s.name == "identity_head" and s.collect_grad for s in single_specs):
+    needs_grad = (any("grads" in s.quantities for s in single_specs)
+                  or any("grads" in o.quantities for o in ov_specs))
+    use_fast_norm = cfg.fast_final_norm and any(s.leaf == "after_final_norm" for s in single_specs)
+    if cfg.fast_final_norm and needs_grad:
         raise ValueError(
-            "identity_head cannot collect gradients (it replaces the head with Identity); "
-            "use after_final_norm / before_final_norm patterns for grad-aware residual collection"
+            "fast_final_norm swaps the output head for nn.Identity(), which breaks the "
+            "backward pass; remove fast_final_norm or drop all :grads/:both hooks."
         )
+    if needs_grad:
+        _prepare_model_for_grad(model)
+    has_per_block_work = any(not s.is_global for s in single_specs) or bool(ov_specs)
 
     global_specs = [s for s in single_specs if s.is_global]
     perblk_specs = [s for s in single_specs if not s.is_global]
     perblk_by_block: dict = {}
     for s in perblk_specs:
-        b = int(s.name.split(".")[0][3:])
-        perblk_by_block.setdefault(b, []).append(s)
+        perblk_by_block.setdefault(int(s.leaf.split(".")[0][3:]), []).append(s)
     ov_by_block = {o.block_idx: o for o in ov_specs}
 
     all_factors: dict = {}
@@ -407,26 +379,25 @@ def _collect_for_checkpoint(
         block_groups = [None]
 
     # --- Global collectors (residual / final-norm) — registered once ---
-    identity_head_state = None
-    residual_collector_for_id = None
+    fast_norm_head = None          # saved (head, attr) when fast_final_norm swaps in Identity()
+    fast_norm_collector = None     # the after_final_norm collector fed manually
     global_collectors: dict = {}
     for spec in global_specs:
-        if spec.module is None:
-            # identity_head: swap output head for nn.Identity() and manually feed
-            identity_head_state = setup_identity_head(model)
+        if use_fast_norm and spec.leaf == "after_final_norm":
+            # swap output head for nn.Identity() so the model output IS the
+            # post-final-norm residual; fed manually below (forward-only)
+            fast_norm_head = setup_identity_head(model)
             rc = HookCollector(
-                module=None, mode=storage_mode,
+                module=None, capture="output", quantities={"acts"}, mode=storage_mode,
                 collect_means=collect_means,
                 accumulation_dtype=cfg.accumulation_dtype,
                 activation_dtype=cfg.activation_dtype,
-                token_selection=spec.token_selection,
-                acts_key="value.acts", grads_key="value.grads",
+                token_selection=spec.token_selection, leaf="after_final_norm",
             )
-            global_collectors["after_final_norm"] = rc  # identity_head stores under this canonical key
-            if residual_collector_for_id is None:
-                residual_collector_for_id = rc
+            global_collectors["after_final_norm"] = rc
+            fast_norm_collector = rc
         else:
-            global_collectors[spec.name] = _build_single(spec, storage_mode, collect_means, cfg)
+            global_collectors[spec.leaf] = _build_single(spec, storage_mode, collect_means, cfg)
 
     for blk_group in block_groups:
         first_pass = blk_group is block_groups[0] if block_groups else True
@@ -439,12 +410,12 @@ def _collect_for_checkpoint(
                 p.requires_grad_(False)
             for b in blk_group:
                 for spec in perblk_by_block.get(b, []):
-                    if spec.collect_grad and spec.module is not None and hasattr(spec.module, "weight"):
+                    if "grads" in spec.quantities and spec.module is not None and hasattr(spec.module, "weight"):
                         spec.module.weight.requires_grad_(True)
-                    collectors[spec.name] = _build_single(spec, storage_mode, collect_means, cfg)
+                    collectors[spec.leaf] = _build_single(spec, storage_mode, collect_means, cfg)
                 ov = ov_by_block.get(b)
                 if ov is not None:
-                    if ov.collect_grad and hasattr(ov.o_proj, "weight"):
+                    if "grads" in ov.quantities and hasattr(ov.o_proj, "weight"):
                         ov.o_proj.weight.requires_grad_(True)
                     ov_dispatchers.append(_build_ov(ov, storage_mode, collect_means, cfg))
 
@@ -522,26 +493,25 @@ def _collect_for_checkpoint(
                 with torch.no_grad():
                     outputs = model(**fwd_kwargs)
 
-                # For identity_head: manually feed model output to the collector
-                if identity_head_state is not None and residual_collector_for_id is not None:
-                    acts_masked = residual_collector_for_id._apply_mask(outputs.logits.detach())
-                    residual_collector_for_id.accumulate(acts_masked)
+                # fast_final_norm: model output IS the post-norm residual — feed it manually
+                if fast_norm_head is not None and fast_norm_collector is not None:
+                    acts_masked = fast_norm_collector._apply_mask(outputs.logits.detach())
+                    fast_norm_collector.accumulate(acts_masked)
 
-        # --- Collect factors and clean up ---
-        for cname, collector in collectors.items():
-            if cname not in all_factors:
-                all_factors[cname] = collector.factors()
+        # --- Collect factors and clean up (collectors yield {leaf: {...}}) ---
+        for collector in collectors.values():
+            for leaf, fac in collector.factors().items():
+                all_factors.setdefault(leaf, fac)
             collector.close()
         for disp in ov_dispatchers:
-            for cname, fac in disp.factors().items():
-                if cname not in all_factors:
-                    all_factors[cname] = fac
+            for leaf, fac in disp.factors().items():
+                all_factors.setdefault(leaf, fac)
             disp.close()
 
-        # Restore identity head after first pass
-        if first_pass and identity_head_state is not None:
-            restore_head(model, *identity_head_state)
-            identity_head_state = None
+        # Restore the original output head after the first (only) global pass
+        if first_pass and fast_norm_head is not None:
+            restore_head(model, *fast_norm_head)
+            fast_norm_head = None
 
         del collectors, ov_dispatchers
         torch.cuda.empty_cache()
@@ -554,90 +524,64 @@ def _collect_for_checkpoint(
 # ---------------------------------------------------------------------------
 
 
-def _reconstruct_raw_factors(existing_data: dict) -> dict:
-    """Reconstruct raw accumulator dicts from a saved .pt file so they can be merged.
+def _entry_quantities(entry: dict):
+    """Quantities present in an entry (each has an `{q}_n` count): e.g. acts, grads."""
+    return [k[:-2] for k in entry if k.endswith("_n")]
 
-    Reads __format__ from the file itself to determine how to decode it.
-    """
-    fmt_str = existing_data.get("__format__", "cov")
-    base_format, _ = parse_format(fmt_str)
+
+def _reconstruct_raw_factors(existing_data: dict) -> dict:
+    """Rebuild collector-style raw accumulators ({q}_cov=Σxxᵀ or {q}_samples, {q}_n,
+    {q}_mean) from a saved file so a continued run can merge into them."""
+    base_format, _ = parse_format(existing_data.get("__format__", "cov"))
     raw = {}
-    for hook_name, entry in existing_data.items():
-        if hook_name.startswith("__"):
+    for leaf, entry in existing_data.items():
+        if leaf.startswith("__"):
             continue
-        raw_entry = {}
-        for sig in _entry_signals(entry):
-            n_key = f"n_{sig}"
-            n = entry[n_key]
+        re_entry = {}
+        for q in _entry_quantities(entry):
+            n = entry[f"{q}_n"]
+            re_entry[f"{q}_n"] = n
             if base_format == "acts":
-                if sig in entry:
-                    raw_entry[sig] = entry[sig]  # (N, d) — will concat
+                if f"{q}_samples" in entry:
+                    re_entry[f"{q}_samples"] = entry[f"{q}_samples"]
             elif base_format == "cov":
-                if sig in entry:
-                    raw_entry[sig] = entry[sig].double()  # raw unnormalized cov
+                if f"{q}_cov" in entry:
+                    re_entry[f"{q}_cov"] = entry[f"{q}_cov"].double()
             elif base_format in ("cov_svd", "acts_svd"):
-                vec_key, val_key = f"{sig}_eigvecs", f"{sig}_eigvals"
-                if val_key not in entry:
+                if f"{q}_eigvals" not in entry:
                     continue
-                if vec_key not in entry:
-                    raise ValueError(
-                        f"Cannot continue {hook_name}.{sig}: eigvecs missing "
-                        f"(eigenvalues-only format cannot be merged)"
-                    )
-                V = entry[vec_key].double()    # (d, k)
-                lam = entry[val_key].double()  # (k,)
-                raw_entry[sig] = (V * lam) @ V.T * n  # unnormalized cov (d, d)
+                if f"{q}_eigvecs" not in entry:
+                    raise ValueError(f"Cannot continue {leaf}.{q}: eigvecs missing")
+                V, lam = entry[f"{q}_eigvecs"].double(), entry[f"{q}_eigvals"].double()
+                re_entry[f"{q}_cov"] = (V * lam) @ V.T * n
             else:
-                raise ValueError(
-                    f"Cannot continue with storage format '{base_format}': "
-                    f"eigenvalues-only format has no eigvecs to reconstruct from"
-                )
-            raw_entry[n_key] = n
-            mean_key = f"{sig}_mean"
-            if mean_key in entry:
-                raw_entry[mean_key] = entry[mean_key].float()  # normalized mean (d,)
-        raw[hook_name] = raw_entry
+                raise ValueError(f"Cannot continue with storage format '{base_format}'")
+            if f"{q}_mean" in entry:
+                re_entry[f"{q}_mean"] = entry[f"{q}_mean"].float()
+        raw[leaf] = re_entry
     return raw
 
 
-def _entry_signals(entry: dict):
-    """Signal keys present in a stored entry: each k with a matching n_{k} count."""
-    return [k[2:] for k in entry if k.startswith("n_") and k != "n"]
-
-
 def _merge_with_existing(existing_raw: dict, new_factors: dict) -> dict:
-    """Add existing raw accumulators into new_factors (in-place). Returns new_factors."""
-    for hook_name, old in existing_raw.items():
-        if hook_name not in new_factors:
+    """Add existing raw accumulators into new_factors (in-place)."""
+    for leaf, old in existing_raw.items():
+        if leaf not in new_factors:
             continue
-        new = new_factors[hook_name]
-        for sig in _entry_signals(old):
-            n_key = f"n_{sig}"
-            if sig not in old:
-                continue
-            old_n = old[n_key]
-            new_n = new.get(n_key, 0)
-            merged_n = old_n + new_n
-            if sig in new:
-                if old[sig].dim() == 2 and old[sig].shape[0] != old[sig].shape[1]:
-                    # Acts mode: concat along token dim
-                    new[sig] = torch.cat([old[sig], new[sig]], dim=0)
+        new = new_factors[leaf]
+        for q in _entry_quantities(old):
+            old_n, new_n = old[f"{q}_n"], new.get(f"{q}_n", 0)
+            cov_k, samp_k = f"{q}_cov", f"{q}_samples"
+            if cov_k in old:
+                new[cov_k] = old[cov_k].to(new[cov_k].dtype) + new[cov_k] if cov_k in new else old[cov_k]
+            elif samp_k in old:
+                new[samp_k] = torch.cat([old[samp_k], new[samp_k]], dim=0) if samp_k in new else old[samp_k]
+            mean_k = f"{q}_mean"
+            if mean_k in old:
+                if mean_k in new and new_n > 0:
+                    new[mean_k] = (old[mean_k] * old_n + new[mean_k] * new_n) / (old_n + new_n)
                 else:
-                    # Cov mode: add unnormalized accumulators
-                    new[sig] = old[sig].to(dtype=new[sig].dtype) + new[sig]
-            else:
-                new[sig] = old[sig]
-            # Merge means (weighted average of normalized means)
-            mean_key = f"{sig}_mean"
-            if mean_key in old:
-                if mean_key in new and new_n > 0:
-                    new[mean_key] = (old[mean_key] * old_n + new[mean_key] * new_n) / merged_n
-                else:
-                    new[mean_key] = old[mean_key]
-            new[n_key] = merged_n
-        if new_factors[hook_name]:
-            first_n = next((new[f"n_{s}"] for s in _entry_signals(new)), 0)
-            new["n"] = first_n
+                    new[mean_k] = old[mean_k]
+            new[f"{q}_n"] = old_n + new_n
     return new_factors
 
 
@@ -770,9 +714,9 @@ def main(cfg: CollectConfig):
         if cfg.packing == "padded":
             # sample count == n_sequences for last-token padded collection
             n_done = next(
-                v[f"n_{s}"]
+                v[f"{q}_n"]
                 for k, v in ref_data.items() if not k.startswith("__")
-                for s in _entry_signals(v)
+                for q in _entry_quantities(v)
             )
             print(f"  continue_from: existing run has {n_done} sequences; skipping to texts[{n_done}:]")
             texts = texts[n_done:]
@@ -801,9 +745,8 @@ def main(cfg: CollectConfig):
     executor = ThreadPoolExecutor(max_workers=1)
 
     print(f"Processing {len(to_process)} remaining checkpoints...")
-    _hooks, _grad_all = cfg._resolved_hooks()
-    print(f"  hooks    = {_hooks}")
-    print(f"  grad_all = {_grad_all}")
+    print(f"  hooks    = {cfg.hooks}")
+    print(f"  fast_final_norm = {cfg.fast_final_norm}")
     print(f"  packing={cfg.packing}, token_selection={cfg.token_selection}")
     print(f"  sample_labels={cfg.sample_labels}, label_samples={cfg.label_samples}, seed={cfg.seed}")
     print(f"  storage_format={cfg.storage_format}")
@@ -828,16 +771,8 @@ def main(cfg: CollectConfig):
             model = load_model(model_config, step_model, revision)
             model.to(device)
 
-            _hooks_list, _grad_all = cfg._resolved_hooks()
-            if _grad_all or any(h.endswith("+G") for h in _hooks_list):
-                model.gradient_checkpointing_enable()
-                model.enable_input_require_grads()
-                model.config.use_cache = False
-                model.train()
-                for m in model.modules():
-                    if isinstance(m, nn.Dropout):
-                        m.p = 0.0
-
+            # Grad-run model setup (enable_input_require_grads etc.) now happens inside
+            # _collect_for_checkpoint when any hook needs gradients.
             n_layers = get_num_layers(model, model_config)
             blocks = cfg.target_layers if cfg.target_layers is not None else list(range(n_layers))
 

@@ -43,7 +43,7 @@ Format conversion, cross-basis projection, and metadata editing on already-colle
 |-----------|---------------|-------------|
 | `scripts/collect.py` | Orchestration: data loading, checkpoint loop, hook setup, batch loop, save | Metric computation (except optional inline), format conversion after the fact |
 | `utils/hooks.py` | Real-time accumulation during forward/backward pass (cov or raw acts); `MultiHeadOVDispatcher` for per-OV-head decomposition | Storage format decisions, token mask computation, pattern resolution |
-| `utils/hook_specs.py` | Resolves the `hooks` glob patterns (with optional `+G` per-entry grad markers and a `grad_all` shortcut) against the model's family-aware hook universe; produces concrete `SingleHookSpec` / `OVHeadSpec` lists. Also holds the backward-compat shim that turns legacy boolean flags into patterns. | Registering hooks on the model (collect.py does that), accumulation |
+| `utils/hook_specs.py` | Resolves the `hooks` leaf-patterns (`<leaf>[:acts\|:grads\|:both]` + `preset:<name>`) against the model's family-aware leaf universe; produces concrete `SingleHookSpec` (leaf + quantities) / `OVHeadSpec` lists; hard-errors on projection-node targets. | Registering hooks on the model (collect.py does that), accumulation |
 | `utils/accessor.py` | Format transformation, disk I/O, CLI post-processing, format-agnostic read with lazy derivation (B from A + MLP weights; O from A + o_proj weight slice for per-OV-head entries), eigendecomposition | Running models for collection |
 | `utils/model_registry.py` | Model config, checkpoint discovery, model/tokenizer loading, architecture introspection (per-family block-boundary + per-OV-head module resolution), selective weight loading, single-tensor on-disk weight cache (`data/weight_cache/`) read/write-through inside `_load_selective_tensors`, step-to-token-count | Data loading, metric computation |
 | `utils/data_utils.py` | Text loading/caching, packing/padding, token mask computation, label computation | Model loading, storage |
@@ -58,9 +58,9 @@ Format conversion, cross-basis projection, and metadata editing on already-colle
 
 2. **`utils/accessor.py` handles both read and write.** `DataAccessor` is the unified interface: `.save()` writes in a specific format, property access reads any format and derives what's missing. The accessor also does B-derivation (needing model weights via model_registry's selective loading) and post-norm derivation.
 
-3. **Token masking has a split**: MLP linear hooks (`blk*.up/down/gate`) always use "all" tokens (per-spec, set by the resolver); residual + block-boundary + per-OV-head hooks use the config's `token_selection` (last or all). Per-hook `token_selection` lives on the `SingleHookSpec` / `OVHeadSpec` produced by `hook_specs.resolve`, not on the collector itself.
+3. **Token masking has a split**: MLP projection leaves (`blk*.mlp.{up,down,gate}.{in,out}`) always use "all" tokens (per-spec, set by the resolver); residual + block-boundary + per-OV-head leaves use the config's `token_selection` (last or all). Per-leaf `token_selection` lives on the `SingleHookSpec` / `OVHeadSpec` produced by `hook_specs.resolve`, not on the collector itself.
 
-4. **Hook selection is pattern-based** (introduced 2026-05). `CollectConfig` exposes `hooks: list[str]` of fnmatch patterns, with optional trailing `+G` per entry to mark that pattern for gradient collection. A `grad_all: bool` flag shortcuts "G on every matched hook". `utils/hook_specs.resolve` matches against the model's family-aware hook universe and returns concrete specs. Legacy boolean flags (`collect_A` / `collect_G` / `collect_final_acts` / `collect_final_grads` / `residual_hook_point`) are still accepted and desugared into a `hooks` list (with inline `+G`) by `synthesize_from_flags` — existing configs work unchanged.
+4. **A hook IS a leaf** — one physical capture-point. `CollectConfig` exposes `hooks: list[str]`; each entry is `<leaf-pattern>[:acts|:grads|:both]` (default `:acts`) or `preset:<name>`. `:quantity` means the same thing at every leaf — capture acts and/or grads there. `utils/hook_specs.resolve` matches against the model's family-aware leaf universe and returns concrete specs; K-FAC is just two leaves (`…in:acts` + `…out:grads`, or `preset:kfac`), and an MLP projection *node* (`blk*.up`) hard-errors. The orthogonal `fast_final_norm: bool` captures `after_final_norm` acts via output-head replacement (forward-only — errors if any hook needs grads).
 
 5. **The data loaders in `data/` are thin** -- they just return HF streaming iterators. All the intelligence (caching, filtering, packing) is in `data_utils.py`.
 
@@ -77,7 +77,7 @@ slurm/collect.sh
         │     └─▶ data/<dataset>_loader.py    (fineweb, pile, olmomix, etc.)
         ├─▶ utils/data_utils.py
         ├─▶ utils/model_registry.py
-        ├─▶ utils/hook_specs.py               (resolve cfg.hooks / grad_all against model)
+        ├─▶ utils/hook_specs.py               (resolve cfg.hooks leaf-patterns against model)
         │     └─▶ utils/model_registry.py
         ├─▶ utils/hooks.py                    (HookCollector, MultiHeadOVDispatcher)
         ├─▶ utils/accessor.py                 (DataAccessor.save() + optional derive/inline metrics)

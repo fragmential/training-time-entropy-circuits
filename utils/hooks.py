@@ -1,10 +1,9 @@
-"""Hook-based collector for activations and covariance at arbitrary model hook points.
+"""Hook-based collector for activations and gradients at one leaf capture-point.
 
-HookCollector: unified class that attaches to any nn.Module to collect:
-    - Forward activations (input or output) as raw tensors or accumulated covariance
-    - Gradient covariance (always accumulated, never raw)
-
-Replaces the previous CovarianceCollector + ResidualCapture split.
+A HookCollector attaches to one nn.Module side (the leaf) and collects the
+requested quantities there: forward acts (raw samples or accumulated covariance)
+and/or backward grad covariance. `quantities` (subset of {"acts","grads"})
+decides which hooks register; everything lands under the single `leaf` name.
 """
 
 import torch
@@ -33,52 +32,44 @@ def _hook_input(args, kwargs):
 
 
 class HookCollector:
-    """Collect activations or covariance at a single hook point.
+    """Collect acts and/or grads at a single leaf capture-point.
 
-    Modes:
+    Modes (for acts only — grads are always accumulated as covariance):
         "cov"  — accumulates Σ xxT and n. Optionally means. Default.
         "acts" — stores raw (masked) activation tensors in a list.
 
-    For gradient collection (collect_grad=True), gradient covariance is always
-    accumulated regardless of mode (storing raw gradients is impractical).
-
     Args:
-        module: Module to hook. If None, call accumulate() manually (e.g. identity_head).
-        capture: "input" (forward_pre_hook) or "output" (forward_hook).
-        mode: "cov" or "acts".
-        collect_grad: Also collect gradient covariance via backward hook.
+        module: Module to hook. If None, call accumulate()/accumulate_grad() manually.
+        capture: "input" (pre-hook / grad_input) or "output" (post-hook / grad_output).
+        quantities: subset of {"acts","grads"} — decides which hooks register.
+        mode: "cov" or "acts" (acts storage only).
         collect_means: Store running mean of activations (for +m modifier).
-        accumulation_dtype: Dtype for covariance accumulators A and G. Default fp64
-                            for numerical stability of log-det computation.
-        activation_dtype: Dtype activations/gradients are cast to before outer products.
-                          Default fp32.
+        accumulation_dtype: covariance accumulator dtype (default fp64 for log-det stability).
+        activation_dtype: dtype acts/grads cast to before outer products (default fp32).
+        leaf: storage leaf name everything is written under.
     """
 
     def __init__(
         self,
         module: nn.Module = None,
         capture: str = "input",
+        quantities=("acts",),
         mode: str = "cov",
-        collect_grad: bool = False,
         collect_means: bool = False,
         accumulation_dtype: str = "fp64",
         activation_dtype: str = "fp32",
-        grad_capture: str = None,
         token_selection: str = None,
-        acts_key: str = "in.acts",
-        grads_key: str = "out.grads",
+        leaf: str = "acts",
     ):
         assert mode in ("cov", "acts"), f"Unknown mode: {mode}"
         assert capture in ("input", "output"), f"Unknown capture: {capture}"
 
         self.mode = mode
         self.capture = capture
+        self.quantities = set(quantities)
         self.token_selection = token_selection
-        self.grad_capture = grad_capture if grad_capture is not None else capture
-        self.collect_grad = collect_grad
         self.collect_means = collect_means
-        self.acts_key = acts_key      # signal key for the forward (acts) cov
-        self.grads_key = grads_key    # signal key for the backward (grads) cov
+        self.leaf = leaf
         self.active = True
         self._acc_dtype = _DTYPE_MAP.get(accumulation_dtype, torch.float64)
         self._act_dtype = _DTYPE_MAP.get(activation_dtype, torch.float32)
@@ -99,14 +90,15 @@ class HookCollector:
         self._n_grads = 0
         self._grads_sum = None   # (d,) running sum for gradient means
 
-        # Register hooks
+        # Register hooks: forward for acts (side decides pre/post), backward for grads.
         self._handles = []
         if module is not None:
-            if capture == "input":
-                self._handles.append(module.register_forward_pre_hook(self._fwd_pre, with_kwargs=True))
-            else:
-                self._handles.append(module.register_forward_hook(self._fwd_post))
-            if collect_grad:
+            if "acts" in self.quantities:
+                if capture == "input":
+                    self._handles.append(module.register_forward_pre_hook(self._fwd_pre, with_kwargs=True))
+                else:
+                    self._handles.append(module.register_forward_hook(self._fwd_post))
+            if "grads" in self.quantities:
                 self._handles.append(module.register_full_backward_hook(self._bwd))
 
     # ------------------------------------------------------------------
@@ -127,7 +119,7 @@ class HookCollector:
         return tensor[:, :-1].reshape(-1, tensor.size(-1)).to(dtype=self._act_dtype)
 
     # ------------------------------------------------------------------
-    # Accumulation (public — also used for identity_head manual feeding)
+    # Accumulation (public — also used for fast_final_norm manual feeding)
     # ------------------------------------------------------------------
 
     def accumulate(self, x_flat: torch.Tensor):
@@ -194,7 +186,7 @@ class HookCollector:
     def _bwd(self, module, grad_input, grad_output):
         if not self.active:
             return
-        go = grad_input[0] if self.grad_capture == "input" else grad_output[0]
+        go = grad_input[0] if self.capture == "input" else grad_output[0]
         if go is None:
             return
         g = go.detach()
@@ -205,39 +197,27 @@ class HookCollector:
     # ------------------------------------------------------------------
 
     def factors(self) -> dict:
-        """Return collected data as CPU tensors, keyed by signal.
-
-        With acts_key="in.acts", grads_key="out.grads" the dict holds:
-            "in.acts": covariance (d,d) in cov mode, or raw samples (N,d) in acts mode
-            "n_in.acts": token count
-            "in.acts_mean": mean vector (d,) if collect_means and cov mode
-            "out.grads": gradient covariance (d,d) if collect_grad
-            "n_out.grads": gradient token count
-            "out.grads_mean": mean gradient vector (d,) if collect_means and collect_grad
-            "n": convenience alias for n_acts
-        """
-        a, g = self.acts_key, self.grads_key
-        result = {}
-
+        """Collected data as {leaf: {q-keyed tensors}} under this collector's single
+        leaf. Keys are uniform `{q}_{fmt}` — `acts_cov` (Σxxᵀ) or `acts_samples` (N,d),
+        `acts_n`, `acts_mean`; same for grads. Emits whatever was accumulated."""
+        e: dict = {}
         if self.mode == "cov":
             if self._acts_cov is not None:
-                result[a] = self._acts_cov.cpu()
-            if self.collect_means and self._acts_sum is not None:
-                result[f"{a}_mean"] = (self._acts_sum / self._n_acts).cpu()
-        else:
-            if self._acts_list:
-                result[a] = torch.cat(self._acts_list, dim=0)
+                e["acts_cov"] = self._acts_cov.cpu()
+                e["acts_n"] = self._n_acts
+                if self.collect_means and self._acts_sum is not None:
+                    e["acts_mean"] = (self._acts_sum / self._n_acts).cpu()
+        elif self._acts_list:
+            e["acts_samples"] = torch.cat(self._acts_list, dim=0)
+            e["acts_n"] = self._n_acts
 
-        result[f"n_{a}"] = self._n_acts
-
-        if self.collect_grad and self._grads_cov is not None:
-            result[g] = self._grads_cov.cpu()
-            result[f"n_{g}"] = self._n_grads
+        if self._grads_cov is not None:
+            e["grads_cov"] = self._grads_cov.cpu()
+            e["grads_n"] = self._n_grads
             if self.collect_means and self._grads_sum is not None:
-                result[f"{g}_mean"] = (self._grads_sum / self._n_grads).cpu()
+                e["grads_mean"] = (self._grads_sum / self._n_grads).cpu()
 
-        result["n"] = self._n_acts
-        return result
+        return {self.leaf: e} if e else {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -302,27 +282,14 @@ def restore_head(model, original, attr_name):
 # ---------------------------------------------------------------------------
 
 class MultiHeadOVDispatcher:
-    """Collect per-OV-head pre-W_o slices from an attention output projection.
+    """Collect per-OV-head pre-W_o slices at one block's o_proj.
 
-    The attention output projection (o_proj / dense) is always called on a
-    tensor of shape (B, T, num_heads * head_dim) regardless of the attention
-    backend (eager / SDPA / flash). Per head h, the pre-W_o slice is:
-        attended_h = o_proj_input[..., h*d_head:(h+1)*d_head]  # (B, T, d_head)
-    and the residual contribution `contrib_h = attended_h @ W_h.T` can be
-    recovered losslessly from this slice plus the corresponding column block
-    of o_proj.weight (handled at metric time by DataAccessor's .O derivation).
-    Storing the pre-W_o slice is `H²×` smaller than storing the (d_model, d_model)
-    covariance of contrib_h.
-
-    Owns one forward pre-hook on o_proj (plus an optional backward hook) and
-    dispatches per-head slices into per-head d_head-sized HookCollectors keyed by
-    f"blk{block_idx}.attn.head{h}" for each h in `selected_heads`.
-
-    Note on G: the gradient pulled back through W_h is
-        grad_input_h = grad_output @ W_h ∈ R^d_head
-    per head. The backward hook on o_proj receives a single d_model-sized
-    grad_output and projects it through the corresponding W_h slice for each
-    selected head.
+    o_proj is always called on (B, T, num_heads*head_dim), so head h's pre-W_o
+    slice is o_proj_input[..., h*d_head:(h+1)*d_head]; its post-W_o contribution
+    (the `…head{h}.contrib` leaf) is derived later from o_proj's column block.
+    Storing the slice is H²× smaller than the contribution covariance. One
+    forward pre-hook (+ optional backward, pulling grads through W_h) feeds a
+    per-head HookCollector writing the `blk{i}.attn.head{h}.slice` leaf.
     """
 
     def __init__(
@@ -332,9 +299,9 @@ class MultiHeadOVDispatcher:
         head_dim: int,
         block_idx: int,
         selected_heads=None,
+        quantities=("acts",),
         mode: str = "cov",
         collect_means: bool = False,
-        collect_grad: bool = False,
         accumulation_dtype: str = "fp64",
         activation_dtype: str = "fp32",
         token_selection: str = None,
@@ -342,7 +309,7 @@ class MultiHeadOVDispatcher:
         self.num_heads = num_heads
         self.head_dim = head_dim
         self.block_idx = block_idx
-        self.collect_grad = collect_grad
+        self.quantities = set(quantities)
         if selected_heads is None:
             selected_heads = list(range(num_heads))
         self.selected_heads = list(selected_heads)
@@ -351,16 +318,17 @@ class MultiHeadOVDispatcher:
             h: HookCollector(
                 module=None, mode=mode,
                 collect_means=collect_means,
-                collect_grad=collect_grad,
                 accumulation_dtype=accumulation_dtype,
                 activation_dtype=activation_dtype,
                 token_selection=token_selection,
-                acts_key="slice.acts", grads_key="slice.grads",
+                leaf=f"blk{block_idx}.attn.head{h}.slice",
             )
             for h in self.selected_heads
         }
-        self._handles = [o_proj_module.register_forward_pre_hook(self._fwd_pre, with_kwargs=True)]
-        if collect_grad:
+        self._handles = []
+        if "acts" in self.quantities:
+            self._handles.append(o_proj_module.register_forward_pre_hook(self._fwd_pre, with_kwargs=True))
+        if "grads" in self.quantities:
             self._handles.append(o_proj_module.register_full_backward_hook(self._bwd))
 
     def set_token_mask(self, mask):
@@ -387,10 +355,10 @@ class MultiHeadOVDispatcher:
             collector.accumulate_grad(collector._apply_mask(g_h))
 
     def factors(self) -> dict:
-        return {
-            f"blk{self.block_idx}.attn.head{h}": c.factors()
-            for h, c in self.collectors.items()
-        }
+        out: dict = {}
+        for c in self.collectors.values():
+            out.update(c.factors())   # each per-head collector yields its own .slice leaf
+        return out
 
     def close(self):
         for h in self._handles:

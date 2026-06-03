@@ -21,14 +21,13 @@ sample_labels: false            # no full-vocab softmax (not needed for this tes
 max_layers_per_pass: 0          # all 6 blocks in one pass
 
 hooks:
-  - blk*.up+G                   # MLP: in.acts, out.acts(derived), out.grads, out.gen, kfac
-  - blk*.down+G
-  - blk*.attn.head*+G           # per-OV-head: slice.acts/grads + slice.gen; contrib.acts(derived)
-  - blk*.attn.in                # boundary: value.acts
+  - preset:kfac                 # MLP: in:acts + out:grads (out.acts derived) -> gen, kfac
+  - blk*.attn.head*.slice:both  # per-OV-head: slice acts/grads + gen; contrib.acts(derived)
+  - blk*.attn.in                # boundary: acts
   - blk*.attn.out
   - blk*.mlp.out
-  - before_final_norm+G         # residual: value.acts/grads + value.gen + kfac
-  - after_final_norm+G
+  - before_final_norm:both      # residual: acts/grads + gen + kfac
+  - after_final_norm:both
 
 storage_format: cov_svd+m+o
 compute_metrics: true

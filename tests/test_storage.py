@@ -2,10 +2,10 @@ import os
 import torch
 from utils.accessor import DataAccessor, decomp_profiler, eigh_descending
 
-# Fixture entries live at hook "after_final_norm" with signals value.acts / value.grads.
+# Fixture entries live at leaf "after_final_norm" with quantities acts / grads.
 HOOK = "after_final_norm"
-ACTS = "value.acts"
-GRADS = "value.grads"
+ACTS = "acts"
+GRADS = "grads"
 
 
 def test_save_load_cov(tmp_path, make_factors_dict):
@@ -14,7 +14,7 @@ def test_save_load_cov(tmp_path, make_factors_dict):
     DataAccessor(factors).save(path, format="cov")
     data = torch.load(path, map_location="cpu", weights_only=False)
     assert HOOK in data
-    assert ACTS in data[HOOK]
+    assert f"{ACTS}_cov" in data[HOOK]
     assert data["__format__"] == "cov"
 
 
@@ -40,11 +40,11 @@ def test_save_load_eigenvalues(tmp_path, make_factors_dict):
 def test_save_load_acts(tmp_path):
     N, d = 100, 32
     acts = torch.randn(N, d)
-    factors = {HOOK: {ACTS: acts, f"n_{ACTS}": N, "n": N}}
+    factors = {HOOK: {f"{ACTS}_samples": acts, f"{ACTS}_n": N}}
     path = str(tmp_path / "acts.pt")
     DataAccessor(factors).save(path, format="acts")
     data = torch.load(path, map_location="cpu", weights_only=False)
-    assert torch.allclose(data[HOOK][ACTS], acts.float(), atol=1e-6)
+    assert torch.allclose(data[HOOK][f"{ACTS}_samples"], acts.float(), atol=1e-6)
 
 
 def test_format_metadata(tmp_path, make_factors_dict):
@@ -84,8 +84,8 @@ def test_roundtrip_cov_to_cov_svd_to_eigenvalues(tmp_path, make_factors_dict):
 def test_cov_svd_reconstruction(tmp_path, make_factors_dict):
     d = 32
     factors = make_factors_dict(d=d, with_grad=False, with_means=False)
-    n = factors[HOOK]["n"]
-    original_cov = factors[HOOK][ACTS].float() / n
+    n = factors[HOOK][f"{ACTS}_n"]
+    original_cov = factors[HOOK][f"{ACTS}_cov"].float() / n
 
     path = str(tmp_path / "svd.pt")
     DataAccessor(factors).save(path, format="cov_svd")
@@ -147,12 +147,13 @@ def test_save_cov_svd_single_decomposition(tmp_path, make_factors_dict):
 
 
 def test_save_cov_svd_means_one_extra_eigvalsh(tmp_path, make_factors_dict):
-    # With +m, the centered eigenvalues add exactly one eigvalsh (eigvecs reused from the eigh).
+    # With +m the centered spectrum is a second full eigendecomposition (the
+    # uncentered eigh plus the centered eigh), so exactly two eigh and no eigvalsh.
     factors = make_factors_dict(d=16, with_grad=False, with_means=True)
     path = str(tmp_path / "svd.pt")
     n_eigh, n_eigvalsh = _count_decomps(lambda: DataAccessor(factors).save(path, format="cov_svd+m"))
-    assert n_eigh == 1
-    assert n_eigvalsh == 1
+    assert n_eigh == 2
+    assert n_eigvalsh == 0
 
 
 def test_storage_dtype_defaults(tmp_path, make_factors_dict):
@@ -199,8 +200,9 @@ def test_cross_checkpoint_self_projection_invariant(tmp_path, make_factors_dict)
 
 
 def test_same_layer_mlp_selects_out_acts(tmp_path):
-    # An MLP hook with stored out.acts (and out.grads) must project against out.acts,
-    # not silently fall back to the input acts.
+    # The MLP .out leaf carries both acts and grads in the SAME (d_out) space, so
+    # project_same_layer cross-projects them; the .in leaf (d_in acts only) is left
+    # alone (no grads there to pair with).
     d = 16
 
     def spd():
@@ -210,18 +212,24 @@ def test_same_layer_mlp_selects_out_acts(tmp_path):
     ovals, ovecs = eigh_descending(spd())
     gvals, gvecs = eigh_descending(spd())
     data = {
-        "blk0.up": {
-            "out.acts_eigvals": ovals, "out.acts_eigvecs": ovecs.float(), "n_out.acts": 200,
-            "out.grads_eigvals": gvals, "out.grads_eigvecs": gvecs.float(), "n_out.grads": 200,
+        "blk0.mlp.up.out": {
+            "acts_eigvals": ovals, "acts_eigvecs": ovecs.float(), "acts_n": 200,
+            "grads_eigvals": gvals, "grads_eigvecs": gvecs.float(), "grads_n": 200,
+        },
+        "blk0.mlp.up.in": {
+            "acts_eigvals": ovals.clone(), "acts_eigvecs": ovecs.float(), "acts_n": 200,
         },
         "__format__": "cov_svd",
     }
     path = str(tmp_path / "svd.pt")
     DataAccessor(data).project_same_layer(onto="both", output_path=path)
-    entry = torch.load(path, map_location="cpu", weights_only=False)["blk0.up"]
-    assert "out.grads_cross_eigvals_out.acts" in entry
-    assert "out.acts_cross_eigvals_out.grads" in entry
-    assert "out.grads_cross_eigvals_in.acts" not in entry
+    reloaded = torch.load(path, map_location="cpu", weights_only=False)
+    out_entry = reloaded["blk0.mlp.up.out"]
+    assert "grads_cross_eigvals_acts" in out_entry
+    assert "acts_cross_eigvals_grads" in out_entry
+    # The .in leaf has no grads, so no cross projection is added there.
+    in_entry = reloaded["blk0.mlp.up.in"]
+    assert not any("cross_eigvals" in k for k in in_entry)
 
 
 def test_convert_preserves_mean_by_default_and_minus_m_drops_it(tmp_path, make_factors_dict):
@@ -246,52 +254,71 @@ def test_convert_preserves_mean_by_default_and_minus_m_drops_it(tmp_path, make_f
 def test_acts_to_cov_svd_derives_mean_by_default(tmp_path):
     acts = torch.randn(20, 8)
     path = str(tmp_path / "svd.pt")
-    DataAccessor({HOOK: {ACTS: acts, f"n_{ACTS}": len(acts), "n": len(acts)}}).save(path, format="cov_svd")
+    DataAccessor({HOOK: {f"{ACTS}_samples": acts, f"{ACTS}_n": len(acts)}}).save(path, format="cov_svd")
     entry = torch.load(path, map_location="cpu", weights_only=False)[HOOK]
     assert torch.allclose(entry[f"{ACTS}_mean"], acts.mean(0), atol=1e-6)
 
 
-def test_derived_preserve_and_drop_overrides(tmp_path):
-    # MLP hook with a stored derived out.acts: cov_svd keeps it, cov_svd-b drops it.
-    data = {
-        "blk0.up": {
-            "n": 5,
-            "in.acts": torch.eye(4) * 5,
-            "in.acts_mean": torch.ones(4),
-            "out.acts": torch.eye(4) * 10,
-            "out.acts_mean": torch.arange(4).float(),
-        }
+def _mlp_proj_data():
+    # MLP up-projection with stored acts at both the .in leaf (captured) and the
+    # .out leaf (a materialized derived quantity, gated by the `b` flag).
+    return {
+        "blk0.mlp.up.in": {
+            "acts_n": 5,
+            "acts_cov": torch.eye(4) * 5,
+            "acts_mean": torch.ones(4),
+        },
+        "blk0.mlp.up.out": {
+            "acts_n": 5,
+            "acts_cov": torch.eye(4) * 10,
+            "acts_mean": torch.arange(4).float(),
+        },
+        "__format__": "cov",
     }
 
+
+def test_derived_preserve_and_drop_overrides(tmp_path):
+    # MLP .out leaf with a stored derived acts: cov_svd keeps it, cov_svd-b drops it.
     svd_path = str(tmp_path / "svd.pt")
-    DataAccessor(data).save(svd_path, format="cov_svd")
-    entry = torch.load(svd_path, map_location="cpu", weights_only=False)["blk0.up"]
-    assert "out.acts_eigvals" in entry
-    assert "out.acts_eigvecs" in entry
-    assert "out.acts_mean" in entry
+    DataAccessor(_mlp_proj_data(), model_name="EleutherAI/pythia-14m").save(svd_path, format="cov_svd")
+    entry = torch.load(svd_path, map_location="cpu", weights_only=False)["blk0.mlp.up.out"]
+    assert "acts_eigvals" in entry
+    assert "acts_eigvecs" in entry
+    assert "acts_mean" in entry
 
     drop_path = str(tmp_path / "drop.pt")
-    DataAccessor(data).save(drop_path, format="cov_svd-b")
-    entry_drop = torch.load(drop_path, map_location="cpu", weights_only=False)["blk0.up"]
-    assert not any(k.startswith("out.acts") for k in entry_drop)
+    DataAccessor(_mlp_proj_data(), model_name="EleutherAI/pythia-14m").save(drop_path, format="cov_svd-b")
+    reloaded = torch.load(drop_path, map_location="cpu", weights_only=False)
+    # The .out leaf's acts are dropped under -b (it has no other quantity → leaf gone).
+    assert "blk0.mlp.up.out" not in reloaded
 
 
 def test_eigenvalues_preserves_means_and_derived_by_default(tmp_path):
-    data = {
-        "blk0.up": {
-            "n": 5,
-            "in.acts": torch.eye(4) * 5,
-            "in.acts_mean": torch.ones(4),
-            "out.acts": torch.eye(4) * 10,
-            "out.acts_mean": torch.arange(4).float(),
-        }
-    }
     path = str(tmp_path / "eig.pt")
-    DataAccessor(data).save(path, format="eigvals")
-    entry = torch.load(path, map_location="cpu", weights_only=False)["blk0.up"]
-    assert {"in.acts_mean", "out.acts_mean", "in.acts_eigvals", "out.acts_eigvals"} <= set(entry)
-    assert "in.acts_eigvecs" not in entry
-    assert "out.acts_eigvecs" not in entry
+    DataAccessor(_mlp_proj_data(), model_name="EleutherAI/pythia-14m").save(path, format="eigvals")
+    reloaded = torch.load(path, map_location="cpu", weights_only=False)
+    in_e = reloaded["blk0.mlp.up.in"]
+    out_e = reloaded["blk0.mlp.up.out"]
+    assert {"acts_mean", "acts_eigvals"} <= set(in_e)
+    assert {"acts_mean", "acts_eigvals"} <= set(out_e)
+    assert "acts_eigvecs" not in in_e
+    assert "acts_eigvecs" not in out_e
+
+
+def test_captured_after_final_norm_acts_not_dropped_as_derived(tmp_path):
+    # after_final_norm.acts is a derived slot (norm @ before_final_norm) AND can be
+    # captured directly by the after_final_norm hook. A captured value must be stored,
+    # not dropped just because a derivation rule exists for that slot.
+    d = 16
+    X = torch.randn(200, d, dtype=torch.float64)
+    G = torch.randn(200, d, dtype=torch.float64)
+    factors = {"after_final_norm": {"acts_cov": X.T @ X, "acts_n": 200, "acts_mean": X.float().mean(0),
+                                    "grads_cov": G.T @ G, "grads_n": 200},
+               "__format__": "cov", "__hf_model__": "EleutherAI/pythia-14m"}
+    out = str(tmp_path / "afn.pt")
+    DataAccessor(factors, model_name="EleutherAI/pythia-14m").save(out, format="cov_svd+m")
+    entry = torch.load(out, map_location="cpu", weights_only=False)["after_final_norm"]
+    assert "acts_eigvals" in entry and "grads_eigvals" in entry  # captured acts kept
 
 
 def test_no_eager_metadata_inference_on_construct(tmp_path, make_factors_dict):
@@ -319,13 +346,15 @@ def test_existing_metadata_not_overwritten(tmp_path, make_factors_dict):
     DataAccessor(factors).save(path, format="cov")
 
     data = torch.load(path, map_location="cpu", weights_only=False)
-    data["__hf_model__"] = "custom/x"
+    # A family-recognizable but non-inferred repo (stamping would otherwise fill in
+    # EleutherAI/pythia-14m + step0 from the path).
+    data["__hf_model__"] = "EleutherAI/pythia-custom-x"
     data["__revision__"] = "rev99"
     torch.save(data, path)
 
     DataAccessor(path).save(path, format="eigenvalues")
     stamped = torch.load(path, map_location="cpu", weights_only=False)
-    assert stamped["__hf_model__"] == "custom/x"
+    assert stamped["__hf_model__"] == "EleutherAI/pythia-custom-x"
     assert stamped["__revision__"] == "rev99"
 
 

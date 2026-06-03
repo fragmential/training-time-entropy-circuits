@@ -2,20 +2,25 @@
 
 Drives the REAL collection pipeline (resolve_hook_specs -> HookCollector /
 MultiHeadOVDispatcher -> forward + backward -> factors) via
-scripts.collect._collect_for_checkpoint, then asserts that each requested hook
-produced covariance factors of the right shape — including the per-OV-head and
+scripts.collect._collect_for_checkpoint, then asserts that each produced leaf
+carries covariance factors of the right shape — including the per-OV-head and
 the kwargs-called `attn.in` boundary paths that only a real model exercises
 (and that the unit suite, which feeds tensors straight to the accumulator,
 never touches).
+
+`_collect_for_checkpoint` returns {leaf: {quantity-keyed dict}} where leaves are
+full nested paths (e.g. blk0.mlp.up.in, blk0.attn.in, blk0.attn.head0.slice), each
+entry keyed by uniform `{q}_{fmt}` — acts_cov / acts_n / acts_mean / grads_cov / ...
 
 Uses each model's final checkpoint so weights are cached once under $HF_HOME
 and reused. Prefetch with:
     uv run python -m tests.prefetch_e2e_models
 
 RUN ON A GPU NODE: OLMo-2-1B is bf16 and unusably slow on CPU. Skipped in fast
-runs (mark: e2e). Submit with ./slurm/e2e.sh, or:
-    srun --partition=gpu_a100 --gpus=1 --cpus-per-task=18 --time=00:20:00 \
-        uv run pytest tests/test_e2e_all_hooks.py -v -m e2e
+runs (mark: e2e). Run all e2e tests via srun:
+    export HF_HOME="/projects/prjs1815/hf_cache"
+    srun --partition=gpu_a100 --gpus=1 --cpus-per-task=18 --time=00:40:00 \
+        uv run pytest tests/ -m e2e
 """
 import gc
 
@@ -23,9 +28,9 @@ import pytest
 import torch
 
 from tests.e2e_models import HOOKS_BY_MODEL, PYTHIA, OLMO, final_checkpoint
-from collect import CollectConfig, _collect_for_checkpoint
+from scripts.collect import CollectConfig, _collect_for_checkpoint
 from utils.model_registry import get_model_config, load_model, load_tokenizer
-from utils.hook_names import classify, captured_signals
+from utils import hook_names as hn
 
 pytestmark = pytest.mark.e2e
 
@@ -69,41 +74,53 @@ def _run_collection(model_name, hooks):
     return factors
 
 
-def _signal(name, quantity):
-    """The captured 'name.acts' or 'name.grads' signal key for this hook, by kind."""
-    return next(s for s in captured_signals(name) if s.endswith(f".{quantity}"))
+def _leaf_kind(leaf):
+    """Classify a storage leaf into one of the broad hook kinds, else None."""
+    if leaf in hn.RESIDUAL_NAMES:
+        return "residual"
+    if leaf.endswith(".slice") or leaf.endswith(".contrib"):
+        return "ov_head"
+    if hn.mlp_proj_leaf(leaf):   # blk{i}.mlp.{up,down,gate}.{in,out}
+        return "mlp"
+    if hn.boundary(leaf):        # blk{i}.{attn,mlp}.{in,out,raw_out}
+        return "boundary"
+    return None
 
 
-def _assert_square_cov(name, fac, quantity):
-    key = _signal(name, quantity)
-    assert key in fac, f"{name}: missing {key!r}"
-    cov = fac[key]
-    assert cov.ndim == 2 and cov.shape[0] == cov.shape[1], f"{name}: {key} not square: {tuple(cov.shape)}"
-    assert torch.isfinite(cov).all(), f"{name}: {key} has non-finite values"
+def _n(entry):
+    """Token count for whichever quantity this leaf carries."""
+    return entry.get("acts_n") or entry.get("grads_n") or 0
+
+
+def _assert_square_cov(leaf, entry, quantity):
+    key = f"{quantity}_cov"
+    assert key in entry, f"{leaf}: missing {key!r}"
+    cov = entry[key]
+    assert cov.ndim == 2 and cov.shape[0] == cov.shape[1], \
+        f"{leaf}: {key} not square: {tuple(cov.shape)}"
+    assert torch.isfinite(cov).all(), f"{leaf}: {key} has non-finite values"
 
 
 @pytest.mark.parametrize("model_name", [PYTHIA, OLMO])
 def test_all_hooks_collect(model_name):
-    """Every requested hook produces finite A (and G where +G) on a real forward/backward."""
-    hooks = HOOKS_BY_MODEL[model_name]
-    grad_patterns = {h[:-2] for h in hooks if h.endswith("+G")}
-    factors = _run_collection(model_name, hooks)
+    """Every requested leaf produces a finite square cov on a real forward/backward."""
+    factors = _run_collection(model_name, HOOKS_BY_MODEL[model_name])
 
     assert factors, "no factors collected"
     seen_kinds = set()
-    for name, fac in factors.items():
-        kind = classify(name)
-        assert kind is not None, f"unclassifiable hook name: {name!r}"
+    for leaf, entry in factors.items():
+        kind = _leaf_kind(leaf)
+        assert kind is not None, f"unclassifiable leaf: {leaf!r}"
         seen_kinds.add(kind)
 
-        _assert_square_cov(name, fac, "acts")       # acts covariance: always present
-        assert fac.get("n", 0) > 0, f"{name}: zero tokens accumulated"
-
-        # grads present exactly when the matching pattern carried +G. (acts and
-        # grads can differ in size — MLP K-FAC has d_in acts vs d_out grads.)
-        wants_grad = _wants_grad(name, grad_patterns)
-        if wants_grad:
-            _assert_square_cov(name, fac, "grads")
+        # Whatever quantity this leaf carries must be a finite square cov. MLP
+        # K-FAC splits acts (.in) and grads (.out) across sibling leaves.
+        if "acts_cov" in entry:
+            _assert_square_cov(leaf, entry, "acts")
+        if "grads_cov" in entry:
+            _assert_square_cov(leaf, entry, "grads")
+        assert "acts_cov" in entry or "grads_cov" in entry, f"{leaf}: no quantity stored"
+        assert _n(entry) > 0, f"{leaf}: zero tokens accumulated"
 
     # Every kind the family exposes must have been collected.
     assert {"mlp", "ov_head", "boundary", "residual"} <= seen_kinds, f"missing kinds: {seen_kinds}"
@@ -113,7 +130,7 @@ def test_olmo_family_specific_hooks():
     """OLMo-2 exposes gate + raw_out + mlp.in, which Pythia silently lacks."""
     factors = _run_collection(OLMO, HOOKS_BY_MODEL[OLMO])
     names = set(factors)
-    assert any(n.endswith(".gate") for n in names), "OLMo gate proj not collected"
+    assert any(".mlp.gate." in n or n.endswith(".mlp.gate") for n in names), "OLMo gate proj not collected"
     assert any(n.endswith(".attn.raw_out") for n in names), "OLMo attn.raw_out not collected"
     assert any(n.endswith(".mlp.in") for n in names), "OLMo mlp.in not collected"
 
@@ -123,13 +140,8 @@ def test_pythia_skips_olmo_only_hooks():
     # Pass the OLMo (superset) patterns to Pythia; the extras must just not appear.
     factors = _run_collection(PYTHIA, HOOKS_BY_MODEL[OLMO])
     names = set(factors)
-    assert not any(n.endswith(".gate") for n in names)
+    assert not any(".mlp.gate" in n for n in names)
     assert not any(n.endswith(".attn.raw_out") for n in names)
     assert not any(n.endswith(".mlp.in") for n in names)
     # but the shared kinds are still there
-    assert any(classify(n) == "ov_head" for n in names)
-
-
-def _wants_grad(name, grad_patterns):
-    import fnmatch
-    return any(fnmatch.fnmatchcase(name, p) for p in grad_patterns)
+    assert any(_leaf_kind(n) == "ov_head" for n in names)

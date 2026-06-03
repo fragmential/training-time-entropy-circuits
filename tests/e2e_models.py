@@ -9,19 +9,18 @@ PYTHIA = "EleutherAI/pythia-14m"
 OLMO = "allenai/OLMo-2-0425-1B"
 E2E_MODELS = [PYTHIA, OLMO]
 
-# Hook patterns covering every kind the family exposes. `+G` adds the gradient
-# (backward) path; per-OV-head (`attn.head*`) and the kwargs-called `attn.in`
-# boundary are the paths that only a real forward/backward pass exercises.
+# Leaf patterns covering every kind the family exposes. `:both`/:grads/preset:kfac
+# drive the backward path; per-OV-head (`attn.head*.slice`) and the kwargs-called
+# `attn.in` boundary are the paths only a real forward/backward pass exercises.
 _COMMON = [
-    "blk*.up+G", "blk*.down+G",                       # MLP input A + G
-    "blk*.attn.head*+G",                              # per-OV-head slice A + G
-    "blk*.attn.in", "blk*.attn.out", "blk*.mlp.out",  # sub-block boundaries
-    "before_final_norm+G", "after_final_norm+G",      # residual stream A + G
+    "preset:kfac",                                     # MLP K-FAC: in:acts + out:grads
+    "blk*.attn.head*.slice:both",                      # per-OV-head slice acts + grads
+    "blk*.attn.in", "blk*.attn.out", "blk*.mlp.out",   # sub-block boundaries (acts)
+    "before_final_norm:both", "after_final_norm:both", # residual stream acts + grads
 ]
 PYTHIA_HOOKS = list(_COMMON)
 OLMO_HOOKS = _COMMON + [
-    "blk*.gate+G",                       # OLMo-2 third MLP projection
-    "blk*.attn.raw_out", "blk*.mlp.in",  # OLMo-2-only boundaries
+    "blk*.attn.raw_out", "blk*.mlp.in",  # OLMo-2-only boundaries (preset:kfac already adds gate)
 ]
 
 HOOKS_BY_MODEL = {PYTHIA: PYTHIA_HOOKS, OLMO: OLMO_HOOKS}

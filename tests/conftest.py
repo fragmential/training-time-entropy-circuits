@@ -3,11 +3,10 @@ import pytest
 import torch
 import numpy as np
 
-# Ensure project root and scripts/ are importable
+# Ensure project root is importable (scripts/ is a package, imported as scripts.*)
 _root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-for p in [_root, os.path.join(_root, "scripts")]:
-    if p not in sys.path:
-        sys.path.insert(0, p)
+if _root not in sys.path:
+    sys.path.insert(0, _root)
 
 
 def pytest_addoption(parser):
@@ -43,24 +42,25 @@ def make_powerlaw_eigvals():
     return _make
 
 
-# Synthetic residual-hook entry: signals are value.acts / value.grads.
+# Synthetic residual leaf: quantities are acts / grads at one leaf.
 HOOK = "after_final_norm"
-ACTS = "value.acts"
-GRADS = "value.grads"
+ACTS = "acts"
+GRADS = "grads"
 
 
 @pytest.fixture
 def make_factors_dict():
-    """Factors dict as HookCollector.factors() would produce (unnormalized cov)."""
+    """Factors dict as HookCollector.factors() would produce (uniform {q}_{fmt} keys,
+    unnormalized Σxxᵀ at {q}_cov)."""
     def _make(d=64, N=200, with_means=True, with_grad=True):
         acts = torch.randn(N, d, dtype=torch.float64)
-        entry = {ACTS: acts.T @ acts, f"n_{ACTS}": N, "n": N}  # unnormalized
+        entry = {f"{ACTS}_cov": acts.T @ acts, f"{ACTS}_n": N}  # unnormalized Σ
         if with_means:
             entry[f"{ACTS}_mean"] = acts.float().mean(0)
         if with_grad:
             grads = torch.randn(N, d, dtype=torch.float64)
-            entry[GRADS] = grads.T @ grads
-            entry[f"n_{GRADS}"] = N
+            entry[f"{GRADS}_cov"] = grads.T @ grads
+            entry[f"{GRADS}_n"] = N
             if with_means:
                 entry[f"{GRADS}_mean"] = grads.float().mean(0)
         return {HOOK: entry}

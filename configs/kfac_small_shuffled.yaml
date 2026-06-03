@@ -28,11 +28,10 @@ max_checkpoints: 20
 checkpoint_spacing: sqrt
 packing: packed
 token_selection: all
-collect_final_acts: true
-collect_final_grads: true
-residual_hook_point: both
-collect_A: true
-collect_G: true
+hooks:
+  - preset:kfac
+  - before_final_norm:both
+  - after_final_norm:both
 sample_labels: true
 label_samples: 1
 seed: 42

@@ -96,7 +96,8 @@ def test_covariance_shapes(model_and_config, texts_and_packed):
     name, layer = projections[0]
     d_out, d_in = layer.weight.shape
 
-    collector = HookCollector(layer, capture="input", mode="cov", collect_grad=True)
+    collector = HookCollector(layer, capture="input", quantities={"acts", "grads"},
+                              mode="cov", leaf="blk0.mlp.up.in")
     mask = compute_token_mask(x, token_selection="all")
     collector.set_token_mask(mask)
 
@@ -116,10 +117,11 @@ def test_covariance_shapes(model_and_config, texts_and_packed):
     factors = collector.factors()
     collector.close()
 
-    assert factors["in.acts"].shape == (d_in, d_in)
-    # grads captured on same side as acts (capture="input"), so also d_in x d_in
-    assert factors["out.grads"].shape == (d_in, d_in)
-    assert factors["n"] > 0
+    # One leaf carries both quantities (acts + grads captured at the same input side).
+    entry = factors["blk0.mlp.up.in"]
+    assert entry["acts_cov"].shape == (d_in, d_in)
+    assert entry["grads_cov"].shape == (d_in, d_in)  # grads input-side -> also d_in x d_in
+    assert entry["acts_n"] > 0
 
 
 def test_storage_roundtrip_real_data(model_and_config, texts_and_packed):
@@ -137,11 +139,12 @@ def test_storage_roundtrip_real_data(model_and_config, texts_and_packed):
     ln = get_final_layernorm(model, config)
     mask = compute_token_mask(x, token_selection="all")
     collector = HookCollector(ln, capture="output", mode="cov", collect_means=True,
-                              acts_key="value.acts", grads_key="value.grads")
+                              leaf="after_final_norm")
     collector.set_token_mask(mask)
     with torch.no_grad():
         model(x)
-    factors = {"after_final_norm": collector.factors()}
+    # factors() already keys by leaf -> {quantity dict}; that is the storage dict.
+    factors = collector.factors()
     collector.close()
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -154,13 +157,13 @@ def test_storage_roundtrip_real_data(model_and_config, texts_and_packed):
 
         # Read via accessor
         acc = DataAccessor(svd_path)
-        eigvals = acc["after_final_norm"].value.acts.eigvals
+        eigvals = acc.after_final_norm.acts.eigvals
         assert eigvals is not None
         assert len(eigvals) > 0
         assert (eigvals[:-1] >= eigvals[1:]).all()
 
         # Verify mean is stored
-        mean = acc["after_final_norm"].value.acts.mean
+        mean = acc.after_final_norm.acts.mean
         assert mean is not None
 
 
@@ -218,17 +221,17 @@ def test_B_equals_WAWt(model_and_config, texts_and_packed):
         with torch.no_grad():
             model(x)
 
-        a_factors = ic.factors()
-        b_factors = oc.factors()
+        a_factors = ic.factors()["acts"]
+        b_factors = oc.factors()["acts"]
         ic.close()
         oc.close()
 
-        n = a_factors["n"]
-        in_cov = a_factors["in.acts"].float() / n
-        out_cov = b_factors["in.acts"].float() / n  # output collector's captured acts = the MLP output
+        n = a_factors["acts_n"]
+        in_cov = a_factors["acts_cov"].float() / n
+        out_cov = b_factors["acts_cov"].float() / n  # output collector's captured acts = the MLP output
         W = layer.weight.detach().float()
         b = layer.bias.detach().float() if layer.bias is not None else None
-        mu = a_factors["in.acts_mean"]
+        mu = a_factors["acts_mean"]
 
         out_derived = W @ in_cov @ W.T
         if b is not None:

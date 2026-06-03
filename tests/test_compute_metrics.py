@@ -1,9 +1,11 @@
 import numpy as np
 import torch
-from compute_metrics import (
+from scripts.compute_metrics import (
     spectral_metrics, mean_metrics, kfac_metrics,
     generalized_eigenvalues, _top_k_outer_products,
+    compute_metrics_for_checkpoint,
 )
+from utils.accessor import DataAccessor
 
 
 def test_spectral_metrics_keys():
@@ -114,3 +116,56 @@ def test_generalized_eigvals_scaled():
     eigvecs = torch.eye(d)
     gen = generalized_eigenvalues(eigvals_grads, eigvecs, eigvals_acts, eigvecs)
     assert torch.allclose(gen, torch.full_like(gen, 3.0), atol=0.1)
+
+
+# ---------------------------------------------------------------------------
+# Metric walk over the hook tree: which node gets which metric.
+# ---------------------------------------------------------------------------
+
+def _cov(d, n=200):
+    X = torch.randn(n, d, dtype=torch.float64)
+    return X.T @ X
+
+
+def _walk_data():
+    d = 16
+    return {
+        "blk0.attn.in":  {"acts_cov": _cov(d), "acts_n": 200, "acts_mean": torch.randn(d).float(),
+                          "grads_cov": _cov(d), "grads_n": 200},
+        "blk0.attn.out": {"acts_cov": _cov(d), "acts_n": 200, "grads_cov": _cov(d), "grads_n": 200},
+        "blk0.mlp.up.in":   {"acts_cov": _cov(d), "acts_n": 200},
+        "blk0.mlp.up.out":  {"grads_cov": _cov(d), "grads_n": 200},
+        "blk0.mlp.down.in": {"acts_cov": _cov(d), "acts_n": 200},
+        "blk0.mlp.down.out": {"grads_cov": _cov(d), "grads_n": 200},
+        "__format__": "cov",
+    }
+
+
+def test_walk_kfac_at_projection_and_subblock_nodes():
+    res = compute_metrics_for_checkpoint(DataAccessor(_walk_data()))
+    # Real weight K-FAC at each projection node...
+    assert "kfac" in res["blk0.mlp.up"] and "kfac" in res["blk0.mlp.down"]
+    # ...and the cross-boundary K-FAC at the sub-block nodes (in/out boundary leaves).
+    assert "kfac" in res["blk0.attn"]
+
+
+def test_walk_projections_kfac_at_mlp_node():
+    res = compute_metrics_for_checkpoint(DataAccessor(_walk_data()))
+    assert "projections_kfac" in res["blk0.mlp"]   # up.in.acts x down.out.grads
+    assert "kfac" not in res["blk0.mlp"]            # blk0.mlp has no in/out boundary leaves here
+
+
+def test_walk_leaf_spectral_family_and_gen():
+    res = compute_metrics_for_checkpoint(DataAccessor(_walk_data()))
+    leaf = res["blk0.attn.in"]
+    assert {"acts_uncentered", "grads_uncentered", "gen"} <= set(leaf)
+    assert "acts_centered" in leaf and "acts_mean_metrics" in leaf  # mean present
+    # .in leaf of a projection: acts only -> no gen, no grads
+    assert "gen" not in res["blk0.mlp.up.in"] and "grads_uncentered" not in res["blk0.mlp.up.in"]
+
+
+def test_walk_derived_out_acts_needs_no_metric_without_grads_pairing():
+    # The .out leaf carries grads; its acts is derived only with a model. Without one,
+    # only grads metrics appear (no gen, no derived acts spectral).
+    res = compute_metrics_for_checkpoint(DataAccessor(_walk_data()))
+    assert set(res["blk0.mlp.up.out"]) == {"grads_uncentered"}

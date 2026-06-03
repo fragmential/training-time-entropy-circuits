@@ -1,29 +1,12 @@
 #!/usr/bin/env python
-"""Compute spectral metrics (RankMe, alpha, eigenspectrum) from collected data.
+"""Compute spectral / K-FAC metrics from collected data via DataAccessor.
 
-Handles all storage formats uniformly via DataAccessor:
-    - acts (.pt): PCA eigendecomposition per hook point → metrics
-    - cov (.pt): eigendecompose covariance per hook point per factor → metrics
-    - cov_svd (.pt): eigenvalues already stored → metrics
-    - eigenvalues (.pt): eigenvalues already stored → metrics
-
-Output keys are the node.signal strings DataAccessor.available() returns, per hook kind:
-    mlp:      in.acts, out.acts (derived), out.grads, out.gen
-    residual/boundary: value.acts, value.grads, value.gen
-    ov_head:  slice.acts, slice.grads, slice.gen, contrib.acts (derived)
-plus per-signal _centered / _mean_metrics / _cross_<label>, and hook-level kfac.
-
-Results structure:
-    {step: {hook_name: {
-        "<role>.acts":  {eigenspectrum, rankme, alpha, r2, r2_100, ...},
-        "<role>.grads": {...},
-        "<role>.gen":   {eigvals, rankme, alpha, ...},  # gradient vs activation, same space
-        "kfac": {trace, log_det, trace_acts, trace_grads, top_eigvals, ...},  # input acts x output grads
-    }}}
+Results: {step: {node_path: {metric_name: {...}}}}. Leaves get the spectral family
+(acts/grads × uncentered/centered/mean/cross); nodes get gen / kfac / projections_kfac
+where their operands resolve. The metric list (METRICS) is walked recursively.
 
 Usage:
     python scripts/compute_metrics.py data/inferences/full_limited pythia-14m-deduped
-    python scripts/compute_metrics.py full_limited pythia-70m-deduped
     python scripts/compute_metrics.py fineweb pythia-14m-deduped --recompute
 """
 
@@ -37,27 +20,7 @@ from multiprocessing import Pool
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from utils.accessor import DataAccessor
-from utils import hook_names as hn
-
-
-# The node that carries both acts and grads in the same space (and so gets a
-# `.gen` generalized-eigenvalue metric), per hook kind.
-_GEN_NODE = {"mlp": "out", "residual": "value", "boundary": "value", "ov_head": "slice"}
-
-
-def _kfac_acts_signal(hook_name):
-    """The input-acts signal feeding this hook's K-FAC block (layer: up's in.acts)."""
-    if hn.classify(hook_name) == "layer":
-        return "in.acts"
-    return next((s for s in hn.captured_signals(hook_name) if s.endswith(".acts")), None)
-
-
-def _kfac_grads_signal(hook_name):
-    """The output-grads signal of this hook's K-FAC block (layer: down's out.grads)."""
-    if hn.classify(hook_name) == "layer":
-        return "out.grads"
-    return next((s for s in hn.captured_signals(hook_name) if s.endswith(".grads")), None)
+from utils.accessor import DataAccessor, decomp_profiler
 
 
 # ---------------------------------------------------------------------------
@@ -500,98 +463,120 @@ def generalized_eigenvalues(
     from utils.accessor import eigvalsh_descending
     return eigvalsh_descending(M).cpu()
 
+
+# A metric fires at any node where all its operands resolve. `kfac` thus fires at
+# projection nodes AND at sub-block nodes (blk.mlp/blk.attn, from their boundary
+# .in/.out leaves); `projections_kfac` only at blk.mlp (up.in x down.out).
+
+from contextlib import nullcontext
+
+
+class _Metric:
+    def __init__(self, name, operands, fn):
+        self.name, self.operands, self.fn = name, operands, fn
+
+
+def _gen_metric(a, g):
+    ae, ge = a.eigh, g.eigh
+    if ae is None or ge is None:
+        return None
+    e_a, v_a = ae
+    e_g, v_g = ge
+    if v_a.shape != v_g.shape:
+        return None  # acts and grads must live in the same space
+    ctx = getattr(a._acc, "_gpu_ctx", None) or nullcontext()
+    with ctx:
+        gen = generalized_eigenvalues(e_g, v_g, e_a, v_a)
+    sm = spectral_metrics(gen) if len(gen) >= 11 else {}
+    return {"eigvals": gen, **sm}
+
+
+def _kfac_metric(a, g):
+    ea, eg = a.eigvals, g.eigvals
+    if ea is None or eg is None:
+        return None
+    return kfac_metrics(ea.clamp(min=0), eg.clamp(min=0))
+
+
+METRICS = [
+    _Metric("gen",              {"a": "acts", "g": "grads"},                 _gen_metric),
+    _Metric("kfac",             {"a": "in.acts", "g": "out.grads"},          _kfac_metric),
+    _Metric("projections_kfac", {"a": "up.in.acts", "g": "down.out.grads"},  _kfac_metric),
+]
+
+
+def _quantity_metrics(q, fv, path):
+    """Spectral family for one (leaf, quantity): uncentered/centered/mean/cross."""
+    out = {}
+    ev = fv.eigvals
+    if ev is None:
+        return out
+    _check_negative_eigenvalues(ev, f"{path}.{q}")
+    out[f"{q}_uncentered"] = spectral_metrics(ev.clamp(min=0), mean=fv.mean)
+
+    cev = fv.eigvals_centered
+    if cev is not None:
+        out[f"{q}_centered"] = spectral_metrics(cev.clamp(min=0))
+
+    if fv.mean is not None and fv.eigh_centered is not None:
+        out[f"{q}_mean_metrics"] = mean_metrics(fv.eigvecs_centered, fv.eigvals_centered, fv.mean)
+
+    entry = fv._acc._entry(path)
+    prefix = f"{q}_cross_eigvals_"
+    for ek, evv in entry.items():
+        if ek.startswith(prefix) and isinstance(evv, torch.Tensor):
+            out[f"{q}_cross_{ek[len(prefix):]}"] = spectral_metrics(evv.clamp(min=0))
+    return out
+
+
+def get_metrics(node, results):
+    """Recursively walk the hook tree; each node writes its own flat result entry."""
+    for child in node.children():
+        get_metrics(child, results)
+    out = {}
+    for q in ("acts", "grads"):
+        fv = node.get(q)
+        if fv is not None:
+            out.update(_quantity_metrics(q, fv, node._path))
+    for m in METRICS:
+        args = {k: node.get(rel) for k, rel in m.operands.items()}
+        if all(v is not None for v in args.values()):
+            r = m.fn(**args)
+            if r is not None:
+                out[m.name] = r
+    if out:
+        results[node._path] = out
+
+
 def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False, gpu_lock=None):
     import time
-    from contextlib import nullcontext
-    from utils.accessor import decomp_profiler
     if verbose:
         decomp_profiler.enable()
-    avail = accessor.available()
-    step_results = {}
-    t0 = time.time()
     gpu_ctx = gpu_lock or nullcontext()
+    accessor._gpu_ctx = gpu_ctx
+    t0 = time.time()
     gpu_wait = 0.0
 
-    # Pre-warm ALL eigendecompositions under GPU lock so the rest is pure numpy
+    # Pre-warm every eigendecomposition under the GPU lock so the metric walk that
+    # follows is pure-CPU cache hits — letting Pool workers overlap GPU and CPU work.
     with gpu_ctx as ctx:
         gpu_wait += getattr(ctx, "waited", 0.0)
-        for hook_name, factors in avail.items():
-            t = time.time()
-            for factor in factors:
-                accessor._ensure_eigh(hook_name, factor,
-                                      need_vecs=True, need_centered_vecs=True)
-            if verbose:
-                print(f"    prewarm {hook_name}: {time.time()-t:.1f}s")
-
+        for leaf, q in accessor.leaf_quantities():
+            accessor.resolve(leaf, q, "eigh")
+            accessor.resolve(leaf, q, "eigh_centered")
     if verbose:
         print(f"    prewarm total: {time.time()-t0:.1f}s")
 
-    for hook_name, factors in avail.items():
-        t_hook = time.time()
-        hook_results = {}
-        hook = accessor[hook_name]
-        entry = accessor._entry(hook_name)
-
-        eigvals_by_signal = {}  # signal -> clamped eigvals, for K-FAC
-        for signal in factors:
-            fv = hook._factor(signal)
-            eigvals = fv.eigvals
-            if eigvals is None:
-                continue
-            _check_negative_eigenvalues(eigvals, f"{hook_name}.{signal}")
-            eigvals = eigvals.clamp(min=0)
-            hook_results[signal] = spectral_metrics(eigvals, mean=fv.mean)
-            eigvals_by_signal[signal] = eigvals
-
-            # Centered eigenvalues
-            centered = fv.eigvals_centered
-            if centered is not None:
-                centered = centered.clamp(min=0)
-                hook_results[f"{signal}_centered"] = spectral_metrics(centered)
-
-            # Mean overlaps
-            if fv.mean is not None and fv.eigh_centered is not None:
-                hook_results[f"{signal}_mean_metrics"] = mean_metrics(fv.eigvecs_centered, fv.eigvals_centered, fv.mean)
-
-            # Cross-basis eigenvalues stored alongside
-            for ek, ev in entry.items():
-                if ek.startswith(f"{signal}_cross_eigvals_") and isinstance(ev, torch.Tensor):
-                    cross_label = ek[len(f"{signal}_cross_eigvals_"):]
-                    cross_eigvals = torch.clamp(ev, min=0)
-                    hook_results[f"{signal}_cross_{cross_label}"] = spectral_metrics(cross_eigvals)
-
-        # --- K-FAC: input-acts x output-grads (the captured acts/grads of this hook) ---
-        e_acts = eigvals_by_signal.get(_kfac_acts_signal(hook_name))
-        e_grads = eigvals_by_signal.get(_kfac_grads_signal(hook_name))
-        if e_acts is not None and e_grads is not None:
-            hook_results["kfac"] = kfac_metrics(e_acts, e_grads)
-
-        # --- Generalized eigenvalues: gradient vs activation at the node carrying both ---
-        gen_node = _GEN_NODE.get(hn.classify(hook_name))
-        if gen_node is not None:
-            node = getattr(hook, gen_node)
-            a_eigh, g_eigh = node.acts.eigh, node.grads.eigh
-            if a_eigh is not None and g_eigh is not None:
-                e_a, v_a = a_eigh
-                e_g, v_g = g_eigh
-                with gpu_ctx as ctx:
-                    gpu_wait += getattr(ctx, "waited", 0.0)
-                    gen_eigvals = generalized_eigenvalues(e_g, v_g, e_a, v_a)
-                gen_sm = spectral_metrics(gen_eigvals) if len(gen_eigvals) >= 11 else {}
-                hook_results[f"{gen_node}.gen"] = {"eigvals": gen_eigvals, **gen_sm}
-
-        if hook_results:
-            step_results[hook_name] = hook_results
-            if verbose:
-                print(f"    {hook_name} ({', '.join(sorted(hook_results))}): {time.time()-t_hook:.1f}s")
+    results = {}
+    get_metrics(accessor.v, results)
 
     if verbose:
-        print(f"    metrics total: {time.time()-t0:.1f}s ({len(step_results)} hooks)")
+        print(f"    metrics total: {time.time()-t0:.1f}s ({len(results)} nodes)")
         print(decomp_profiler.summary())
         decomp_profiler.disable()
     if gpu_wait > 0:
-        step_results["__gpu_wait__"] = gpu_wait
-    return step_results
+        results["__gpu_wait__"] = gpu_wait
+    return results
 
 
 
@@ -640,7 +625,7 @@ def _compute_derive(to_compute, model_name, res_dict, results_path,
                      keep_cached=False, num_workers=2):
     """Process checkpoints with selective weight loading, threaded for parallelism.
 
-    GPU operations (eigendecomposition, B derivation) are serialized via gpu_lock.
+    GPU operations (eigendecomposition, derivations) are serialized via gpu_lock.
     CPU-heavy work (spectral metrics, K-FAC metrics) runs in parallel across threads.
     Disk usage bounded: at most num_workers + 2 checkpoints on disk at any time.
     """

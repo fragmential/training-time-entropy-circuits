@@ -125,16 +125,16 @@ def test_snapshot_storage_cov_svd(request, tmp_path):
     from utils.accessor import DataAccessor
     d, N = 32, 200
     X = torch.randn(N, d, dtype=torch.float64)
-    factors = {"after_final_norm": {"value.acts": X.T @ X, "n_value.acts": N, "n": N,
-                                    "value.acts_mean": X.float().mean(0)}}
+    factors = {"after_final_norm": {"acts_cov": X.T @ X, "acts_n": N,
+                                    "acts_mean": X.float().mean(0)}}
     path = str(tmp_path / "svd.pt")
     DataAccessor(factors).save(path, format="cov_svd+m")
     data = torch.load(path, map_location="cpu", weights_only=False)
     entry = data["after_final_norm"]
     _compare_or_update("storage_cov_svd", {
-        "eigvals": entry["value.acts_eigvals"],
-        "eigvals_centered": entry.get("value.acts_eigvals_centered", torch.tensor([])),
-        "mean": entry["value.acts_mean"],
+        "eigvals": entry["acts_eigvals"],
+        "eigvals_centered": entry.get("acts_eigvals_centered", torch.tensor([])),
+        "mean": entry["acts_mean"],
     }, request)
 
 
@@ -143,7 +143,7 @@ def test_snapshot_storage_convert_chain(request, tmp_path):
     from utils.accessor import DataAccessor
     d, N = 32, 200
     X = torch.randn(N, d, dtype=torch.float64)
-    factors = {"after_final_norm": {"value.acts": X.T @ X, "n_value.acts": N, "n": N}}
+    factors = {"after_final_norm": {"acts_cov": X.T @ X, "acts_n": N}}
 
     cov_path = str(tmp_path / "cov.pt")
     DataAccessor(factors).save(cov_path, format="cov")
@@ -154,7 +154,7 @@ def test_snapshot_storage_convert_chain(request, tmp_path):
 
     eig_data = torch.load(eig_path, map_location="cpu", weights_only=False)
     _compare_or_update("storage_convert_chain", {
-        "eigvals": eig_data["after_final_norm"]["value.acts_eigvals"],
+        "eigvals": eig_data["after_final_norm"]["acts_eigvals"],
     }, request)
 
 
@@ -168,11 +168,11 @@ def test_snapshot_accessor_from_cov(request):
     cov = (X.T @ X / N).float()
     mu = X.float().mean(0)
     data = {
-        "after_final_norm": {"value.acts": cov * N, "n_value.acts": N, "n": N, "value.acts_mean": mu},
+        "after_final_norm": {"acts_cov": cov * N, "acts_n": N, "acts_mean": mu},
         "__format__": "cov",
     }
     acc = DataAccessor(data)
-    eigvals = acc["after_final_norm"].value.acts.eigvals
+    eigvals = acc.after_final_norm.acts.eigvals
     _compare_or_update("accessor_from_cov", {"eigvals": eigvals}, request)
 
 
@@ -189,13 +189,13 @@ def test_snapshot_accessor_centered(request):
     mu = torch.randn(d).float()
     data = {
         "after_final_norm": {
-            "value.acts_eigvals": eigvals, "value.acts_eigvecs": eigvecs.float(),
-            "value.acts_mean": mu, "n_value.acts": 200, "n": 200,
+            "acts_eigvals": eigvals, "acts_eigvecs": eigvecs.float(),
+            "acts_mean": mu, "acts_n": 200,
         },
         "__format__": "cov_svd",
     }
     acc = DataAccessor(data)
-    centered = acc["after_final_norm"].value.acts.eigvals_centered
+    centered = acc.after_final_norm.acts.eigvals_centered
     _compare_or_update("accessor_centered", {"centered": centered}, request)
 
 
@@ -203,7 +203,7 @@ def test_snapshot_accessor_centered(request):
 
 def test_snapshot_spectral_metrics(request):
     _fixed_seed()
-    from compute_metrics import spectral_metrics
+    from scripts.compute_metrics import spectral_metrics
     eigvals = torch.tensor([1.0 / (i + 1) ** 1.5 for i in range(200)])
     out = spectral_metrics(eigvals)
     _compare_or_update("spectral_metrics", {
@@ -214,7 +214,7 @@ def test_snapshot_spectral_metrics(request):
 
 def test_snapshot_mean_metrics(request):
     _fixed_seed()
-    from compute_metrics import mean_metrics
+    from scripts.compute_metrics import mean_metrics
     d = 32
     eigvecs = torch.eye(d)
     eigvals = torch.tensor([100.0 / (i + 1) ** 1.5 for i in range(d)])
@@ -229,7 +229,7 @@ def test_snapshot_mean_metrics(request):
 
 def test_snapshot_kfac_metrics(request):
     _fixed_seed()
-    from compute_metrics import kfac_metrics
+    from scripts.compute_metrics import kfac_metrics
     eA = torch.tensor([10.0 / (i + 1) ** 1.5 for i in range(32)])
     eG = torch.tensor([5.0 / (i + 1) ** 1.2 for i in range(16)])
     out = kfac_metrics(eA, eG, top_k=100, sample_k=50)
@@ -241,7 +241,7 @@ def test_snapshot_kfac_metrics(request):
 
 def test_snapshot_generalized_eigvals(request):
     _fixed_seed()
-    from compute_metrics import generalized_eigenvalues
+    from scripts.compute_metrics import generalized_eigenvalues
     d = 16
     eigvals = torch.tensor([10.0 / (i + 1) for i in range(d)])
     # Use random orthogonal bases
@@ -259,9 +259,9 @@ def test_snapshot_hook_cov(request):
     X = torch.randn(100, 16, dtype=torch.float32)
     c = HookCollector(module=None, mode="cov", collect_means=True)
     c.accumulate(X)
-    factors = c.factors()
+    factors = c.factors()["acts"]
     _compare_or_update("hook_cov", {
-        "acts": factors["in.acts"], "n": factors["n"], "acts_mean": factors["in.acts_mean"],
+        "acts": factors["acts_cov"], "n": factors["acts_n"], "acts_mean": factors["acts_mean"],
     }, request)
 
 

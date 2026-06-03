@@ -1,6 +1,6 @@
 output_dir: data/inferences/rankme_trainset_packed_4MT
 # Residual activation collection with packed training data.
-# Uses before_final_norm hook (raw residual stream), packed sequences, all tokens.
+# Uses fast_final_norm (output-head replacement, post-layernorm residual), packed sequences, all tokens.
 # "native" resolves to each model's training data (pile_deduped for Pythia, olmo_mix for OLMo).
 
 model_name:
@@ -41,9 +41,8 @@ min_length: 32
 max_checkpoints: 50
 packing: packed
 token_selection: all
-collect_final_acts: true
-residual_hook_point: identity_head
-collect_A: false
-collect_G: false
+hooks:
+  - after_final_norm:acts
+fast_final_norm: true
 storage_format: eigenvalues+mb
 compute_metrics: True

@@ -22,9 +22,8 @@ min_length: 32
 checkpoints: final
 packing: packed
 token_selection: all
-collect_final_acts: false
-collect_A: true
-collect_G: true
+hooks:
+  - preset:kfac
 sample_labels: true
 label_samples: 1
 seed: 42

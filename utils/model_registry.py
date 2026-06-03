@@ -1,10 +1,12 @@
 """Model-specific logic for checkpoint discovery, model loading, tokenizer setup, and HF cache management."""
 import os
+import re
 from dataclasses import dataclass
 from types import SimpleNamespace
 import numpy as np
 
-from utils.hook_names import mlp_proj, ov_head
+# Repo root, so revisions_file paths resolve regardless of the caller's cwd.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 @dataclass
@@ -45,7 +47,10 @@ def get_model_config(model_name: str) -> ModelConfig:
             training_dataset="pile_deduped_eleutherai",
         )
     if "olmo" in name:
-        overrides = _OLMO_OVERRIDES.get(model_name, {})
+        # match by basename so the short name (e.g. "OLMo-2-0425-1B", as used in
+        # result filenames) resolves the same overrides as the full repo path
+        short = model_name.split("/")[-1]
+        overrides = next((v for k, v in _OLMO_OVERRIDES.items() if k.split("/")[-1] == short), {})
         return ModelConfig(
             family="olmo",
             hf_repo=model_name,
@@ -106,23 +111,17 @@ def _olmo_checkpoints(config, max_checkpoints, spacing="linear"):
 
 
 def _read_revisions_file(filepath: str) -> dict:
-    print(f"Opening checkpoint file: {filepath}")
+    """{step: revision_str} from a revisions file. Path resolves relative to the
+    repo root, so cwd doesn't matter; a missing/empty file raises (no silent {})."""
+    path = filepath if os.path.isabs(filepath) else os.path.join(_REPO_ROOT, filepath)
     checkpoint_map = {}
-    try:
-        with open(filepath) as f:
-            for line in f:
-                line = line.strip()
-                if "step" in line and "-tokens" in line:
-                    try:
-                        step = int(line.split("-tokens")[0].split("step")[-1])
-                        checkpoint_map[step] = line
-                    except ValueError:
-                        print(f"Skipping line (invalid step): {line}")
-    except FileNotFoundError:
-        print(f"Error: File '{filepath}' not found")
-    except Exception as e:
-        print(f"Unexpected error: {e}")
-    print(f"Found {len(checkpoint_map)} checkpoints")
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if "step" in line and "-tokens" in line:
+                checkpoint_map[int(line.split("-tokens")[0].split("step")[-1])] = line
+    if not checkpoint_map:
+        raise ValueError(f"No checkpoints parsed from {path}")
     return checkpoint_map
 
 
@@ -169,14 +168,14 @@ def get_mlp_projections(model, config, block_idx):
     if config.family == "pythia":
         block = model.gpt_neox.layers[block_idx]
         return [
-            (f"blk{block_idx}.up",   block.mlp.dense_h_to_4h),
-            (f"blk{block_idx}.down", block.mlp.dense_4h_to_h),
+            (f"blk{block_idx}.mlp.up",   block.mlp.dense_h_to_4h),
+            (f"blk{block_idx}.mlp.down", block.mlp.dense_4h_to_h),
         ]
     block = model.model.layers[block_idx]
     return [
-        (f"blk{block_idx}.gate", block.mlp.gate_proj),
-        (f"blk{block_idx}.up",   block.mlp.up_proj),
-        (f"blk{block_idx}.down", block.mlp.down_proj),
+        (f"blk{block_idx}.mlp.gate", block.mlp.gate_proj),
+        (f"blk{block_idx}.mlp.up",   block.mlp.up_proj),
+        (f"blk{block_idx}.mlp.down", block.mlp.down_proj),
     ]
 
 
@@ -216,10 +215,10 @@ def get_block_boundary_hooks(model, config, block_idx):
         attn_raw  = self_attn(x)
         attn_out  = post_attention_layernorm(attn_raw)
         x_mid     = x + attn_out
-        mlp_raw   = mlp(x_mid)
+        mlp_raw   = mlp(x_mid)                             # mlp.raw_out (= down-proj output)
         mlp_out   = post_feedforward_layernorm(mlp_raw)
         x_next    = x_mid + mlp_out
-      → 5 distinct tensors.
+      → 6 distinct tensors (raw_out captures the pre-post-norm side of each sub-block).
     """
     prefix = f"blk{block_idx}"
     if config.family == "pythia":
@@ -235,6 +234,7 @@ def get_block_boundary_hooks(model, config, block_idx):
         (f"{prefix}.attn.raw_out", block.self_attn,                  "output"),
         (f"{prefix}.attn.out",     block.post_attention_layernorm,   "output"),
         (f"{prefix}.mlp.in",       block.mlp,                        "input"),
+        (f"{prefix}.mlp.raw_out",  block.mlp,                        "output"),
         (f"{prefix}.mlp.out",      block.post_feedforward_layernorm, "output"),
     ]
 
@@ -258,32 +258,117 @@ def get_attention_output_proj(model, config, block_idx):
     return "o_proj", model.model.layers[block_idx].self_attn.o_proj, n_heads, head_dim
 
 
-# --- Selective weight loading ---
+# Derivation graph: a derived (leaf, quantity) <- a source (leaf, quantity) via a
+# Transform the accessor applies. The only place that knows derivation edges + weight
+# state-dict locations.
 
-# Hook name → state dict key mapping (architecture-dependent)
-_PYTHIA_PROJ_MAP = {"up": "dense_h_to_4h", "down": "dense_4h_to_h"}
-_OLMO_PROJ_MAP = {"gate": "gate_proj", "up": "up_proj", "down": "down_proj"}
+_PYTHIA_PROJ_SD = {"up": "dense_h_to_4h", "down": "dense_4h_to_h"}   # has bias
+_OLMO_PROJ_SD = {"gate": "gate_proj", "up": "up_proj", "down": "down_proj"}  # no bias
+
+_MLP_OUT = re.compile(r"(.*)\.mlp\.(up|down|gate)\.out$")
+_HEAD_CONTRIB = re.compile(r"(.*)\.attn\.head(\d+)\.contrib$")
 
 
-def _hook_to_sd_keys(config, hook_name):
-    """Map hook name (e.g. 'blk14.up' or 'blk3.attn.head5') to state dict key prefix.
+def _proj_sd_prefix(config, idx, proj):
+    if config.family == "pythia":
+        return f"gpt_neox.layers.{idx}.mlp.{_PYTHIA_PROJ_SD[proj]}"
+    return f"model.layers.{idx}.mlp.{_OLMO_PROJ_SD[proj]}"
 
-    Per-OV-head hooks at the same block index all map to the same o_proj prefix —
-    one weight matrix serves all H heads.
-    """
-    mp = mlp_proj(hook_name)
-    if mp:
-        idx, proj = mp
-        if config.family == "pythia":
-            return f"gpt_neox.layers.{idx}.mlp.{_PYTHIA_PROJ_MAP[proj]}"
-        return f"model.layers.{idx}.mlp.{_OLMO_PROJ_MAP[proj]}"
-    oh = ov_head(hook_name)
-    if oh:
-        idx = oh[0]
-        if config.family == "pythia":
-            return f"gpt_neox.layers.{idx}.attention.dense"
-        return f"model.layers.{idx}.self_attn.o_proj"
+
+def _oproj_sd_prefix(config, idx):
+    if config.family == "pythia":
+        return f"gpt_neox.layers.{idx}.attention.dense"
+    return f"model.layers.{idx}.self_attn.o_proj"
+
+
+def _blk_idx(prefix):
+    m = re.search(r"blk(\d+)", prefix)
+    return m.group(1) if m else None
+
+
+class Linear:
+    """Weight matrix (optionally a head column-slice, optionally +bias). `.formats()`
+    maps each output format to its required source formats."""
+    kind = "linear"
+
+    def __init__(self, sd_prefix, head=None, bias=False):
+        self.sd_prefix, self.head, self.bias = sd_prefix, head, bias
+
+    def formats(self):
+        cov_inputs = ("cov", "mean") if self.bias else ("cov",)  # bias needs source mean
+        return {"samples": ("samples",), "mean": ("mean",), "cov": cov_inputs, "n": ("n",)}
+
+
+class Norm:
+    """Nonlinear norm module: produces only `samples` (cov/eigh reached via reformat)."""
+    kind = "norm"
+
+    def __init__(self, sd_prefix):
+        self.sd_prefix = sd_prefix
+
+    def formats(self):
+        return {"samples": ("samples",), "n": ("n",)}
+
+
+# Each rule: (leaf_regex, build_source_leaf(match)->str, src_quantity, build_Transform(config,match))
+_DERIVATIONS = [
+    (_MLP_OUT,
+     lambda m: f"{m.group(1)}.mlp.{m.group(2)}.in",
+     "acts",
+     lambda cfg, m: Linear(_proj_sd_prefix(cfg, _blk_idx(m.group(1)), m.group(2)),
+                           bias=(cfg.family == "pythia"))),
+    (_HEAD_CONTRIB,
+     lambda m: f"{m.group(1)}.attn.head{m.group(2)}.slice",
+     "acts",
+     lambda cfg, m: Linear(_oproj_sd_prefix(cfg, _blk_idx(m.group(1))), head=int(m.group(2)))),
+    (re.compile(r"after_final_norm$"),
+     lambda m: "before_final_norm",
+     "acts",
+     lambda cfg, m: Norm(_norm_sd_prefix(cfg))),
+]
+
+
+def derivation(config, leaf, quantity):
+    """(src_leaf, src_quantity, Transform) for a derivable (leaf, quantity), else None."""
+    for pat, src_of, src_q, make_T in _DERIVATIONS:
+        if quantity == src_q and (m := pat.match(leaf)):
+            return src_of(m), src_q, make_T(config, m)
     return None
+
+
+def derivation_sd_prefixes(config, leaves):
+    """Linear-weight sd-prefixes to derive any of `leaves` (acts). Norm excluded
+    (it loads via the `__norm__` path, not a weight+bias prefix)."""
+    out = set()
+    for leaf in leaves:
+        d = derivation(config, leaf, "acts")
+        if d and getattr(d[2], "kind", None) == "linear" and d[2].sd_prefix:
+            out.add(d[2].sd_prefix)
+    return out
+
+
+# Forward of _DERIVATIONS: a present source leaf -> the derived leaf it feeds (so
+# save / tree-building can enumerate derivable leaves from what's stored).
+_PRODUCES = [
+    (re.compile(r"(.*)\.attn\.head(\d+)\.slice$"),
+     lambda m: f"{m.group(1)}.attn.head{m.group(2)}.contrib"),
+    (re.compile(r"(.*)\.mlp\.(up|down|gate)\.in$"),
+     lambda m: f"{m.group(1)}.mlp.{m.group(2)}.out"),
+    (re.compile(r"^before_final_norm$"),
+     lambda m: "after_final_norm"),
+]
+
+
+def derived_leaves(present):
+    """Leaves derivable (acts) from `present` leaves but not themselves present."""
+    present = set(present)
+    out = set()
+    for leaf in present:
+        for pat, build in _PRODUCES:
+            m = pat.match(leaf)
+            if m:
+                out.add(build(m))
+    return out - present
 
 
 def _norm_sd_prefix(config):
@@ -425,21 +510,19 @@ def _get_cached_snap_dir(hf_repo, revision):
     return None
 
 
-def load_selective_weights(config, hf_repo, revision, hook_names, need_norm=False):
-    """Load only the weight tensors needed for specific hooks from safetensors.
+def load_selective_weights(config, hf_repo, revision, sd_prefixes, need_norm=False):
+    """Load only the weight tensors at the given state-dict prefixes.
 
-    Returns dict:
-        {hook_name: SimpleNamespace(weight=Tensor, bias=Tensor|None), ...}
+    Returns dict keyed BY STATE-DICT PREFIX:
+        {sd_prefix: SimpleNamespace(weight=Tensor, bias=Tensor|None), ...}
         If need_norm: "__norm__" key with a callable norm (supports .float()).
+    The accessor's _weight(sd_prefix) looks up by prefix; derivation() supplies the
+    prefixes (see derivation_sd_prefixes).
     """
     all_keys = set()
-    hook_prefixes = {}
-    for h in hook_names:
-        prefix = _hook_to_sd_keys(config, h)
-        if prefix:
-            hook_prefixes[h] = prefix
-            all_keys.add(f"{prefix}.weight")
-            all_keys.add(f"{prefix}.bias")
+    for prefix in sd_prefixes:
+        all_keys.add(f"{prefix}.weight")
+        all_keys.add(f"{prefix}.bias")
 
     norm_prefix = None
     if need_norm:
@@ -465,10 +548,10 @@ def load_selective_weights(config, hf_repo, revision, hook_names, need_norm=Fals
         tensors.update(loaded)
 
     result = {}
-    for h, prefix in hook_prefixes.items():
+    for prefix in sd_prefixes:
         w = tensors.get(f"{prefix}.weight")
         if w is not None:
-            result[h] = SimpleNamespace(weight=w, bias=tensors.get(f"{prefix}.bias"))
+            result[prefix] = SimpleNamespace(weight=w, bias=tensors.get(f"{prefix}.bias"))
 
     if norm_prefix:
         w = tensors.get(f"{norm_prefix}.weight")
