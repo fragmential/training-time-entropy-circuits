@@ -31,6 +31,9 @@ from utils.model_registry import (
 
 
 _DEV = "cuda" if torch.cuda.is_available() else "cpu"
+# A GPU is present (even in a worker where torch hasn't initialised CUDA yet) if SLURM
+# exposed one. Used to refuse silently grinding big eighs on a CPU core.
+_GPU_EXPECTED = bool(os.environ.get("CUDA_VISIBLE_DEVICES")) or torch.cuda.is_available()
 
 
 # ===========================================================================
@@ -65,8 +68,17 @@ class _DecompProfiler:
 decomp_profiler = _DecompProfiler()
 
 
+def _require_gpu(M):
+    """Refuse a large eigendecomp on CPU when a GPU is present — catches the
+    regression where forked Pool workers silently fall back to CPU eigh."""
+    if _GPU_EXPECTED and M.device.type == "cpu" and M.shape[-1] >= 1024:
+        raise RuntimeError(
+            f"eigendecomp {tuple(M.shape)} on CPU while a GPU is present — refusing")
+
+
 def eigh_descending(M):
     """Full eigendecomposition, sorted descending, eigenvalues clamped >= 0."""
+    _require_gpu(M)
     t = time.time()
     vals, vecs = torch.linalg.eigh(M)
     decomp_profiler.log(f"eigh[{M.device}]", tuple(M.shape), time.time() - t)
@@ -74,6 +86,7 @@ def eigh_descending(M):
 
 def eigvalsh_descending(M):
     """Eigenvalues only, sorted descending, clamped >= 0."""
+    _require_gpu(M)
     t = time.time()
     v = torch.linalg.eigvalsh(M).flip(0).clamp(min=0)
     decomp_profiler.log(f"eigvalsh[{M.device}]", tuple(M.shape), time.time() - t)
@@ -278,7 +291,7 @@ class DataAccessor:
     """Format-agnostic reader / writer for collected activation / covariance data."""
 
     def __init__(self, data, model=None, model_config=None, model_name=None, revision=None,
-                 abort_on_model_load: bool = False):
+                 abort_on_model_load: bool = False, derive: bool = True):
         if model_name is not None and "/" not in model_name:
             model_name = _resolve_hf_name(model_name)
         self.path = data if isinstance(data, str) else None
@@ -291,7 +304,8 @@ class DataAccessor:
         self._revision = revision or data.get("__revision__")
         self._hf_repo = data.get("__hf_model__")
         self._selective_weights: Optional[dict] = None
-        self.abort_on_model_load = abort_on_model_load
+        self.abort_on_model_load = abort_on_model_load or not derive # extra guard if deriving is unintentional
+        self._derive = derive   # False -> never load weights; weight-derived leaves resolve to None
         self._cache: dict = {}        # (leaf, q, fmt) -> tensor / tuple / None
         self._resolving: set = set()  # cycle guard for resolve
         self._can_cache: dict = {}
@@ -309,12 +323,12 @@ class DataAccessor:
     def _weights_obtainable(self) -> bool:
         """Cheap flag: are derivation weights reachable? Never loads them."""
         return (self.model is not None or self._selective_weights is not None
-                or self._model_name is not None)
+                or (self._derive and self._model_name is not None))
 
     def _ensure_weights(self) -> bool:
         if self.model is not None or self._selective_weights is not None:
             return True
-        if self._model_name is None:
+        if not self._derive or self._model_name is None:
             return False
         if self.abort_on_model_load:
             raise RuntimeError(

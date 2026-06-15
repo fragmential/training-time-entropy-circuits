@@ -24,6 +24,9 @@ dependencies = [
 dev = ["pytest>=8.0"]
 
 [dependency-groups]
+dev = [
+    "nbstripout>=0.9.1",
+]
 notebook = ["ipykernel"]
 
 [tool.pytest.ini_options]

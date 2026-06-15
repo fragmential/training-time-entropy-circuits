@@ -50,6 +50,19 @@ def test_mlp_out_acts_eigvals_descending():
     assert ev is not None and (ev[:-1] >= ev[1:] - 1e-5).all()
 
 
+def test_derive_false_skips_weight_derivation():
+    # up.out acts needs the projection weight; derive=False must skip (no download), not crash
+    X = torch.randn(64, 8, dtype=torch.float64)
+    data = {
+        "blk0.mlp.up.in": {"acts_cov": X.T @ X, "acts_n": 64, "acts_mean": X.float().mean(0)},
+        "__format__": "cov", "__hf_model__": MODEL,
+    }
+    acc = DataAccessor(data, model_name=MODEL, derive=False)
+    assert acc._ensure_weights() is False                    # no load attempted
+    assert acc.factor("blk0.mlp.up.out", "acts") is None     # weight-derived leaf skipped
+    assert acc.factor("blk0.mlp.up.in", "acts") is not None  # captured leaf still resolves
+
+
 # --- per-OV-head contrib acts = W_h @ slice_cov @ W_hᵀ (head column slice) ---
 
 def _ov_acc(block_idx=3, num_heads=4, head_dim=5, seed=0, include_mean=False):

@@ -103,8 +103,34 @@ def make_alternate_versions_hue_shift(
 #     return versions
 
 
+def make_alternate_versions_gradient(base_colors, n_versions, n=None,
+                                     start='blue', total_shift=0.82,
+                                     saturation=0.7, lightness_mult=0.94):
+    """Fixed hue-loop palette, identical for every base-colour (model) position.
+
+    Like the per-model hue_shift scheme, but with one fixed `start` colour for
+    everyone: hue rotates by up to `total_shift` across `n` steps (default
+    n_versions), wrapping through the spectrum (blue -> purple -> ... -> green),
+    at reduced `saturation`. versions[i] is band i's colour repeated across all
+    positions so palettes[i][any] is the same. Default (start='blue',
+    total_shift=0.82) ends just past green, in turquoise. For depth-ordered
+    stacks like the layer-contribution plot.
+    """
+    n = n or n_versions
+    width = len(base_colors)
+    out = []
+    for i in range(n_versions):
+        t = i / max(n - 1, 1)
+        c = adjust_color(start, lightness_mult=lightness_mult,
+                         saturation_mult=saturation, hue_shift=total_shift * t)
+        out.append([c] * width)
+    return out
+
+
 def make_alternate_versions(base_colors, n_versions, method="hue_shift", **kwargs):
     if method == "hue_shift":
         return make_alternate_versions_hue_shift(base_colors, n_versions, **kwargs)
     if method == "lightness":
         return make_alternate_versions_lightness(base_colors, n_versions, **kwargs)
+    if method == "gradient":
+        return make_alternate_versions_gradient(base_colors, n_versions, **kwargs)

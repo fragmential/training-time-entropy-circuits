@@ -17,6 +17,7 @@ import re
 import numpy as np
 import torch
 from multiprocessing import Pool
+from typing import Callable
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -170,6 +171,7 @@ def mean_metrics(eigvecs: torch.Tensor, eigvals: torch.Tensor, mean: torch.Tenso
         mean_norm:           ||μ||₂
         max_overlap:         max_j |<μ̂, v_j>|         (which single eigvec μ aligns best with)
         max_overlap_idx:     argmax of the above
+        top_overlap:         |<μ̂, v_0>|               (overlap with the top eigendirection)
         pr:                  participation ratio of |<μ̂, v_j>|² over j ∈ [1, d]
         rayleigh:            μ̂ᵀ Σ μ̂                  (variance along the mean direction)
         rayleigh_normed:     μ̂ᵀ Σ μ̂ / λ_max          ∈ [0, 1]
@@ -189,7 +191,7 @@ def mean_metrics(eigvecs: torch.Tensor, eigvals: torch.Tensor, mean: torch.Tenso
         # degenerate: μ = 0, every alignment metric is undefined
         return {
             "mean_norm": 0.0,
-            "max_overlap": 0.0, "max_overlap_idx": -1,
+            "max_overlap": 0.0, "max_overlap_idx": -1, "top_overlap": 0.0,
             "pr": float("nan"), "rayleigh": 0.0, "rayleigh_normed": 0.0,
             "mahalanobis": 0.0, "pr_weighted": float("nan"),
             "centroid_idx": float("nan"), "centroid_idx_weighted": float("nan"),
@@ -205,6 +207,7 @@ def mean_metrics(eigvecs: torch.Tensor, eigvals: torch.Tensor, mean: torch.Tenso
     # Max overlap
     max_idx = int(torch.argmax(profile))
     max_overlap = float(torch.sqrt(profile[max_idx]))   # |<μ̂, v_j>|, not squared
+    top_overlap = float(torch.sqrt(profile[0]))         # |<μ̂, v_0>|, top eigendirection
 
     # Participation ratio (unweighted)
     pr = float(1.0 / torch.sum(profile ** 2))
@@ -236,6 +239,7 @@ def mean_metrics(eigvecs: torch.Tensor, eigvals: torch.Tensor, mean: torch.Tenso
         "mean_norm": mean_norm,
         "max_overlap": max_overlap,
         "max_overlap_idx": max_idx,
+        "top_overlap": top_overlap,
         "pr": pr,
         "rayleigh": rayleigh,
         "rayleigh_normed": rayleigh_normed,
@@ -472,8 +476,9 @@ from contextlib import nullcontext
 
 
 class _Metric:
-    def __init__(self, name, operands, fn):
+    def __init__(self, name, operands, fn, node_re=None):
         self.name, self.operands, self.fn = name, operands, fn
+        self.match: Callable = re.compile(node_re).match if node_re else lambda _ : True
 
 
 def _gen_metric(a, g):
@@ -497,11 +502,17 @@ def _kfac_metric(a, g):
         return None
     return kfac_metrics(ea.clamp(min=0), eg.clamp(min=0))
 
+def _blk_mean_metrics(a_in, a_out):
+    if a_out.mean is not None and a_in.eigh_centered is not None:
+        return mean_metrics(a_in.eigvecs_centered, a_in.eigvals_centered, a_out.mean)
+
 
 METRICS = [
     _Metric("gen",              {"a": "acts", "g": "grads"},                 _gen_metric),
     _Metric("kfac",             {"a": "in.acts", "g": "out.grads"},          _kfac_metric),
     _Metric("projections_kfac", {"a": "up.in.acts", "g": "down.out.grads"},  _kfac_metric),
+    _Metric("mean_metrics_blk_vs_res", {"a_in": "in.acts", "a_out": "out.acts"},  _blk_mean_metrics,
+            node_re=r"blk\d+\.(attn|mlp)$"),  # residual sub-block nodes only, not projections
 ]
 
 
@@ -513,6 +524,9 @@ def _quantity_metrics(q, fv, path):
         return out
     _check_negative_eigenvalues(ev, f"{path}.{q}")
     out[f"{q}_uncentered"] = spectral_metrics(ev.clamp(min=0), mean=fv.mean)
+
+    if fv.mean is not None:
+        out[f"{q}_mean_vec"] = fv.mean   # raw μ (d,) for cross-leaf cosine analysis
 
     cev = fv.eigvals_centered
     if cev is not None:
@@ -540,7 +554,7 @@ def get_metrics(node, results):
             out.update(_quantity_metrics(q, fv, node._path))
     for m in METRICS:
         args = {k: node.get(rel) for k, rel in m.operands.items()}
-        if all(v is not None for v in args.values()):
+        if all(v is not None for v in args.values()) and m.match(node._path):
             r = m.fn(**args)
             if r is not None:
                 out[m.name] = r
@@ -579,16 +593,38 @@ def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False
     return results
 
 
+def _merge_step(old: dict, new: dict) -> dict:
+    """Fold `new` into `old` at the (leaf, metric) key level — new wins on conflict,
+    keys not recomputed this run are preserved. Lets a re-run add metrics without
+    clobbering weight-derived leaves (e.g. head.contrib) absent under --derive false.
+    """
+    out = {k: (dict(v) if isinstance(v, dict) else v) for k, v in old.items()}
+    for k, v in new.items():
+        out[k] = {**out[k], **v} if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
 
 # ---------------------------------------------------------------------------
 # Per-file metric computation (called by workers)
 # ---------------------------------------------------------------------------
 
-def _compute_metrics_for_file(args):
-    """Pool worker: compute metrics for a .pt file (no model loading)."""
+def _to_numpy(o):
+    """Recursively convert torch tensors to numpy so Pool results pickle by value —
+    avoids torch's shared-memory IPC, which exhausts mmaps on big models (d~4096+)."""
+    if torch.is_tensor(o):
+        return o.detach().cpu().numpy()
+    if isinstance(o, dict):
+        return {k: _to_numpy(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return type(o)(_to_numpy(v) for v in o)
+    return o
+
+
+def _compute_metrics_for_file(args, derive=True):
+    """Pool worker: compute metrics for a .pt file (derive=False skips weight-derived leaves)."""
     step, path = args
     data = torch.load(path, map_location="cpu", weights_only=False)
-    return step, compute_metrics_for_checkpoint(DataAccessor(data))
+    return step, _to_numpy(compute_metrics_for_checkpoint(DataAccessor(data, derive=derive)))
 
 
 def _needs_model_loading(data_path):
@@ -721,7 +757,7 @@ def _compute_derive(to_compute, model_name, res_dict, results_path,
                 total_gpu_wait += step_results.pop("__gpu_wait__", 0.0)
 
                 with results_lock:
-                    res_dict[step] = step_results
+                    res_dict[step] = _merge_step(res_dict.get(step, {}), step_results)
                     np.save(results_path, res_dict)
 
                 n_done += 1
@@ -827,36 +863,30 @@ def main(
         print(f"All {len(step_files)} steps already have metrics in {results_path}")
         return
 
-    # Auto-detect: does this data need model loading for full metrics?
-    sample_path = to_compute[0][1]
-    use_derive = derive and _needs_model_loading(sample_path)
-
-    if use_derive:
-        if num_workers is None:
-            cpus = int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count()))
-            num_workers = max(1, cpus // 2)
-        derive_workers = min(num_workers, len(to_compute))
-        print(
-            f"Computing metrics for {len(to_compute)}/{len(step_files)} steps "
-            f"({derive_workers} threads + selective weight loading + GPU lock)..."
-        )
-        _compute_derive(to_compute, model_name, res_dict, results_path,
-                         keep_cached, num_workers=derive_workers)
-    else:
-        if num_workers is None:
-            num_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count()))
-        print(
-            f"Computing metrics for {len(to_compute)}/{len(step_files)} steps "
-            f"using {num_workers} workers..."
-        )
-        with Pool(processes=num_workers) as pool:
-            for step, metrics in pool.imap_unordered(_compute_metrics_for_file, to_compute):
-                res_dict[step] = metrics
-                hooks = list(metrics.keys())
-                print(
-                    f"  Step {step}: {len(hooks)} hook points "
-                    f"({', '.join(hooks[:3])}{'...' if len(hooks) > 3 else ''})"
-                )
+    if num_workers is None:
+        num_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count()))
+    print(
+        f"Computing metrics for {len(to_compute)}/{len(step_files)} steps "
+        f"using {num_workers} workers (derive={derive})..."
+    )
+    # spawn (not fork) when a GPU is present so each worker gets its own CUDA context
+    # and the eigh runs on the GPU; fork is fine on CPU-only nodes. Execution model is
+    # independent of `derive` (which only gates weight loading inside the worker).
+    from functools import partial
+    from multiprocessing import get_context
+    mp_ctx = get_context("spawn") if os.environ.get("CUDA_VISIBLE_DEVICES") else get_context()
+    worker = partial(_compute_metrics_for_file, derive=derive)
+    with mp_ctx.Pool(processes=num_workers) as pool:
+        for i, (step, metrics) in enumerate(pool.imap_unordered(worker, to_compute), 1):
+            res_dict[step] = _merge_step(res_dict.get(step, {}), metrics)
+            hooks = list(metrics.keys())
+            print(
+                f"  Step {step}: {len(hooks)} hook points "
+                f"({', '.join(hooks[:3])}{'...' if len(hooks) > 3 else ''})",
+                flush=True,
+            )
+            if i % 5 == 0:
+                np.save(results_path, res_dict)   # incremental: don't lose a long run
 
     np.save(results_path, res_dict)
     print(f"Saved {len(res_dict)} results to {results_path}")
