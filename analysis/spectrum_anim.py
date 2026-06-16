@@ -111,9 +111,39 @@ def _strip_panel(yvar, data_sources, model_names, opts, palettes):
                 label=opts.get('title') or _bk('YVAR_LABELS').get(name, name))
 
 
+def _heatmap_panel(data_sources, model_names, opts):
+    """Block×block cosine-of-means matrix per checkpoint (mirrors block_mean_cos).
+    dynamic=True -> symmetric range from off-diagonal max; per_frame picks whether
+    that range is recomputed each frame (full contrast) or pinned once (stable colorbar)."""
+    mn = model_names[0]
+    labels = [s[2] if len(s) > 2 else '' for s in data_sources]
+    vecs, steps = [], None
+    for dsrc in data_sources:
+        ys, steps = _bk('get_ys')(dsrc[0], mn, (dsrc[1][0],), 'acts_mean_vec')
+        vecs.append(ys)
+    frames = []
+    for si in range(len(steps)):
+        V = np.array([np.asarray(vecs[k][si], dtype=float) for k in range(len(vecs))])
+        V /= np.linalg.norm(V, axis=1, keepdims=True)
+        frames.append(V @ V.T)
+    dynamic, per_frame = opts.get('dynamic', True), opts.get('per_frame', False)
+    vmin, vmax = opts.get('vmin', -1), opts.get('vmax', 1)
+    if dynamic and not per_frame:                       # pin one global symmetric range
+        off = np.concatenate([f[~np.eye(len(f), dtype=bool)] for f in frames])
+        v = np.nanmax(np.abs(off)); vmin, vmax = -v, v
+    return dict(kind='heatmap', frames=frames, labels=labels,
+                hide_diag=opts.get('hide_diag', True), per_frame=dynamic and per_frame,
+                cmap=opts.get('cmap', 'coolwarm'), vmin=vmin, vmax=vmax,
+                title=opts.get('title')), steps
+
+
 def _materialize(panels, ncols, fps, model, xvar, prog_bar, suptitle, figsize, smooth=0, peak=0):
     spec_panels, steps = [], None
     for yvar, data_sources, model_names, opts in panels:
+        if opts.get('kind') == 'heatmap':
+            panel, steps = _heatmap_panel(data_sources, model_names, opts)
+            spec_panels.append(panel)
+            continue
         palettes = _panel_palettes(data_sources, opts)
         ds0 = data_sources[0]
         yv = ds0[3] if len(ds0) > 3 else yvar
@@ -198,7 +228,9 @@ def _layout(kinds, ncols, prog_bar, figsize):
                     axes[idx] = fig.add_subplot(sub[0, k])
         return fig, axes, bar_ax
     nrows = (n + ncols - 1) // ncols
-    fig = plt.figure(figsize=figsize or (7 * ncols, 5 * nrows + 0.3))
+    square = all(k == 'heatmap' for k in kinds)        # heatmaps are square -> avoid a wide figure
+    fig = plt.figure(figsize=figsize or ((5.6 * ncols, 5.5 * nrows + 0.3) if square
+                                         else (7 * ncols, 5 * nrows + 0.3)))
     if bar:
         ratios = ([1] + [40] * nrows) if prog_bar == 'top' else ([40] * nrows + [1])
         gs = fig.add_gridspec(nrows + 1, ncols, height_ratios=ratios)
@@ -243,18 +275,45 @@ def _draw_strip(ax, p, i):
     ax.set_ylabel(p['label'], fontsize=7.5, rotation=90, labelpad=2)         # metric name, vertical
 
 
+def _draw_heatmap(ax, p, i):
+    M = np.array(p['frames'][i], dtype=float)
+    if p['hide_diag']: np.fill_diagonal(M, np.nan)
+    vmin, vmax = p['vmin'], p['vmax']
+    if p['per_frame']:                                   # recompute symmetric range this frame
+        v = np.nanmax(np.abs(M[~np.eye(len(M), dtype=bool)])); vmin, vmax = -v, v
+    cmap = plt.get_cmap(p['cmap']).copy(); cmap.set_bad('white')   # NaN diagonal -> white
+    ax.imshow(M, cmap=cmap, vmin=vmin, vmax=vmax)
+    ax.set_anchor('C')          # square aspect shrinks the box -> centre it (else pins right)
+    if p['labels']:
+        ax.set_xticks(range(len(p['labels']))); ax.set_xticklabels(p['labels'], rotation=90, fontsize=6)
+        ax.set_yticks(range(len(p['labels']))); ax.set_yticklabels(p['labels'], fontsize=6)
+    if p['title'] is not None: ax.set_title(p['title'])
+
+
+_DRAW = {'strip': _draw_strip, 'spectrum': _draw_spectrum, 'heatmap': _draw_heatmap}
+
+
 def render(spec, save=None):
     kinds = [p['kind'] for p in spec['panels']]
     fig, axes, bar_ax = _layout(kinds, spec['ncols'], spec['prog_bar'], spec['figsize'])
     if spec['suptitle'] is not None:
         fig.suptitle(spec['suptitle'])
-    fig.subplots_adjust(left=0.08, right=0.97, top=0.88, bottom=0.12, hspace=0.35, wspace=0.30)
+    right = 0.88 if any(p['kind'] == 'heatmap' for p in spec['panels']) else 0.97  # room for cbar labels
+    fig.subplots_adjust(left=0.08, right=right, top=0.88, bottom=0.12, hspace=0.35, wspace=0.30)
     n = spec['n']
+
+    from matplotlib.cm import ScalarMappable          # static colorbars for pinned heatmaps
+    from matplotlib.colors import Normalize           # (fixed norm -> survives per-frame clear)
+    for ax, p in zip(axes, spec['panels']):
+        if p['kind'] == 'heatmap' and not p['per_frame']:
+            cmap = plt.get_cmap(p['cmap']).copy(); cmap.set_bad('white')
+            sm = ScalarMappable(cmap=cmap, norm=Normalize(p['vmin'], p['vmax'])); sm.set_array([])
+            fig.colorbar(sm, ax=ax, fraction=0.046, pad=0.04)
 
     def update(i):
         for ax, p in zip(axes, spec['panels']):
             ax.clear(); ax.figure.sca(ax)  # not plt.sca: manager is None mid-save
-            (_draw_strip if p['kind'] == 'strip' else _draw_spectrum)(ax, p, i)
+            _DRAW[p['kind']](ax, p, i)
         if bar_ax is not None:
             _draw_progress(bar_ax, i / (n - 1) if n > 1 else 1.0, spec['frame_labels'][i])
 

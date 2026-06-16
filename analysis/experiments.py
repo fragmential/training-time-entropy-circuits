@@ -24,7 +24,7 @@ from analysis import experiments_lib as _lib
 importlib.reload(_lib)
 from analysis.experiments_lib import (
     grid_start, grid_show, plot_group, plot_spectrum, plot_layer_contribution,
-    build_hooks, get_model_label,
+    plot_heatmap, block_mean_cos, build_hooks, get_model_label,
 )
 
 # %%
@@ -417,10 +417,58 @@ for model in filter_model_names:
 
 
 # %%
+# for model in filter_model_names:
+#     _out_rankme_grid(model, yvar='true_rankme')#, normalize='anchor')
+# for model in filter_model_names:
+#     _out_rankme_grid(model, yvar='matrix_entropy')#, normalize='anchor')
+
+# %% [markdown]
+# ### Block mean ↔ residual mean (Exp 1.2)
+
+# %%
+# Each block output's mean vs the local residual it adds into (its sub-block input,
+# blkN.{mlp,attn}.in) — cosine of mean directions + magnitude ratio ‖μ_out‖/‖μ_in‖.
+# Same "residual it joins" convention as mean_metrics_blk_vs_res. Coloured by depth.
+def _blkres_mean_grid(model):
+    outs = layer_outs(model)
+    grid_start(ncols=2, title=f'Block mean vs the residual it joins — {model}')
+    plot_group('cos_to_res', outs, [model], color_palette='gradient')
+    plot_group('magratio_res', outs, [model], color_palette='gradient', ylog=True)
+    grid_show()
+
 for model in filter_model_names:
-    _out_rankme_grid(model, yvar='true_rankme')#, normalize='anchor')
+    _blkres_mean_grid(model)
+
+# %% [markdown]
+# ### Mean-direction drift (Exp 1.3)
+
+# %%
+# How each block-output mean *direction* moves over training: cosine with the previous
+# checkpoint (consecutive) and with an EMA of its own history (denoised). Series-mode hooks.
+def _drift_grid(model):
+    outs = layer_outs(model)
+    grid_start(ncols=2, title=f'Mean-direction drift — {model}')
+    plot_group('cos_drift', outs, [model], color_palette='gradient')
+    plot_group('cos_drift_ema', outs, [model], color_palette='gradient')
+    grid_show()
+
 for model in filter_model_names:
-    _out_rankme_grid(model, yvar='matrix_entropy')#, normalize='anchor')
+    _drift_grid(model)
+
+# %% [markdown]
+# ### Block↔block mean alignment (Exp 1.1)
+
+# %%
+# Pairwise cosine between block-output means at the final checkpoint (block×block),
+# ordered by depth (attn, mlp per layer). Diagonal hidden; symmetric dynamic colour
+# range. Off-diagonal structure shows which layers' mean directions co-align.
+grid_start(ncols=2, title='Block-mean cosine (final ckpt)', savefig=False)
+for model in filter_model_names:
+    outs = layer_outs(model)
+    plot_heatmap(block_mean_cos(model, outs), labels=[s[2] for s in outs], title=get_model_label(model),
+                 hide_diag=True, dynamic=True)
+grid_show()
+
 
 # %% [markdown]
 # ### K-FAC up/gate

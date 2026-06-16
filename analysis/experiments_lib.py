@@ -89,17 +89,39 @@ adjust_hook = {
     "loghistogram": lambda hist, bins=None: rebin_hist(hist, bins=bins),
 }
 
+def _cos(a, b):                                         # acts_mean_vec is a torch tensor -> float() to plot cleanly
+    return float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b)))
+def _joined_residual(node, model):                      # the sub-block input a block output adds into;
+    inp = node.replace('.out', '.in')                   # Pythia's parallel residual: mlp.in === attn.in
+    return inp.replace('.mlp.in', '.attn.in') if 'pythia' in model else inp
+def _drift(V, lag=1):                                   # series-mode: self-cosine across checkpoints
+    return [np.nan]*lag + [_cos(V[t], V[t-lag]) for t in range(lag, len(V))]
+def _drift_ema(V, beta=0.7):                            # series-mode: cosine vs EMA of own history (h reassigned, not mutated)
+    out, h = [np.nan], V[0]
+    for t in range(1, len(V)): out.append(_cos(V[t], h)); h = beta*h + (1-beta)*V[t]
+    return out
+
 virtual_hooks = {
     "peak_eigval": (["eigenspectrum", "trace"], (lambda evs, tr: evs[0].item()*tr)),
     "eigvals": (["eigenspectrum", "trace"], (lambda evs, tr: evs*tr)),
     "histogram":    (["eigvals"], (lambda evs, bins=512: make_histogram(evs, bins))),
     "loghistogram": (["eigvals"], (lambda evs, bins=512: make_histogram(evs, bins, log_bins=True))),
-    "mean_norm": ([(lambda k: f"{k.split('_')[0]}_mean_metrics", "mean_norm")], lambda x: x),
+    "mean_norm": ([{'key': lambda k: f"{k.split('_')[0]}_mean_metrics", 'yvar': 'mean_norm'}], lambda x: x),
     "mean_frac": (["trace", "mean_norm"], lambda tr, mu: mu**2 / tr),
     "mean_ratio": (["trace", "mean_norm"], lambda tr, mu: mu**2 / (tr-mu**2)),
-    "rankme_center_diff": (["rankme", (lambda k: k.replace("_centered", "_uncentered"), "rankme")], lambda c, u: c - u),
-    "rankme_center_prop": (["rankme", (lambda k: k.replace("_centered", "_uncentered"), "rankme")], lambda c, u: (c - u)/c),
+    "rankme_center_diff": (["rankme", {'key': lambda k: k.replace("_centered", "_uncentered"), 'yvar': 'rankme'}], lambda c, u: c - u),
+    "rankme_center_prop": (["rankme", {'key': lambda k: k.replace("_centered", "_uncentered"), 'yvar': 'rankme'}], lambda c, u: (c - u)/c),
+    "cos_to_res":   ([{'yvar': 'acts_mean_vec'}, {'node': _joined_residual, 'yvar': 'acts_mean_vec'}], _cos),
+    "magratio_res": ([{'yvar': 'acts_mean_vec'}, {'node': _joined_residual, 'yvar': 'acts_mean_vec'}], lambda a, b: float(np.linalg.norm(a) / np.linalg.norm(b))),
+    "cos_drift":     ([{'yvar': 'acts_mean_vec'}], _drift, 'series'),
+    "cos_drift_ema": ([{'yvar': 'acts_mean_vec'}], _drift_ema, 'series'),
 }
+
+def _operand(req, hook, model):
+    if isinstance(req, str): return hook, req
+    node, k = req.get('node', hook[0]), req.get('key')
+    if callable(node): node = node(hook[0], model)   # node selector may depend on the model (family aliases)
+    return ((node,) if k is None else (node, k(hook[1]) if callable(k) else k)), req['yvar']
 
 def get_ys(source_file, model_name, hook, yvar, yvar_kwargs={}):
     hookpath = (*hook, yvar)
@@ -121,23 +143,16 @@ def get_ys(source_file, model_name, hook, yvar, yvar_kwargs={}):
             print("broken hook:", hookpath, file=sys.stderr)
             raise e
 
-        required_yvars, hook_transform = virtual_hooks[yvar]
+        required_yvars, hook_transform, *mode = virtual_hooks[yvar]   # 'series' => whole-series transform
         try:
-            operands = []
-            for req in required_yvars:
-                if isinstance(req, tuple):
-                    key_override, req_yvar = req
-                    if callable(key_override):
-                        key_override = key_override(hook[1])
-                    operands.append(get_ys(source_file, model_name, (hook[0], key_override), req_yvar)[0])
-                else:
-                    operands.append(get_ys(source_file, model_name, hook, req)[0])
+            operands = [get_ys(source_file, model_name, *_operand(req, hook, model_name))[0] for req in required_yvars]
         except KeyError:
             print(f"hook: {hook}\nrequired vars: {required_yvars}\nhook transform: {hook_transform}")
             raise e
         if None in operands:
             return None, None
-        ys = [hook_transform(*operands_per_step, **yvar_kwargs) for operands_per_step in zip(*operands)]
+        ys = (hook_transform(*operands, **yvar_kwargs) if mode and mode[0] == 'series'
+              else [hook_transform(*per, **yvar_kwargs) for per in zip(*operands)])
 
     hook_cache[cache_id] = (ys, step_nums)
     return ys, step_nums
@@ -221,6 +236,10 @@ YVAR_LABELS = {
     'centroid_idx_weighted': r'Energy-weighted centroid of $\mu$',
     'profile':               r'$p_j=|\langle\hat\mu, v_j\rangle|^2$',
     'profile_weighted':      r'$\tilde p_j\propto\lambda_j p_j$',
+    'cos_to_res':            r'$\cos(\mu_{out}, \mu_{in})$ (vs joined residual)',
+    'magratio_res':          r'$\|\mu_{out}\|/\|\mu_{in}\|$',
+    'cos_drift':             r'$\cos(\mu_t, \mu_{t-1})$ (drift)',
+    'cos_drift_ema':         r'$\cos(\mu_t, \overline{\mu}_{<t})$ (EMA drift)',
 }
 
 base_colors = [
@@ -637,6 +656,26 @@ def plot_layer_contribution(model, sources, xvar='tokens', title=None,
     plt.show()
 
 
+@griddable
+def plot_heatmap(M, labels=None, title=None, cmap='coolwarm', vmin=-1, vmax=1,
+                 hide_diag=False, dynamic=False):
+    M = np.array(M, dtype=float)                         # fresh copy -> safe to NaN the diagonal
+    if hide_diag: np.fill_diagonal(M, np.nan)
+    if dynamic:                                          # symmetric range around 0 (gray centre)
+        v = np.nanmax(np.abs(M)); vmin, vmax = -v, v
+    cmap = plt.get_cmap(cmap).copy(); cmap.set_bad('white')   # NaN cells (hidden diagonal) -> white
+    im = plt.imshow(M, cmap=cmap, vmin=vmin, vmax=vmax)
+    if labels is not None:
+        plt.xticks(range(len(labels)), labels, rotation=90, fontsize=6); plt.yticks(range(len(labels)), labels, fontsize=6)
+    if title: plt.title(title)
+    plt.colorbar(im, fraction=0.046, pad=0.04); plt.show()
+
+def block_mean_cos(model, sources, step=None):           # block×block cosine-of-means matrix at a step
+    V = np.array([get_y(s[0], model, (s[1][0],), 'acts_mean_vec', step) for s in sources])
+    V = V / np.linalg.norm(V, axis=1, keepdims=True)
+    return V @ V.T
+
+
 
 # %%
 # Hook constants: short name -> (node_path, metric). Built with loops (no 2.5k-line literal).
@@ -648,9 +687,9 @@ def build_hooks(n_blocks=41):
     HK = HookConsts()
     A = {"AU": "acts_uncentered", "AC": "acts_centered"}
     G = {"GU": "grads_uncentered", "GC": "grads_centered"}
-    for p, leaf in {"AFN": "after_final_norm", "BFN": "before_final_norm"}.items():      # residual
-        for t, m in {**A, "BU": "acts_uncentered", "BC": "acts_centered", **G}.items(): HK[f"{p}_{t}"] = (leaf, m)
-        HK[f"{p}_KF"], HK[f"{p}_GB"] = (leaf, "kfac"), (leaf, "gen")
+    for p, node in {"AFN": "after_final_norm", "BFN": "before_final_norm"}.items():      # residual
+        for t, m in {**A, "BU": "acts_uncentered", "BC": "acts_centered", **G}.items(): HK[f"{p}_{t}"] = (node, m)
+        HK[f"{p}_KF"], HK[f"{p}_GB"] = (node, "kfac"), (node, "gen")
     for i in range(n_blocks):
         for p, w in {"U": "up", "D": "down", "G": "gate"}.items():                       # mlp projections
             b = f"blk{i}.mlp.{w}"
