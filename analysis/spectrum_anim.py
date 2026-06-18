@@ -354,15 +354,22 @@ def animate_spectra(panels, ncols=2, fps=4, figsize=None, model=None,
     panels: list of (yvar, data_sources, model_names[, opts_dict]). `common` kwargs
     (xlog, ylog, title, ...) apply to every panel; per-panel opts override.
     smooth: window (odd; 0=off) — denoises line spectra, keeps peaks/edges.
-    peak:   >1 biases the smoothing toward the window max (upper envelope)."""
+    peak:   >1 biases the smoothing toward the window max (upper envelope).
+    save:   optional path to ALSO write the animation to — a pure side effect; the inline
+            render returned for the notebook is identical whether or not save is given.
+            '*.mp4' with no ffmpeg on PATH sbatches a background render; '*.gif' / ffmpeg
+            '*.mp4' are written in-process."""
     norm = []
     for p in panels:
         yvar, data_sources, model_names, *rest = p
         norm.append((yvar, data_sources, model_names, {**common, **(rest[0] if rest else {})}))
     spec = _materialize(norm, ncols, fps, model or norm[0][2][0], xvar, prog_bar, suptitle, figsize, smooth, peak)
-    if save and save.endswith('.mp4') and shutil.which('ffmpeg') is None:
-        return _save_mp4_via_sbatch(spec, save)
-    return render(spec, save)
+    if save:                                            # write a file too (does NOT replace inline render)
+        if save.endswith('.mp4') and shutil.which('ffmpeg') is None:
+            _save_mp4_via_sbatch(spec, save)
+        else:
+            render(spec, save)
+    return render(spec, save=None)                      # always render inline for the notebook
 
 
 if __name__ == '__main__':  # render side: python spectrum_anim.py <spec.pkl> <out>
