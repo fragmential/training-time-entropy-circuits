@@ -39,7 +39,7 @@ class HookCollector:
         "acts" — stores raw (masked) activation tensors in a list.
 
     Args:
-        module: Module to hook. If None, call accumulate()/accumulate_grad() manually.
+        module: Module to hook. If None, feed data manually via feed()/feed_grad().
         capture: "input" (pre-hook / grad_input) or "output" (post-hook / grad_output).
         quantities: subset of {"acts","grads"} — decides which hooks register.
         mode: "cov" or "acts" (acts storage only).
@@ -164,6 +164,14 @@ class HookCollector:
         if self.collect_means:
             self._grads_sum.add_(g_f.float().sum(dim=0))
 
+    def feed(self, raw: torch.Tensor):
+        """Mask a raw (B,T,d)/(N,d) activation tensor, then accumulate."""
+        self.accumulate(self._apply_mask(raw))
+
+    def feed_grad(self, raw: torch.Tensor):
+        """Mask a raw (B,T,d)/(N,d) gradient tensor, then accumulate."""
+        self.accumulate_grad(self._apply_mask(raw))
+
     # ------------------------------------------------------------------
     # Hook callbacks
     # ------------------------------------------------------------------
@@ -172,7 +180,7 @@ class HookCollector:
         if not self.active:
             return
         x = _hook_input(args, kwargs).detach()
-        self.accumulate(self._apply_mask(x))
+        self.feed(x)
 
     def _fwd_post(self, module, inp, output):
         if not self.active:
@@ -181,7 +189,7 @@ class HookCollector:
         if isinstance(output, tuple):
             output = output[0]
         out = output.detach()
-        self.accumulate(self._apply_mask(out))
+        self.feed(out)
 
     def _bwd(self, module, grad_input, grad_output):
         if not self.active:
@@ -189,8 +197,7 @@ class HookCollector:
         go = grad_input[0] if self.capture == "input" else grad_output[0]
         if go is None:
             return
-        g = go.detach()
-        self.accumulate_grad(self._apply_mask(g))
+        self.feed_grad(go.detach())
 
     # ------------------------------------------------------------------
     # Results
@@ -340,7 +347,7 @@ class MultiHeadOVDispatcher:
         d = self.head_dim
         for h, collector in self.collectors.items():
             attended_h = x[..., h * d : (h + 1) * d]  # (B, T, d_head)
-            collector.accumulate(collector._apply_mask(attended_h))
+            collector.feed(attended_h)
 
     def _bwd(self, module, grad_input, grad_output):
         go = grad_output[0] if grad_output else None
@@ -352,7 +359,7 @@ class MultiHeadOVDispatcher:
         for h, collector in self.collectors.items():
             W_h = W[:, h * d : (h + 1) * d]  # (d_model, d_head)
             g_h = g @ W_h  # (B, T, d_head)
-            collector.accumulate_grad(collector._apply_mask(g_h))
+            collector.feed_grad(g_h)
 
     def captured(self) -> dict:
         out: dict = {}
