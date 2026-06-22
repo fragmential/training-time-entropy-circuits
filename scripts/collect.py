@@ -820,21 +820,12 @@ def main(cfg: CollectConfig):
 
             if cfg.compute_metrics:
                 _t0 = time.time()
-                import numpy as np
-                from scripts.compute_metrics import compute_metrics_for_checkpoint
+                from scripts.compute_metrics import compute_metrics_for_checkpoint, save_step_metrics
                 step_metrics = compute_metrics_for_checkpoint(acc, verbose=cfg.profile_metrics)
-                metrics_dir = os.path.join(cfg.output_dir.replace("inferences", "results", 1)
-                                           if cfg.output_dir else "data/results")
-                os.makedirs(metrics_dir, exist_ok=True)
+                metrics_dir = (cfg.output_dir.replace("inferences", "results", 1)
+                               if cfg.output_dir else "data/results")
                 metrics_path = os.path.join(metrics_dir, f"results_{short_name}.npy")
-                res_dict = {}
-                if os.path.exists(metrics_path):
-                    try:
-                        res_dict = np.load(metrics_path, allow_pickle=True).item()
-                    except (OSError, ValueError, TypeError):
-                        pass
-                res_dict[step_num] = step_metrics
-                np.save(metrics_path, res_dict)
+                save_step_metrics(metrics_path, step_num, step_metrics)
                 t_metrics += time.time() - _t0
                 tqdm.write(f"  Metrics: {len(step_metrics)} hooks -> {metrics_path}")
 
