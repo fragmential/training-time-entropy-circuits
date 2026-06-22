@@ -35,18 +35,18 @@ def test_mlp_out_acts_cov_with_bias_correction():
     C = (X.T @ X).float() / 64
     Wm = W @ X.float().mean(0)
     expect = W @ C @ W.T + torch.outer(Wm, b) + torch.outer(b, Wm) + torch.outer(b, b)
-    assert torch.allclose(acc.factor("blk0.mlp.up.out", "acts").cov, expect, atol=1e-4)
+    assert torch.allclose(acc.view("blk0.mlp.up.out", "acts").cov, expect, atol=1e-4)
 
 
 def test_mlp_out_acts_cov_no_bias():
     acc, W, _, X = _mlp_acc(bias=False)
     C = (X.T @ X).float() / 64
-    assert torch.allclose(acc.factor("blk0.mlp.up.out", "acts").cov, W @ C @ W.T, atol=1e-4)
+    assert torch.allclose(acc.view("blk0.mlp.up.out", "acts").cov, W @ C @ W.T, atol=1e-4)
 
 
 def test_mlp_out_acts_eigvals_descending():
     acc, *_ = _mlp_acc()
-    ev = acc.factor("blk0.mlp.up.out", "acts").eigvals
+    ev = acc.view("blk0.mlp.up.out", "acts").eigvals
     assert ev is not None and (ev[:-1] >= ev[1:] - 1e-5).all()
 
 
@@ -59,8 +59,8 @@ def test_derive_false_skips_weight_derivation():
     }
     acc = DataAccessor(data, model_name=MODEL, derive=False)
     assert acc._ensure_weights() is False                    # no load attempted
-    assert acc.factor("blk0.mlp.up.out", "acts") is None     # weight-derived leaf skipped
-    assert acc.factor("blk0.mlp.up.in", "acts") is not None  # captured leaf still resolves
+    assert acc.view("blk0.mlp.up.out", "acts") is None     # weight-derived leaf skipped
+    assert acc.view("blk0.mlp.up.in", "acts") is not None  # captured leaf still resolves
 
 
 # --- per-OV-head contrib acts = W_h @ slice_cov @ W_hᵀ (head column slice) ---
@@ -87,7 +87,7 @@ def _ov_acc(block_idx=3, num_heads=4, head_dim=5, seed=0, include_mean=False):
 
 
 def _contrib(acc, blk, h):
-    return acc.factor(f"blk{blk}.attn.head{h}.contrib", "acts")
+    return acc.view(f"blk{blk}.attn.head{h}.contrib", "acts")
 
 
 def test_contrib_cov_equals_head_slice_map():
@@ -142,7 +142,7 @@ def test_after_final_norm_derived_from_before():
         expect = norm(X.float())
     got = acc.resolve("after_final_norm", "acts", "samples")
     assert got is not None and torch.allclose(got, expect, atol=1e-5)
-    assert acc.factor("after_final_norm", "acts").cov is not None  # cov via reformat(cov<-samples)
+    assert acc.view("after_final_norm", "acts").cov is not None  # cov via reformat(cov<-samples)
 
 
 # --- +o / +b storage modifiers materialize derived acts at a new leaf ---

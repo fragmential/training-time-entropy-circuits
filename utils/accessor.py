@@ -105,9 +105,6 @@ def _eigh(C, k):
     v = eigvalsh_descending(C)
     return v[:k] if k else v
 
-def _eigh_full(C):
-    return eigh_descending(C)
-
 def _from_acts(acts, k):
     mu = acts.mean(0)
     n = acts.shape[0]
@@ -216,11 +213,6 @@ def parse_format_spec(fmt):
     return base, plus, minus
 
 
-def parse_format(fmt):
-    """Split a storage format into (base, positive modifier flags)."""
-    base, plus, _ = parse_format_spec(fmt)
-    return base, plus
-
 _DTYPE_MAP = {
     "float32":  torch.float32,  "fp32": torch.float32,
     "float64":  torch.float64,  "fp64": torch.float64,
@@ -254,21 +246,9 @@ def _cast_for(tensor, item_type, storage_dtype):
     return _cast(tensor, dtype_str)
 
 
-def _convert_worker(args):
-    in_path, out_path, fmt, abort_on_model_load = args
-    return DataAccessor(in_path, abort_on_model_load=abort_on_model_load).save(out_path, format=fmt)
-
-def _project_same_layer_worker(args):
-    in_path, out_path, onto = args
-    return DataAccessor(in_path).project_same_layer(onto=onto, output_path=out_path)
-
-def _project_onto_file_worker(args):
-    in_path, out_path, basis_path = args
-    return DataAccessor(in_path).project_onto_basis(basis_path, output_path=out_path)
-
-def _set_filter_worker(args):
-    in_path, out_path, filter_dict = args
-    return DataAccessor(in_path).set_token_filter(filter_dict, output_path=out_path)
+def _save_worker(args):
+    in_path, out_path, init_kwargs, save_kwargs = args
+    return DataAccessor(in_path, **init_kwargs).save(out_path, **save_kwargs)
 
 
 def _resolve_hf_name(short_name):
@@ -545,7 +525,7 @@ class DataAccessor:
         return fn
 
     # ------------------------------------------------------------------
-    # Node / FactorView access points
+    # Node / View access points
     # ------------------------------------------------------------------
 
     @property
@@ -555,24 +535,16 @@ class DataAccessor:
     def __getitem__(self, path: str) -> "Node":
         return Node(self, path)
 
-    @property
-    def after_final_norm(self) -> "Node":
-        return Node(self, "after_final_norm")
-
-    @property
-    def before_final_norm(self) -> "Node":
-        return Node(self, "before_final_norm")
-
-    def factor(self, leaf, q) -> Optional["FactorView"]:
-        """Handle-or-None: a FactorView iff (leaf, q) has a reachable representation."""
-        return FactorView(self, leaf, q) if self.can_resolve(leaf, q, "eigvals") else None
+    def view(self, leaf, q) -> Optional["View"]:
+        """Handle-or-None: a View iff (leaf, q) has a reachable representation."""
+        return View(self, leaf, q) if self.can_resolve(leaf, q, "eigvals") else None
 
     def leaf_quantities(self):
         """(leaf, q) pairs that resolve, across all tree leaves (for prewarm)."""
         out = []
         for leaf in sorted(self._all_leaves()):
             for q in ("acts", "grads"):
-                if self.factor(leaf, q) is not None:
+                if self.view(leaf, q) is not None:
                     out.append((leaf, q))
         return out
 
@@ -593,9 +565,14 @@ class DataAccessor:
     # Save
     # ------------------------------------------------------------------
 
-    def save(self, path, format="cov_svd", cross_basis_refs=None,
+    def save(self, path, format=None, cross_basis_refs=None,
              storage_dtype=None, token_filter=None, n_chunks=None):
-        result = self.to_dict(format=format, storage_dtype=storage_dtype)
+        if format is None:                       # preserve: write current data + corrected metadata
+            fmt = self.data.get("__format__", "unknown")
+            result = {k: dict(v) if isinstance(v, dict) else v for k, v in self.data.items()}
+        else:                                    # convert: materialize the requested format
+            fmt = format
+            result = self.to_dict(format=format, storage_dtype=storage_dtype)
 
         if cross_basis_refs:
             target = DataAccessor(result, model=self.model, model_config=self.model_config,
@@ -604,7 +581,7 @@ class DataAccessor:
                 target._project_onto(ref_path)
 
         self._stamp_from_path(path)
-        self._write_metadata(result, format, token_filter=token_filter, n_chunks=n_chunks)
+        self._write_metadata(result, fmt, token_filter=token_filter, n_chunks=n_chunks)
         directory = os.path.dirname(path)
         if directory:
             os.makedirs(directory, exist_ok=True)
@@ -789,44 +766,16 @@ class DataAccessor:
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
-    # Cross-basis projections / token filter
+    # Cross-basis projection (used by save's cross_basis_refs)
     # ------------------------------------------------------------------
-
-    def set_token_filter(self, filter_dict: dict, output_path: str = None) -> str:
-        self.data["__token_filter__"] = filter_dict
-        return self._save_in_place(output_path)
-
-    def project_same_layer(self, onto: str = "both", output_path: str = None) -> str:
-        """Cross-project acts and grads onto each other's basis at every leaf that
-        carries both in the same space (boundary / slice / a projection's .out)."""
-        do_fwd = onto in ("fwd", "both")
-        do_rev = onto in ("rev", "both")
-        for leaf in self._all_leaves():
-            a = self.factor(leaf, "acts")
-            g = self.factor(leaf, "grads")
-            if a is None or g is None:
-                continue
-            av, gv, ac, gc = a.eigvecs, g.eigvecs, a.cov, g.cov
-            if any(x is None for x in (av, gv, ac, gc)) or av.shape != gv.shape:
-                continue
-            e = self.data.setdefault(self._canon(leaf), {})
-            if do_fwd:
-                e["grads_cross_eigvals_acts"] = cross_eigvals(gc, av)
-            if do_rev:
-                e["acts_cross_eigvals_grads"] = cross_eigvals(ac, gv)
-        return self._save_in_place(output_path)
-
-    def project_onto_basis(self, basis_path: str, output_path: str = None) -> str:
-        self._project_onto(basis_path)
-        return self._save_in_place(output_path)
 
     def _project_onto(self, basis_path: str) -> None:
         ref = DataAccessor(basis_path)
         label = os.path.splitext(os.path.basename(basis_path))[0]
         for leaf in self._all_leaves():
             for q in ("acts", "grads"):
-                a = self.factor(leaf, q)
-                b = ref.factor(leaf, q)
+                a = self.view(leaf, q)
+                b = ref.view(leaf, q)
                 if a is None or b is None:
                     continue
                 basis, cov = b.eigvecs, a.cov
@@ -835,23 +784,14 @@ class DataAccessor:
                 self.data.setdefault(self._canon(leaf), {})[f"{q}_cross_eigvals_{label}"] = \
                     cross_eigvals(cov, basis)
 
-    def _save_in_place(self, output_path: str = None) -> str:
-        out = output_path or self.path
-        if out is None:
-            raise ValueError("output_path is required for in-memory data")
-        self._stamp_from_path(out)
-        self._write_metadata(self.data, self.data.get("__format__", "unknown"))
-        torch.save(self.data, out)
-        return out
-
 
 # ---------------------------------------------------------------------------
-# Tree navigation: Node (a path) -> FactorView (a leaf+quantity)
+# Tree navigation: Node (a path) -> View (a leaf+quantity)
 # ---------------------------------------------------------------------------
 
 class Node:
     """An ephemeral tree node addressed by a dotted path. Descend with attribute
-    access; `.acts` / `.grads` yield a FactorView when this path is a data leaf."""
+    access; `.acts` / `.grads` yield a View when this path is a data leaf."""
 
     def __init__(self, acc: DataAccessor, path: str = ""):
         self._acc = acc
@@ -868,14 +808,14 @@ class Node:
         if seg.startswith("_"):
             raise AttributeError(seg)
         if seg in ("acts", "grads"):
-            fv = self._acc.factor(self._path, seg)
-            if fv is None:
+            v = self._acc.view(self._path, seg)
+            if v is None:
                 raise AttributeError(f"{self._path!r} has no {seg}")
-            return fv
+            return v
         return Node(self._acc, f"{self._path}.{seg}" if self._path else seg)
 
     def get(self, rel):
-        """Resolve a relative path to a FactorView, or None (used by metrics)."""
+        """Resolve a relative path to a View, or None (used by metrics)."""
         node = self
         for seg in rel.split("."):
             if not isinstance(node, Node):
@@ -884,13 +824,13 @@ class Node:
                 node = node.__getattr__(seg)
             except AttributeError:
                 return None
-        return node if isinstance(node, FactorView) else None
+        return node if isinstance(node, View) else None
 
     def __repr__(self):
         return f"Node({self._path!r})"
 
 
-class FactorView:
+class View:
     """One quantity (acts/grads) of one leaf. `.<format>` -> resolve(leaf, q, fmt),
     reading None when that format is unavailable."""
 
@@ -905,7 +845,7 @@ class FactorView:
         return self._acc.resolve(self._leaf, self._q, fmt)
 
     def __repr__(self):
-        return f"FactorView({self._leaf!r}, {self._q!r})"
+        return f"View({self._leaf!r}, {self._q!r})"
 
 
 # ===========================================================================
@@ -956,12 +896,9 @@ if __name__ == "__main__":
     p.add_argument("--abort-on-model-load", action="store_true",
                    help="Abort instead of lazily loading model weights for derivations")
 
-    p = sub.add_parser("project", help="Add cross-basis eigenvalue projections")
+    p = sub.add_parser("project", help="Add cross-checkpoint cross-basis eigenvalue projections")
     p.add_argument("--input", required=True, metavar="PATH")
-    g = p.add_mutually_exclusive_group(required=True)
-    g.add_argument("--onto", choices=["fwd", "rev", "both"],
-                   help="Same-leaf cross-projection: grads->acts basis (fwd), acts->grads (rev), both")
-    g.add_argument("--onto-file", dest="onto_file", metavar="FILE",
+    p.add_argument("--onto-file", dest="onto_file", required=True, metavar="FILE",
                    help="Cross-checkpoint: project each file onto eigenbasis from this reference file")
     p.add_argument("--output", default=None, metavar="PATH", help="Output path (single-file input only)")
     p.add_argument("--output-dir", default=None, dest="output_dir", metavar="DIR",
@@ -987,32 +924,24 @@ if __name__ == "__main__":
 
     elif args.command == "convert":
         pairs = _resolve_outputs(_pt_files(args.input), args.output, args.output_dir)
+        init = {"abort_on_model_load": args.abort_on_model_load}
+        save_kwargs = {"format": args.to}
         if len(pairs) == 1:
             ip, op = pairs[0]
-            acc = DataAccessor(ip, abort_on_model_load=args.abort_on_model_load)
-            print(f"Saved to {acc.save(op, format=args.to)}")
+            print(f"Saved to {DataAccessor(ip, **init).save(op, **save_kwargs)}")
         else:
             print(f"Converting {len(pairs)} files to {args.to}...")
-            _run_pool(_convert_worker,
-                      [(ip, op, args.to, args.abort_on_model_load) for ip, op in pairs],
-                      args.workers)
+            _run_pool(_save_worker, [(ip, op, init, save_kwargs) for ip, op in pairs], args.workers)
 
     elif args.command == "project":
         pairs = _resolve_outputs(_pt_files(args.input), args.output, args.output_dir)
-        if args.onto:
-            if len(pairs) == 1:
-                ip, op = pairs[0]
-                print(f"Saved to {DataAccessor(ip).project_same_layer(args.onto, output_path=op)}")
-            else:
-                print(f"Projecting {len(pairs)} files (onto={args.onto})...")
-                _run_pool(_project_same_layer_worker, [(ip, op, args.onto) for ip, op in pairs], args.workers)
+        save_kwargs = {"cross_basis_refs": [args.onto_file]}
+        if len(pairs) == 1:
+            ip, op = pairs[0]
+            print(f"Saved to {DataAccessor(ip).save(op, **save_kwargs)}")
         else:
-            if len(pairs) == 1:
-                ip, op = pairs[0]
-                print(f"Saved to {DataAccessor(ip).project_onto_basis(args.onto_file, op)}")
-            else:
-                print(f"Projecting {len(pairs)} files onto {args.onto_file}...")
-                _run_pool(_project_onto_file_worker, [(ip, op, args.onto_file) for ip, op in pairs], args.workers)
+            print(f"Projecting {len(pairs)} files onto {args.onto_file}...")
+            _run_pool(_save_worker, [(ip, op, {}, save_kwargs) for ip, op in pairs], args.workers)
 
     elif args.command == "set-filter":
         pts = _pt_files(args.input)
@@ -1026,13 +955,14 @@ if __name__ == "__main__":
             filter_dict["boundary_token_ids"] = args.boundary_token_ids
         if args.answer_only:
             filter_dict["answer_only"] = True
+        save_kwargs = {"token_filter": filter_dict}
         pairs = _resolve_outputs(pts, args.output, args.output_dir)
         if len(pairs) == 1:
             ip, op = pairs[0]
-            print(f"Saved to {DataAccessor(ip).set_token_filter(filter_dict, op)}")
+            print(f"Saved to {DataAccessor(ip).save(op, **save_kwargs)}")
         else:
             print(f"Setting token filter on {len(pairs)} files...")
-            _run_pool(_set_filter_worker, [(ip, op, filter_dict) for ip, op in pairs], args.workers)
+            _run_pool(_save_worker, [(ip, op, {}, save_kwargs) for ip, op in pairs], args.workers)
 
     else:
         parser.print_help()

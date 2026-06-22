@@ -255,72 +255,77 @@ def mean_metrics(eigvecs: torch.Tensor, eigvals: torch.Tensor, mean: torch.Tenso
 # K-FAC metrics
 # ---------------------------------------------------------------------------
 
-def _top_k_outer_products(a: np.ndarray, b: np.ndarray, k: int) -> np.ndarray:
-    """Top-k products from outer(a, b) where a, b are sorted descending.
+def _top_k_outer_products(a: torch.Tensor, b: torch.Tensor, k: int) -> torch.Tensor:
+    """Top-k products from outer(a, b) where a, b are sorted descending (numpy internally).
 
     Uses flat outer product for small dims, priority queue for large.
     """
+    a, b = a.detach().cpu().numpy(), b.detach().cpu().numpy()
     m, n = len(a), len(b)
     if m * n <= 2_000_000:
         prods = np.outer(a, b).ravel()
         if len(prods) <= k:
-            return np.sort(prods)[::-1].copy()
-        idx = np.argpartition(prods, -k)[-k:]
-        return np.sort(prods[idx])[::-1].copy()
+            out = np.sort(prods)[::-1]
+        else:
+            idx = np.argpartition(prods, -k)[-k:]
+            out = np.sort(prods[idx])[::-1]
+    else:
+        # Priority queue: O(k log(min(m,n)))
+        heap = [(-(a[0] * b[0]), 0, 0)]
+        seen = {(0, 0)}
+        result = []
+        while len(result) < k and heap:
+            neg_prod, i, j = heapq.heappop(heap)
+            result.append(-neg_prod)
+            if i + 1 < m and (i + 1, j) not in seen:
+                heapq.heappush(heap, (-(a[i + 1] * b[j]), i + 1, j))
+                seen.add((i + 1, j))
+            if j + 1 < n and (i, j + 1) not in seen:
+                heapq.heappush(heap, (-(a[i] * b[j + 1]), i, j + 1))
+                seen.add((i, j + 1))
+        out = np.array(result)
+    return torch.from_numpy(np.ascontiguousarray(out))
 
-    # Priority queue: O(k log(min(m,n)))
-    heap = [(-(a[0] * b[0]), 0, 0)]
-    seen = {(0, 0)}
-    result = []
-    while len(result) < k and heap:
-        neg_prod, i, j = heapq.heappop(heap)
-        result.append(-neg_prod)
-        if i + 1 < m and (i + 1, j) not in seen:
-            heapq.heappush(heap, (-(a[i + 1] * b[j]), i + 1, j))
-            seen.add((i + 1, j))
-        if j + 1 < n and (i, j + 1) not in seen:
-            heapq.heappush(heap, (-(a[i] * b[j + 1]), i, j + 1))
-            seen.add((i, j + 1))
-    return np.array(result)
 
+def _sample_outer_products_linspace(a: torch.Tensor, b: torch.Tensor, k: int) -> torch.Tensor:
+    """Sample k products linearly spaced across the full outer-product distribution
+    (descending; numpy internally).
 
-def _sample_outer_products_linspace(a: np.ndarray, b: np.ndarray, k: int) -> np.ndarray:
-    """Sample k products linearly spaced across the full outer product distribution.
-
-    For small matrices, computes all products and samples exactly.
-    For large matrices (> 2M products), approximates using sorted index mapping.
-    Returns array of length min(k, m*n) in descending order.
+    Small matrices sample exactly; >2M products approximate via sorted-index mapping.
     """
+    a, b = a.detach().cpu().numpy(), b.detach().cpu().numpy()
     m, n = len(a), len(b)
     total = m * n
     if total <= k:
         prods = np.outer(a, b).ravel()
         prods.sort()
-        return prods[::-1].copy()
-    if total <= 2_000_000:
+        out = prods[::-1]
+    elif total <= 2_000_000:
         prods = np.outer(a, b).ravel()
         prods.sort()
-        prods = prods[::-1].copy()
+        prods = prods[::-1]
         idx = np.round(np.linspace(0, len(prods) - 1, k)).astype(int)
-        return prods[idx]
-    # Approximate: map rank -> (i, j) via sorted row-major order
-    rank_idx = np.round(np.linspace(0, total - 1, k)).astype(int)
-    i_idx = np.minimum(rank_idx // n, m - 1)
-    j_idx = np.minimum(rank_idx % n, n - 1)
-    sampled = a[i_idx] * b[j_idx]
-    return np.sort(sampled)[::-1].copy()
+        out = prods[idx]
+    else:
+        # Approximate: map rank -> (i, j) via sorted row-major order
+        rank_idx = np.round(np.linspace(0, total - 1, k)).astype(int)
+        i_idx = np.minimum(rank_idx // n, m - 1)
+        j_idx = np.minimum(rank_idx % n, n - 1)
+        out = np.sort(a[i_idx] * b[j_idx])[::-1]
+    return torch.from_numpy(np.ascontiguousarray(out))
 
 
-def _histogram_outer_product(a: np.ndarray, b: np.ndarray, bins: int = 1024,
+def _histogram_outer_product(a: torch.Tensor, b: torch.Tensor, bins: int = 1024,
                              chunk_limit: int = 2_000_000) -> dict:
-    """Histogram the full K-FAC outer product a ⊗ b in linear and log-spaced bins.
+    """Histogram the full K-FAC outer product a ⊗ b in linear and log-spaced bins
+    (numpy internally; returns torch tensors).
 
     Computes in chunks so the full outer product is never materialised.
     Returns density-normalised histograms (integral = 1) plus the edges and
     n_total = |a|*|b| so counts can be recovered as `density * n_total * diff(edges)`.
     """
-    a = np.asarray(a, dtype=np.float64)
-    b = np.asarray(b, dtype=np.float64)
+    a = a.detach().cpu().numpy().astype(np.float64)
+    b = b.detach().cpu().numpy().astype(np.float64)
     m, n = len(a), len(b)
     total = m * n
 
@@ -344,13 +349,13 @@ def _histogram_outer_product(a: np.ndarray, b: np.ndarray, bins: int = 1024,
             log_counts += np.histogram(chunk, bins=log_edges)[0]
 
     out = {
-        "histogram": lin_counts / (total * np.diff(lin_edges)),
-        "histogram_edges": lin_edges,
+        "histogram": torch.from_numpy(lin_counts / (total * np.diff(lin_edges))),
+        "histogram_edges": torch.from_numpy(lin_edges),
         "n_total": total,
     }
     if has_log:
-        out["loghistogram"] = log_counts / (total * np.diff(log_edges))
-        out["loghistogram_edges"] = log_edges
+        out["loghistogram"] = torch.from_numpy(log_counts / (total * np.diff(log_edges)))
+        out["loghistogram_edges"] = torch.from_numpy(log_edges)
     return out
 
 
@@ -385,10 +390,6 @@ def kfac_metrics(
         sampled_eigvals: sample_k products linearly spaced across full distribution
         + spectral metrics on top_eigvals (rankme, alpha, r2, r2_100)
     """
-    # Convert to numpy for numpy-only helper functions
-    e_acts_np = eigvals_acts.numpy()
-    e_grads_np = eigvals_grads.numpy()
-
     d_in, d_out = len(eigvals_acts), len(eigvals_grads)
 
     trace_acts = float(eigvals_acts.sum())
@@ -402,14 +403,14 @@ def kfac_metrics(
     log_det = d_in * ld_grads + d_out * ld_acts
 
     k_top = min(top_k, d_in * d_out)
-    top_eigvals = torch.from_numpy(_top_k_outer_products(e_acts_np, e_grads_np, k_top)).clamp(min=0)
+    top_eigvals = _top_k_outer_products(eigvals_acts, eigvals_grads, k_top).clamp(min=0)
 
     k_samp = min(sample_k, d_in * d_out)
-    sampled_eigvals = torch.from_numpy(_sample_outer_products_linspace(e_acts_np, e_grads_np, k_samp)).clamp(min=0)
+    sampled_eigvals = _sample_outer_products_linspace(eigvals_acts, eigvals_grads, k_samp).clamp(min=0)
 
     sm = spectral_metrics(top_eigvals) if len(top_eigvals) >= 11 else {}
 
-    hist = _histogram_outer_product(e_acts_np, e_grads_np, bins=1024)
+    hist = _histogram_outer_product(eigvals_acts, eigvals_grads, bins=1024)
 
     return {
         **sm,
@@ -535,6 +536,8 @@ def _quantity_metrics(q, fv, path):
     if fv.mean is not None and fv.eigh_centered is not None:
         out[f"{q}_mean_metrics"] = mean_metrics(fv.eigvecs_centered, fv.eigvals_centered, fv.mean)
 
+    # TODO(1b): this reaches into accessor internals to surface cross-basis projections;
+    # expose them through a proper projection API once general projections are designed.
     entry = fv._acc._entry(path)
     prefix = f"{q}_cross_eigvals_"
     for ek, evv in entry.items():
@@ -590,7 +593,7 @@ def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False
         decomp_profiler.disable()
     if gpu_wait > 0:
         results["__gpu_wait__"] = gpu_wait
-    return results
+    return _to_numpy(results)   # provider emits pure numpy; analysis/results never see torch
 
 
 def _merge_step(old: dict, new: dict) -> dict:
@@ -624,7 +627,7 @@ def _compute_metrics_for_file(args, derive=True):
     """Pool worker: compute metrics for a .pt file (derive=False skips weight-derived leaves)."""
     step, path = args
     data = torch.load(path, map_location="cpu", weights_only=False)
-    return step, _to_numpy(compute_metrics_for_checkpoint(DataAccessor(data, derive=derive)))
+    return step, compute_metrics_for_checkpoint(DataAccessor(data, derive=derive))
 
 
 def _needs_model_loading(data_path):
@@ -654,158 +657,6 @@ def _resolve_data_root(data_root: str, config_directory: str):
     return data_root, config_directory
 
 # ---------------------------------------------------------------------------
-# Sequential derive mode (prefetch/delete like collect.py)
-# ---------------------------------------------------------------------------
-
-def _compute_derive(to_compute, model_name, res_dict, results_path,
-                     keep_cached=False, num_workers=2):
-    """Process checkpoints with selective weight loading, threaded for parallelism.
-
-    GPU operations (eigendecomposition, derivations) are serialized via gpu_lock.
-    CPU-heavy work (spectral metrics, K-FAC metrics) runs in parallel across threads.
-    Disk usage bounded: at most num_workers + 2 checkpoints on disk at any time.
-    """
-    import gc
-    import queue
-    import threading
-    import traceback
-    from utils.model_registry import (
-        get_model_config, get_checkpoint_schedule,
-        prefetch_checkpoint, delete_cached_revision,
-    )
-    from utils.accessor import _resolve_hf_name
-
-    hf_name = _resolve_hf_name(model_name)
-    config = get_model_config(hf_name)
-    schedule = {s: (r, m) for s, r, m in get_checkpoint_schedule(config, None)}
-
-    # Resolve metadata for all items upfront (from schedule; avoid loading full files)
-    items = []
-    for step, path in sorted(to_compute, key=lambda x: x[0]):
-        if step in schedule:
-            rev, step_model = schedule[step]
-        else:
-            # Fall back to loading the file only if not in schedule
-            meta = torch.load(path, map_location="cpu", weights_only=False)
-            rev = meta.get("__revision__")
-            step_model = meta.get("__hf_model__") or config.hf_repo
-        if step_model is None:
-            step_model = config.hf_repo
-        items.append((step, path, rev, step_model))
-
-    gpu_lock = threading.Lock()
-    results_lock = threading.Lock()
-    disk_sem = threading.Semaphore(num_workers + 2)
-    work_queue = queue.Queue()
-
-    # Per-thread timing stats
-    stats_lock = threading.Lock()
-    worker_stats = []  # list of (total_time, gpu_wait, download_wait, n_checkpoints)
-
-    # Timed lock/queue helpers
-    class _TimedLock:
-        """Wraps a lock to track cumulative wait time."""
-        def __init__(self, lock):
-            self._lock = lock
-            self._local = threading.local()
-        def __enter__(self):
-            import time
-            t0 = time.monotonic()
-            self._lock.acquire()
-            self._local.waited = time.monotonic() - t0
-            return self
-        def __exit__(self, *args):
-            self._lock.release()
-        @property
-        def waited(self):
-            return getattr(self._local, "waited", 0.0)
-
-    timed_gpu = _TimedLock(gpu_lock)
-
-    # Producer: download checkpoints, respecting disk budget
-    def producer():
-        for item in items:
-            disk_sem.acquire()
-            prefetch_checkpoint(item[3], item[2])
-            work_queue.put(item)
-        for _ in range(num_workers):
-            work_queue.put(None)
-
-    # Consumer: process checkpoints from queue
-    def worker():
-        import time
-        total_gpu_wait = 0.0
-        total_dl_wait = 0.0
-        n_done = 0
-        t_start = time.monotonic()
-
-        while True:
-            t0 = time.monotonic()
-            item = work_queue.get()
-            dl_wait = time.monotonic() - t0
-            if item is None:
-                break
-            total_dl_wait += dl_wait
-            step, path, rev, step_model = item
-            try:
-                data = torch.load(path, map_location="cpu", weights_only=False)
-                acc = DataAccessor(data, model_name=hf_name, revision=rev)
-                acc._hf_repo = step_model
-
-                step_results = compute_metrics_for_checkpoint(
-                    acc, gpu_lock=timed_gpu)
-                total_gpu_wait += step_results.pop("__gpu_wait__", 0.0)
-
-                with results_lock:
-                    res_dict[step] = _merge_step(res_dict.get(step, {}), step_results)
-                    np.save(results_path, res_dict)
-
-                n_done += 1
-                hooks = list(step_results.keys())
-                print(
-                    f"  Step {step}: {len(hooks)} hook points "
-                    f"({', '.join(hooks[:3])}{'...' if len(hooks) > 3 else ''})"
-                )
-            except Exception as e:
-                print(f"Skipping step {step}: {e}")
-                traceback.print_exc()
-            finally:
-                acc = data = None
-                gc.collect()
-                torch.cuda.empty_cache()
-                if not keep_cached:
-                    with gpu_lock:
-                        delete_cached_revision(step_model, rev)
-                disk_sem.release()
-
-        total_time = time.monotonic() - t_start
-        with stats_lock:
-            worker_stats.append((total_time, total_gpu_wait, total_dl_wait, n_done))
-
-    producer_thread = threading.Thread(target=producer)
-    producer_thread.start()
-
-    threads = [threading.Thread(target=worker) for _ in range(num_workers)]
-    for w in threads:
-        w.start()
-
-    producer_thread.join()
-    for w in threads:
-        w.join()
-
-    # Print timing summary
-    total_wall = sum(s[0] for s in worker_stats)
-    total_gpu = sum(s[1] for s in worker_stats)
-    total_dl = sum(s[2] for s in worker_stats)
-    total_ckpts = sum(s[3] for s in worker_stats)
-    if total_wall > 0:
-        print(f"\n  Timing ({num_workers} workers, {total_ckpts} checkpoints):")
-        print(f"    GPU wait:      {total_gpu:7.1f}s  ({100*total_gpu/total_wall:.1f}% of worker time)")
-        print(f"    Download wait: {total_dl:7.1f}s  ({100*total_dl/total_wall:.1f}% of worker time)")
-        print(f"    Compute:       {total_wall-total_gpu-total_dl:7.1f}s  ({100*(total_wall-total_gpu-total_dl)/total_wall:.1f}% of worker time)")
-        print(f"    Total worker:  {total_wall:7.1f}s  (wall: {max(s[0] for s in worker_stats):.1f}s)")
-
-# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -815,7 +666,6 @@ def main(
     num_workers: int = None,
     recompute: bool = False,
     derive: bool = True,
-    keep_cached: bool = False,
     data_root: str = "data/inferences",
     output_root: str = "data/results",
 ):
@@ -830,7 +680,6 @@ def main(
         num_workers: Number of parallel workers (default: cpu count).
         recompute: If True, recompute all steps even if results exist.
         derive: If True (default), derive B and post-norm metrics when possible.
-                Uses sequential processing with prefetch/delete.
     """
 
     data_root, config_directory = _resolve_data_root(data_root, config_directory)

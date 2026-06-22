@@ -1,6 +1,6 @@
-"""Canonical leaf-name grammar: pure string parsing of dotted capture paths.
+"""Canonical hook-name grammar: pure string parsing of dotted capture paths.
 
-A leaf is one physical capture-point. The collectable leaves are:
+A hook is one physical capture-point. The collectable hooks are:
     blk{i}.mlp.{up,down,gate}.{in,out}     MLP projection input / output
     blk{i}.{attn,mlp}.{in,out,raw_out}     sub-block residual boundaries
     blk{i}.attn.head{h}.slice              per-OV-head pre-W_o slice

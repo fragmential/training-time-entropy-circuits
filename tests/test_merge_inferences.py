@@ -101,4 +101,4 @@ def test_merge_files_roundtrip_and_readable(tmp_path):
     merged = torch.load(op, map_location="cpu", weights_only=False)
     assert _leaves(merged) == {"blk0.attn.in", "blk0.mlp.raw_out"}
     acc = DataAccessor(merged)
-    assert acc.factor("blk0.mlp.raw_out", "acts").eigvals is not None
+    assert acc.view("blk0.mlp.raw_out", "acts").eigvals is not None

@@ -289,7 +289,7 @@ def main(
     # Build basis dict: {leaf: (U_tensor, band_indices)} from each leaf's acts eigvecs
     basis_dict = {}
     for hook in hook_names:
-        fv = acc.factor(hook, "acts")
+        fv = acc.view(hook, "acts")
         eigvecs = fv.eigvecs if fv is not None else None
         if eigvecs is None:
             print(f"  WARNING: no acts eigenvectors for {hook}, skipping")

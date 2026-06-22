@@ -1,4 +1,4 @@
-"""Resolver + Node/FactorView navigation: produce any format from what's stored,
+"""Resolver + Node/View navigation: produce any format from what's stored,
 descend the tree, and resolve Pythia parallel-residual aliases."""
 import copy
 from types import SimpleNamespace
@@ -39,7 +39,7 @@ def _acts_data(d=32, N=200):
 
 
 def _acts(acc):
-    return acc.factor(LEAF, "acts")
+    return acc.view(LEAF, "acts")
 
 
 def test_eigvals_from_cov_svd():
@@ -91,7 +91,7 @@ def test_eigenvalues_only_no_cov_no_loop(tmp_path):
     assert acc.resolve(LEAF, "acts", "cov") is None
     assert acc.resolve(LEAF, "acts", "eigvecs") is None
     assert acc.can_resolve(LEAF, "acts", "cov") is False
-    assert acc.factor(LEAF, "acts") is not None  # eigvals reachable
+    assert acc.view(LEAF, "acts") is not None  # eigvals reachable
 
 
 def test_eigvecs_access_order_independent():
@@ -119,7 +119,7 @@ def test_eigvecs_centered_access_order_independent():
     assert torch.allclose(ev, ev2, atol=1e-6)
 
 
-# --- Node / FactorView navigation ---
+# --- Node / View navigation ---
 
 def _nav_cov(d, seed):
     g = torch.Generator().manual_seed(seed)
@@ -157,21 +157,21 @@ def _residual_acc():
 def test_mlp_navigation_matches_factor():
     acc = _mlp_acc()
     assert torch.allclose(acc.v.blk0.mlp.up["in"].acts.eigvals,
-                          acc.factor("blk0.mlp.up.in", "acts").eigvals)
+                          acc.view("blk0.mlp.up.in", "acts").eigvals)
     assert torch.allclose(acc["blk0.mlp.up.in"].acts.eigvals,
-                          acc.factor("blk0.mlp.up.in", "acts").eigvals)
+                          acc.view("blk0.mlp.up.in", "acts").eigvals)
     assert torch.allclose(acc.v.blk0.mlp.up.out.acts.cov,
-                          acc.factor("blk0.mlp.up.out", "acts").cov)  # derived
-    assert acc.factor("blk0.mlp.up.in", "grads") is None
+                          acc.view("blk0.mlp.up.out", "acts").cov)  # derived
+    assert acc.view("blk0.mlp.up.in", "grads") is None
 
 
 def test_residual_navigation_matches_factor():
     acc = _residual_acc()
-    assert torch.allclose(acc.after_final_norm.acts.eigvals,
-                          acc.factor("after_final_norm", "acts").eigvals)
+    assert torch.allclose(acc["after_final_norm"].acts.eigvals,
+                          acc.view("after_final_norm", "acts").eigvals)
     assert torch.allclose(acc.v.after_final_norm.grads.eigvals,
-                          acc.factor("after_final_norm", "grads").eigvals)
-    assert acc.factor("blk0.attn.out", "grads") is None
+                          acc.view("after_final_norm", "grads").eigvals)
+    assert acc.view("blk0.attn.out", "grads") is None
 
 
 def test_navigation_matches_direct_decomposition():
@@ -201,16 +201,16 @@ def _boundary_data(keys, d=8):
 
 def test_alias_mlp_in_resolves_to_attn_in():
     acc = DataAccessor(_boundary_data(["blk3.attn.in", "blk3.attn.out", "blk3.mlp.out"]))
-    assert torch.equal(acc.factor("blk3.mlp.in", "acts").cov,
-                       acc.factor("blk3.attn.in", "acts").cov)
-    assert torch.equal(acc.factor("blk3.attn.raw_out", "acts").cov,
-                       acc.factor("blk3.attn.out", "acts").cov)
+    assert torch.equal(acc.view("blk3.mlp.in", "acts").cov,
+                       acc.view("blk3.attn.in", "acts").cov)
+    assert torch.equal(acc.view("blk3.attn.raw_out", "acts").cov,
+                       acc.view("blk3.attn.out", "acts").cov)
 
 
 def test_alias_not_used_when_canonical_stored():
     acc = DataAccessor(_boundary_data(["blk3.attn.in", "blk3.mlp.in"]))
-    assert not torch.equal(acc.factor("blk3.mlp.in", "acts").cov,
-                           acc.factor("blk3.attn.in", "acts").cov)
+    assert not torch.equal(acc.view("blk3.mlp.in", "acts").cov,
+                           acc.view("blk3.attn.in", "acts").cov)
 
 
 def test_alias_absent_from_iteration():
@@ -229,6 +229,6 @@ def test_alias_convert_does_not_duplicate(tmp_path):
 
 def test_navigation_to_boundaries():
     acc = DataAccessor(_boundary_data(["blk3.attn.in", "blk3.attn.out", "blk3.mlp.out"]))
-    assert torch.equal(acc.v.blk3.attn["in"].acts.cov, acc.factor("blk3.attn.in", "acts").cov)
-    assert torch.equal(acc.v.blk3.mlp.out.acts.cov, acc.factor("blk3.mlp.out", "acts").cov)
-    assert acc.factor("blk3.attn.in", "grads") is None
+    assert torch.equal(acc.v.blk3.attn["in"].acts.cov, acc.view("blk3.attn.in", "acts").cov)
+    assert torch.equal(acc.v.blk3.mlp.out.acts.cov, acc.view("blk3.mlp.out", "acts").cov)
+    assert acc.view("blk3.attn.in", "grads") is None
