@@ -1,27 +1,49 @@
-"""DataAccessor rebuild (WIP) — read/resolve core only. See docs/accessor_interface.md.
+"""DataAccessor rebuild (WIP) — read/resolve core + skeleton. See docs/accessor_interface.md.
 
 Axis: leaf (dotted hook path) . quantity (acts|grads) . component (cov/eigvals/eigvecs/...).
 `_resolve(leaf, q, component)` produces any component: stored -> convert -> derive (cross-leaf).
-weights, projections, save, prewarm, identity, CLI, profiler: not yet.
+Implemented: resolve core, derive tier, prewarm, GPU guard. Stubbed: save, projections, info.
 """
 
+import os
 import torch
+from collections import namedtuple
 from collections.abc import Iterator
-from functools import partial
+from functools import partial, wraps
 from typing import Callable
 
 from utils.hook_names import canonical
-from utils.model_registry import ModelConfig, derivation, derived_leaves
+from utils.model_registry import ModelConfig, WeightProvider, derivation, derived_leaves
 
 Component = torch.Tensor | int | float
+Identity = namedtuple("Identity", "model revision run")
 
 COMPONENTS = (
     "gram", "n", "mask", "samples", "mean", "lvecs",
     "cov", "cov_centered",
     "eigvals", "eigvecs", "eigvals_centered", "eigvecs_centered",
 )
+QUANTITIES = ("acts", "grads")
+
+_DEV = "cuda" if torch.cuda.is_available() else "cpu"
+_GPU_EXPECTED = bool(os.environ.get("CUDA_VISIBLE_DEVICES")) or torch.cuda.is_available()
 
 
+def require_gpu(fn: Callable) -> Callable:
+    """Run an eigendecomposition on the GPU when one is present; refuse a large CPU
+    fallback when a GPU is expected (catches the forked-worker CPU regression)."""
+    @wraps(fn)
+    def wrapped(M: torch.Tensor):
+        if torch.cuda.is_available():
+            r = fn(M.to(_DEV))
+            return tuple(t.cpu() for t in r) if isinstance(r, tuple) else r.cpu()
+        if _GPU_EXPECTED and M.shape[-1] >= 1024:
+            raise RuntimeError(f"eigendecomp {tuple(M.shape)} on CPU while a GPU is present — refusing")
+        return fn(M)
+    return wrapped
+
+
+@require_gpu
 def _eigh(cov: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """One decomposition shared by eigvals + eigvecs; descending, eigvals clamped >= 0."""
     vals, vecs = torch.linalg.eigh(cov)
@@ -73,8 +95,8 @@ def _build_tree(acc: "DataAccessor", leaves: list[str]) -> "Node":
 class DataAccessor:
     """Format-agnostic reader for collected data. Read via the tree (`.v` / `acc[path]`)."""
 
-    def __init__(self, data: dict | str, *, weights=None, config: ModelConfig | None = None,
-                 derive: bool = True) -> None:
+    def __init__(self, data: dict | str, *, weights: WeightProvider | None = None,
+                 config: ModelConfig | None = None, derive: bool = True) -> None:
         self.data: dict = torch.load(data, map_location="cpu", weights_only=False) if isinstance(data, str) else data
         self._weights = weights
         self._config = config
@@ -82,7 +104,12 @@ class DataAccessor:
         self._cache: dict[tuple[str, str, str], Component | tuple[torch.Tensor, torch.Tensor]] = {}
         self._resolving: set[tuple[str, str, str]] = set()   # cycle guard
         present = [k for k in self.data if not k.startswith("__")]
-        self.v = _build_tree(self, sorted(set(present) | derived_leaves(present)))  # present + derivable
+        self._leaves = sorted(set(present) | derived_leaves(present))   # present + derivable
+        self.v = _build_tree(self, self._leaves)
+
+    @property
+    def _identity(self) -> Identity:
+        return Identity(self.data.get("__hf_model__"), self.data.get("__revision__"), self.data.get("__run__"))
 
     # --- read entry: the only public read path ---
     def __getitem__(self, path: str) -> "Node":
@@ -128,13 +155,22 @@ class DataAccessor:
             for sources, fn in T.recipes().get(component, []):
                 yield tuple((src_leaf, src_q, s) for s in sources), partial(fn, *ingr)
 
-    # --- public surface: not this step ---
-    def save(self, *a, **k):
-        raise NotImplementedError
+    # --- prewarm: fill the cache (notably the eigendecompositions) before metric compute ---
     def prewarm(self, components: list[str] | None = None) -> None:
+        for leaf in self._leaves:
+            for q in QUANTITIES:
+                for c in (components or COMPONENTS):
+                    self._resolve(leaf, q, c)
+
+    # --- public surface: signatures only (save discussed next) ---
+    def save(self, path: str, format: str | None = None, *, storage_dtype=None,
+             token_filter: dict | None = None, n_chunks: int | None = None,
+             persist_projections: bool = False) -> str:
         raise NotImplementedError
+
     def needs_model_weights(self) -> bool:
         raise NotImplementedError
+
     def info(self) -> str:
         raise NotImplementedError
 
@@ -151,8 +187,8 @@ class Node:
     def __getattr__(self, seg: str) -> "Node | View":
         if seg.startswith("_"):
             raise AttributeError(seg)
-        if seg in ("acts", "grads"):
-            return View(self._acc, self._path, seg)
+        if seg in QUANTITIES:
+            return View(self._acc, self._acc._identity, self._path, seg)
         child = self._children.get(seg)
         if child is None:
             raise AttributeError(f"{self._path!r} has no child {seg!r}")
@@ -169,17 +205,25 @@ class Node:
 
 
 class View:
-    """One (leaf, quantity). `view.<component>` -> resolved tensor/tuple, or None."""
+    """One (leaf, quantity) with a stamped `identity` (so it can be named without an
+    accessor — e.g. a cached projection reference). `view.<component>` -> tensor/tuple/None."""
 
-    def __init__(self, acc: DataAccessor, leaf: str, q: str) -> None:
+    def __init__(self, acc: "DataAccessor | None", identity: Identity, leaf: str, q: str) -> None:
         self._acc = acc
+        self.identity = identity
         self._leaf = leaf
         self._q = q
 
     def __getattr__(self, component: str) -> Component | None:
         if component.startswith("_"):
             raise AttributeError(component)
-        return self._acc._resolve(self._leaf, self._q, component)
+        return self._acc._resolve(self._leaf, self._q, component) if self._acc is not None else None
+
+    def in_basis(self, reference: "View") -> "View":
+        raise NotImplementedError                         # projections: deferred
+
+    def projections(self) -> list["View"]:
+        raise NotImplementedError
 
     def __repr__(self) -> str:
         return f"View({self._leaf!r}, {self._q!r})"
