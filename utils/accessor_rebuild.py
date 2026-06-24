@@ -7,6 +7,7 @@ Implemented: resolve core, derive tier, prewarm, GPU guard. Stubbed: save, proje
 
 import os
 import re
+import time
 import torch
 from collections import namedtuple
 from collections.abc import Iterator
@@ -30,21 +31,59 @@ _DEV = "cuda" if torch.cuda.is_available() else "cpu"
 _GPU_EXPECTED = bool(os.environ.get("CUDA_VISIBLE_DEVICES")) or torch.cuda.is_available()
 
 
+class _DecompProfiler:
+    """Times the decompositions it decorates, when enabled (off by default → no overhead)."""
+    def __init__(self):
+        self.enabled = False
+        self.calls: list[tuple[str, tuple, float]] = []
+
+    def enable(self): self.enabled, self.calls = True, []
+    def disable(self): self.enabled = False
+
+    def __call__(self, fn: Callable) -> Callable:
+        @wraps(fn)
+        def timed(M):
+            if not self.enabled:
+                return fn(M)
+            t = time.time()
+            out = fn(M)
+            self.calls.append((fn.__name__, tuple(M.shape), time.time() - t))
+            return out
+        return timed
+
+    def summary(self) -> str:
+        total = sum(d for *_, d in self.calls)
+        return "\n".join([f"{len(self.calls)} decompositions, {total:.2f}s total:",
+                          *(f"  {n} {s}: {d:.3f}s" for n, s, d in self.calls)])
+
+decomp_profiler = _DecompProfiler()
+
+
+def _to_cpu(r):
+    return r.cpu() if isinstance(r, torch.Tensor) else tuple(t.cpu() for t in r) if isinstance(r, tuple) else r
+
+
+def prefer_gpu(fn: Callable) -> Callable:
+    """Move tensor args to _DEV (a no-op when it's already CPU), run, bring the result back."""
+    @wraps(fn)
+    def wrapped(*args):
+        return _to_cpu(fn(*(a.to(_DEV) if isinstance(a, torch.Tensor) else a for a in args)))
+    return wrapped
+
+
 def require_gpu(fn: Callable) -> Callable:
-    """Run an eigendecomposition on the GPU when one is present; refuse a large CPU
-    fallback when a GPU is expected (catches the forked-worker CPU regression)."""
+    """prefer_gpu, but refuse a large CPU run when a GPU is expected (the forked-worker regression)."""
+    run = prefer_gpu(fn)
     @wraps(fn)
     def wrapped(M: torch.Tensor):
-        if torch.cuda.is_available():
-            r = fn(M.to(_DEV))
-            return tuple(t.cpu() for t in r) if isinstance(r, tuple) else r.cpu()
-        if _GPU_EXPECTED and M.shape[-1] >= 1024:
+        if _GPU_EXPECTED and not torch.cuda.is_available() and M.shape[-1] >= 1024:
             raise RuntimeError(f"eigendecomp {tuple(M.shape)} on CPU while a GPU is present — refusing")
-        return fn(M)
+        return run(M)
     return wrapped
 
 
 @require_gpu
+@decomp_profiler
 def _eigh(cov: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """One decomposition shared by eigvals + eigvecs; descending, eigvals clamped >= 0."""
     vals, vecs = torch.linalg.eigh(cov)
@@ -55,6 +94,7 @@ def _cov(samples: torch.Tensor) -> torch.Tensor:
     return X.T @ X / X.shape[0]
 
 @require_gpu
+@decomp_profiler
 def _svd(samples: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """One SVD; lvecs comes off it (and eigvecs/eigvals could, secondarily). X = U·diag(S)·Vᵀ."""
     U, S, Vt = torch.linalg.svd(samples.float(), full_matrices=False)
@@ -62,6 +102,11 @@ def _svd(samples: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tenso
 
 def _fp32(t: Component) -> Component:
     return t.float() if isinstance(t, torch.Tensor) else t
+
+
+class _AbortWeights:
+    """A WeightProvider that refuses to load — the `abort_on_model_load` switch."""
+    def __getattr__(self, _): raise RuntimeError("refusing to load model weights (abort_on_model_load)")
 
 
 # component -> [(source components, fn)], tried in priority order. `_eigh` is private
@@ -117,12 +162,13 @@ def _build_tree(acc: "DataAccessor", leaves: list[str]) -> "Node":
 class DataAccessor:
     """Format-agnostic reader for collected data. Read via the tree (`.v` / `acc[path]`)."""
 
-    def __init__(self, data: dict | str, *, weights: WeightProvider | None = None,
-                 config: ModelConfig | None = None, derive: bool = True) -> None:
+    def __init__(self, data: dict | str, *, identity: Identity | None = None,
+                 weights: WeightProvider | None = None, config: ModelConfig | None = None,
+                 abort_on_model_load: bool = False) -> None:
         self.data: dict = torch.load(data, map_location="cpu", weights_only=False) if isinstance(data, str) else data
-        self._weights = weights
+        self.stamp(identity)
+        self._weights = _AbortWeights() if abort_on_model_load else weights
         self._config = config
-        self._derive = derive
         self._cache: dict[tuple[str, str, str], Component | tuple[torch.Tensor, torch.Tensor]] = {}
         self._resolving: set[tuple[str, str, str]] = set()   # cycle guard
         self._present = {k for k in self.data if not k.startswith("__")}
@@ -132,6 +178,13 @@ class DataAccessor:
     @property
     def _identity(self) -> Identity:
         return Identity(self.data.get("__hf_model__"), self.data.get("__revision__"), self.data.get("__run__"))
+
+    def stamp(self, identity: Identity | None = None, **metadata) -> "DataAccessor":
+        """Write metadata — identity + any `__key__` entries — at init or any time after. Chainable."""
+        if identity:
+            self.data["__hf_model__"], self.data["__revision__"], self.data["__run__"] = identity
+        self.data |= {f"__{k}__": v for k, v in metadata.items() if v is not None}
+        return self
 
     # --- read entry: the only public read path ---
     def __getitem__(self, path: str) -> "Node":
@@ -170,7 +223,7 @@ class DataAccessor:
         if stored is not None:
             yield (), lambda: stored
         for src, fn in CONVERSIONS.get(component, ()):
-            yield tuple((leaf, q, s) for s in src), fn
+            yield tuple((leaf, q, s) for s in src), prefer_gpu(fn)
         if (self._config and (d := derivation(self._config, leaf, q)) and self._weights
                 and (ingr := d[2].ingredients(self._weights)) is not None):
             src_leaf, src_q, T = d
@@ -186,6 +239,7 @@ class DataAccessor:
 
     # --- save: a format is just the set of components it writes (FORMATS) ---
     def save(self, path: str, format: str | None = None, overrides: tuple[str, ...] = ()) -> str:
+        assert all(self._identity), f"cannot save {path}: incomplete identity {self._identity} — stamp() it first"
         fmt = format or self.data.get("__format__")
         if fmt is None:
             raise ValueError(f"cannot save {path}: no format given and data has no __format__")
@@ -221,10 +275,14 @@ class DataAccessor:
         return out
 
     def needs_model_weights(self) -> bool:
-        raise NotImplementedError
+        return len(self._leaves) > len(self._present)
 
     def info(self) -> str:
-        raise NotImplementedError
+        def show(v): return f"{tuple(v.shape)} {v.dtype}" if isinstance(v, torch.Tensor) else v
+        meta = [f"{k} = {v}" for k, v in self.data.items() if k.startswith("__")]
+        body = [f"{leaf}\n" + "\n".join(f"  {k}: {show(v)}" for k, v in sorted(e.items()))
+                for leaf, e in sorted(self.data.items()) if not leaf.startswith("__")]
+        return "\n".join(meta + body)
 
 
 class Node:
