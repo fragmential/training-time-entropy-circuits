@@ -1,8 +1,8 @@
-"""DataAccessor rebuild (WIP) — read/resolve core + skeleton. See docs/accessor_interface.md.
+"""DataAccessor rebuild (WIP) — read/resolve/save core. See docs/accessor_interface.md.
 
-Axis: leaf (dotted hook path) . quantity (acts|grads) . component (cov/eigvals/eigvecs/...).
-`_resolve(leaf, q, component)` produces any component: stored -> convert -> derive (cross-leaf).
-Implemented: resolve core, derive tier, prewarm, GPU guard. Stubbed: save, projections, info.
+Axis: leaf (dotted hook path) . quantity (acts|grads) . component (cov/eigvals/eigvecs/...),
+optionally in a reference's basis (a projection). `_resolve(leaf, q, component, reference)`
+produces any component: stored -> convert -> derive; projection: store -> rotate -> convert.
 """
 
 import os
@@ -17,8 +17,25 @@ from typing import Callable
 from utils.hook_names import canonical
 from utils.model_registry import ModelConfig, WeightProvider, derivation, derived_leaves, MLP_OUT, HEAD_CONTRIB
 
-Component = torch.Tensor | int | float
-Identity = namedtuple("Identity", "model revision run")
+AtomicComponent = torch.Tensor | int | float
+Component = AtomicComponent | tuple[AtomicComponent, ...]
+
+Leaf = str
+"""Dot-delimited path to a Leaf"""
+Quantity = str
+"""One of ("acts","grads") (essentially enum of QUANTITIES)"""
+CompName = str
+"""String name of a Component"""
+Format = str
+"""String name of a format (set of components to save)"""
+
+SourceIdentity = namedtuple("SourceIdentity", "model revision run")
+
+ViewId = tuple[SourceIdentity, Leaf, Quantity]            # a View's identity
+Address = tuple[Leaf, Quantity, CompName, "View | None"]  # producer input / resolve call (+ reference)
+Key = tuple[Leaf, Quantity, CompName, ViewId | None]      # resolve cache key: Address, reference reduced to its id
+Conversion = tuple[tuple[CompName, ...], Callable[..., Component]]   # (source components, build fn)
+Producer = tuple[tuple[Address, ...], Callable[..., Component]]  # (input addresses, build fn)
 
 COMPONENTS = (
     "gram", "n", "mask", "samples", "mean", "lvecs",
@@ -59,7 +76,7 @@ class _DecompProfiler:
 decomp_profiler = _DecompProfiler()
 
 
-def _to_cpu(r):
+def _to_cpu(r: Component) -> Component:
     return r.cpu() if isinstance(r, torch.Tensor) else tuple(t.cpu() for t in r) if isinstance(r, tuple) else r
 
 
@@ -100,7 +117,7 @@ def _svd(samples: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tenso
     U, S, Vt = torch.linalg.svd(samples.float(), full_matrices=False)
     return U, S, Vt.T
 
-def _fp32(t: Component) -> Component:
+def _fp32(t: AtomicComponent) -> AtomicComponent:
     return t.float() if isinstance(t, torch.Tensor) else t
 
 
@@ -111,7 +128,7 @@ class _AbortWeights:
 
 # component -> [(source components, fn)], tried in priority order. `_eigh` is private
 # (View blocks `_`), kept so eigvals + eigvecs share one decomposition.
-CONVERSIONS: dict[str, list[tuple[tuple[str, ...], Callable]]] = {
+CONVERSIONS: dict[CompName, list[Conversion]] = {
     "cov":              [(("gram", "n"),          lambda g, n: g.float() / n),
                          (("samples", "mask"),    lambda X, m: _cov(X[m.bool()])),
                          (("samples",),           _cov),
@@ -135,8 +152,7 @@ CONVERSIONS: dict[str, list[tuple[tuple[str, ...], Callable]]] = {
                           lambda U, l, V, n: (U * (l * n).sqrt()) @ V.T)],
 }
 
-
-FORMATS: dict[str, tuple[str, ...]] = {
+FORMATS: dict[Format, tuple[CompName, ...]] = {
     "acts":        ("samples", "mask", "mean", "n"),
     "acts_svd":    ("lvecs", "eigvals", "eigvecs", "mask", "mean", "n"),
     "cov":         ("gram", "mean", "n"),
@@ -145,8 +161,14 @@ FORMATS: dict[str, tuple[str, ...]] = {
 }
 MATERIALIZE_PRESETS = {"b": MLP_OUT, "o": HEAD_CONTRIB}   # derived-leaf families for save(materialize=…)
 
+# Projection of a quantity into a reference basis: only `cov` (the rotation, basis injected) is
+# special; eigvals/eigvecs/... derive from it through CONVERSIONS, threaded with the reference.
+PROJECTIONS: dict[CompName, list[Conversion]] = {
+    "cov": [(("cov",), lambda basis, cov: basis.T @ cov.to(basis.dtype) @ basis)],
+}
 
-def _build_tree(acc: "DataAccessor", leaves: list[str]) -> "Node":
+
+def _build_tree(acc: "DataAccessor", leaves: list[Leaf]) -> "Node":
     """The leaf tree as actual Nodes (structure only, no data); root has path ''."""
     root = Node(acc, "", {})
     for leaf in leaves:
@@ -162,24 +184,24 @@ def _build_tree(acc: "DataAccessor", leaves: list[str]) -> "Node":
 class DataAccessor:
     """Format-agnostic reader for collected data. Read via the tree (`.v` / `acc[path]`)."""
 
-    def __init__(self, data: dict | str, *, identity: Identity | None = None,
+    def __init__(self, data: dict | str, *, identity: SourceIdentity | None = None,
                  weights: WeightProvider | None = None, config: ModelConfig | None = None,
                  abort_on_model_load: bool = False) -> None:
         self.data: dict = torch.load(data, map_location="cpu", weights_only=False) if isinstance(data, str) else data
         self.stamp(identity)
         self._weights = _AbortWeights() if abort_on_model_load else weights
         self._config = config
-        self._cache: dict[tuple[str, str, str], Component | tuple[torch.Tensor, torch.Tensor]] = {}
-        self._resolving: set[tuple[str, str, str]] = set()   # cycle guard
+        self._cache: dict[Key, Component] = {}
+        self._resolving: set[Key] = set()                     # cycle guard
         self._present = {k for k in self.data if not k.startswith("__")}
         self._leaves = sorted(self._present | derived_leaves(self._present))   # present + derivable
         self.v = _build_tree(self, self._leaves)
 
     @property
-    def _identity(self) -> Identity:
-        return Identity(self.data.get("__hf_model__"), self.data.get("__revision__"), self.data.get("__run__"))
+    def _identity(self) -> SourceIdentity:
+        return SourceIdentity(self.data.get("__hf_model__"), self.data.get("__revision__"), self.data.get("__run__"))
 
-    def stamp(self, identity: Identity | None = None, **metadata) -> "DataAccessor":
+    def stamp(self, identity: SourceIdentity | None = None, **metadata) -> "DataAccessor":
         """Write metadata — identity + any `__key__` entries — at init or any time after. Chainable."""
         if identity:
             self.data["__hf_model__"], self.data["__revision__"], self.data["__run__"] = identity
@@ -187,48 +209,64 @@ class DataAccessor:
         return self
 
     # --- read entry: the only public read path ---
-    def __getitem__(self, path: str) -> "Node":
+    def __getitem__(self, path: Leaf) -> "Node":
         node = self.v
         for seg in filter(None, path.split(".")):
             node = node[seg]
         return node
 
-    # --- resolver: _resolve memoizes + guards cycles; _produce runs the chain ---
-    def _resolve(self, leaf: str, q: str, component: str) -> Component | tuple[torch.Tensor, torch.Tensor] | None:
-        key = (leaf, q, component)
+    # --- resolver: memoizes, guards cycles, runs the producer chain ---
+    def _resolve(self, leaf: Leaf, q: Quantity, component: CompName,
+                 reference: "View | None" = None) -> Component | None:
+        key: Key = (leaf, q, component, reference.identity if reference is not None else None)
         if key in self._cache:
             return self._cache[key]
         if key in self._resolving:
             return None                                   # cycle cutoff (transient — never cached)
         self._resolving.add(key)
+        result = None
         try:
-            result = self._produce(leaf, q, component)
+            for inputs, fn in self._producers(leaf, q, component, reference):
+                args = [self._resolve(*i) for i in inputs]
+                if all(a is not None for a in args) and (out := fn(*args)) is not None:
+                    result = out
+                    break
         finally:
             self._resolving.discard(key)
         if result is not None:                            # cache positives only
             self._cache[key] = result
         return result
 
-    def _produce(self, leaf: str, q: str, component: str) -> Component | tuple[torch.Tensor, torch.Tensor] | None:
-        for inputs, fn in self._producers(leaf, q, component):
-            args = [self._resolve(*i) for i in inputs]
-            if all(a is not None for a in args) and (out := fn(*args)) is not None:
-                return out
-        return None
-
-    def _producers(self, leaf: str, q: str, component: str) -> Iterator[tuple[tuple[tuple[str, str, str], ...], Callable]]:
-        """(inputs, fn) in priority: stored, then convert, then derive (cross-leaf)."""
+    def _producers(self, leaf: Leaf, q: Quantity, component: CompName,
+                   reference: "View | None") -> Iterator[Producer]:
+        """(inputs, fn) by priority. reference=None: stored → convert → derive (cross-leaf).
+        reference set: persisted store → rotation (PROJECTIONS) → convert, threaded."""
         leaf = canonical(leaf, self.data)                 # alias -> stored name (the one place)
+        if reference is not None:
+            yield from self._projection_producers(leaf, q, component, reference)
+            return
         stored = self.data.get(leaf, {}).get(f"{q}_{component}")
         if stored is not None:
             yield (), lambda: stored
         for src, fn in CONVERSIONS.get(component, ()):
-            yield tuple((leaf, q, s) for s in src), prefer_gpu(fn)
+            yield tuple((leaf, q, s, None) for s in src), prefer_gpu(fn)
         if (self._config and (d := derivation(self._config, leaf, q)) and self._weights
                 and (ingr := d[2].ingredients(self._weights)) is not None):
             src_leaf, src_q, T = d
             for sources, fn in T.recipes().get(component, []):
-                yield tuple((src_leaf, src_q, s) for s in sources), partial(fn, *ingr)
+                yield tuple((src_leaf, src_q, s, None) for s in sources), partial(fn, *ingr)
+
+    def _projection_producers(self, leaf: Leaf, q: Quantity, component: CompName,
+                              reference: View) -> Iterator[Producer]:
+        """Projection of `leaf.q` into `reference`'s basis: persisted store → rotation → convert."""
+        persisted = self.data.get(leaf, {}).get(f"__{q}_projections__", {}).get(reference.identity, {})
+        if component in persisted:
+            yield (), lambda: persisted[component]
+        if (basis := reference.eigvecs) is not None:
+            for src, fn in PROJECTIONS.get(component, ()):
+                yield tuple((leaf, q, s, None) for s in src), partial(prefer_gpu(fn), basis)
+        for src, fn in CONVERSIONS.get(component, ()):
+            yield tuple((leaf, q, s, reference) for s in src), prefer_gpu(fn)
 
     # --- prewarm: fill the cache (notably the eigendecompositions) before metric compute ---
     def prewarm(self, components: list[str] | None = None) -> None:
@@ -238,7 +276,7 @@ class DataAccessor:
                     self._resolve(leaf, q, c)
 
     # --- save: a format is just the set of components it writes (FORMATS) ---
-    def save(self, path: str, format: str | None = None, overrides: tuple[str, ...] = ()) -> str:
+    def save(self, path: str, format: Format | None = None, overrides: tuple[str, ...] = ()) -> str:
         assert all(self._identity), f"cannot save {path}: incomplete identity {self._identity} — stamp() it first"
         fmt = format or self.data.get("__format__")
         if fmt is None:
@@ -250,27 +288,29 @@ class DataAccessor:
         torch.save(out, path)
         return path
 
-    def _materialize_keys(self, leaf: str, format: str, exclude: "DataAccessor | None" = None) -> dict:
-        """The `{q}_{component}` keys for `leaf` (fp32) that resolve here but NOT in `exclude`."""
-        return {f"{q}_{c}": _fp32(v)
+    def _materialize_keys(self, leaf: Leaf, format: Format, exclude: "DataAccessor | None" = None) -> dict:
+        """`{q}_{component}` keys for `leaf` (fp32) that resolve here but NOT in `exclude`,
+        plus the leaf's `__…__` keys (projection stores) carried verbatim."""
+        keys = {f"{q}_{c}": _fp32(v)
                 for q in QUANTITIES for c in FORMATS[format]
                 if (exclude is None or exclude._resolve(leaf, q, c) is None)
                 and (v := self._resolve(leaf, q, c)) is not None}
+        return keys | {k: v for k, v in self.data.get(leaf, {}).items() if k.startswith("__")}
 
-    def _materialize(self, format: str, overrides: tuple[str, ...] = ()) -> dict:
+    def _materialize(self, format: Format, overrides: tuple[str, ...] = ()) -> dict:
         """Present leaves, plus any derived leaf a reload couldn't reproduce (a lossy
         format's orphans), then `±<regex|preset>` overrides add/remove leaves."""
-        out = {L: e for L in self._present if (e := self._materialize_keys(L, format))}
+        out = {leaf: e for leaf in self._present if (e := self._materialize_keys(leaf, format))}
         reload = DataAccessor(out, weights=self._weights, config=self._config)
-        out |= {L: e for L in self._leaves if L not in self._present
-                if (e := self._materialize_keys(L, format, reload))}
+        out |= {leaf: e for leaf in self._leaves if leaf not in self._present
+                if (e := self._materialize_keys(leaf, format, reload))}
 
         for sign, *rest in overrides:
             name = "".join(rest)
             rx = MATERIALIZE_PRESETS.get(name) or re.compile(name)
-            hits = {L for L in self._leaves if rx.search(L)}
-            out = out | {L: self._materialize_keys(L, format) for L in hits} if sign == "+" \
-                  else {L: e for L, e in out.items() if L not in hits}
+            hits = {leaf for leaf in self._leaves if rx.search(leaf)}
+            out = out | {leaf: self._materialize_keys(leaf, format) for leaf in hits} if sign == "+" \
+                  else {leaf: e for leaf, e in out.items() if leaf not in hits}
 
         return out
 
@@ -280,7 +320,7 @@ class DataAccessor:
     def info(self) -> str:
         def show(v): return f"{tuple(v.shape)} {v.dtype}" if isinstance(v, torch.Tensor) else v
         meta = [f"{k} = {v}" for k, v in self.data.items() if k.startswith("__")]
-        body = [f"{leaf}\n" + "\n".join(f"  {k}: {show(v)}" for k, v in sorted(e.items()))
+        body = [f"{leaf}\n" + "\n".join(f"  {k}: {show(v)}" for k, v in sorted(e.items()) if not k.startswith("__"))
                 for leaf, e in sorted(self.data.items()) if not leaf.startswith("__")]
         return "\n".join(meta + body)
 
@@ -315,25 +355,42 @@ class Node:
 
 
 class View:
-    """One (leaf, quantity) with a stamped `identity` (so it can be named without an
-    accessor — e.g. a cached projection reference). `view.<component>` -> tensor/tuple/None."""
+    """One (leaf, quantity). `identity` = (source_identity, leaf, q) names it without the
+    accessor (e.g. a cached projection reference). `view.<component>` -> tensor/tuple/None.
+    `reference` set => this quantity projected into that reference's basis."""
 
-    def __init__(self, acc: "DataAccessor | None", identity: Identity, leaf: str, q: str) -> None:
+    def __init__(self, acc: "DataAccessor | None", source: SourceIdentity, leaf: Leaf, q: Quantity,
+                 reference: "View | None" = None) -> None:
         self._acc = acc
-        self.identity = identity
+        self._source = source
         self._leaf = leaf
         self._q = q
+        self.reference = reference                          # set => a projection
 
-    def __getattr__(self, component: str) -> Component | None:
+    @property
+    def identity(self) -> ViewId:
+        return (self._source, self._leaf, self._q)
+
+    def __getattr__(self, component: CompName) -> AtomicComponent | None:
         if component.startswith("_"):
             raise AttributeError(component)
-        return self._acc._resolve(self._leaf, self._q, component) if self._acc is not None else None
+        return self._acc._resolve(self._leaf, self._q, component, self.reference) if self._acc is not None else None
 
     def in_basis(self, reference: "View") -> "View":
-        raise NotImplementedError                         # projections: deferred
+        return View(self._acc, self._source, self._leaf, self._q, reference)
+
+    def persist(self, *components: CompName) -> "View":
+        """Write the listed (computed) components of this projection into its on-disk store."""
+        store = self._acc.data.setdefault(self._leaf, {}).setdefault(
+            f"__{self._q}_projections__", {}).setdefault(self.reference.identity, {})
+        store |= {c: v for c in components if (v := getattr(self, c)) is not None}
+        return self
 
     def projections(self) -> list["View"]:
-        raise NotImplementedError
+        """This quantity's persisted projections, each a readable projected View."""
+        store = self._acc.data.get(self._leaf, {}).get(f"__{self._q}_projections__", {}) if self._acc else {}
+        return [self.in_basis(View(None, *ref_id)) for ref_id in store]
 
     def __repr__(self) -> str:
-        return f"View({self._leaf!r}, {self._q!r})"
+        onto = f" onto {self.reference._leaf}@{self.reference._source.run}" if self.reference else ""
+        return f"View({self._leaf!r}, {self._q!r}{onto})"
