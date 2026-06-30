@@ -8,6 +8,7 @@ decides which hooks register; everything lands under the single `leaf` name.
 
 import torch
 import torch.nn as nn
+from abc import ABC, abstractmethod
 from typing import Optional
 
 _DTYPE_MAP = {
@@ -31,7 +32,19 @@ def _hook_input(args, kwargs):
     return next(iter(kwargs.values()))
 
 
-class HookCollector:
+class Capturer(ABC):
+    """A collection endpoint collect.py drives uniformly: set its token mask, read what it
+    captured ({leaf: {...}}), then close it. HookCollector covers one leaf; MultiHeadOVDispatcher
+    fans a block's OV heads out to per-head HookCollectors."""
+    @abstractmethod
+    def set_token_mask(self, mask) -> None: ...
+    @abstractmethod
+    def captured(self) -> dict: ...
+    @abstractmethod
+    def close(self) -> None: ...
+
+
+class HookCollector(Capturer):
     """Collect acts and/or grads at a single leaf capture-point.
 
     Modes (for acts only — grads are always accumulated as covariance):
@@ -51,7 +64,7 @@ class HookCollector:
 
     def __init__(
         self,
-        module: nn.Module = None,
+        module: Optional[nn.Module] = None,
         capture: str = "input",
         quantities=("acts",),
         mode: str = "cov",
@@ -289,7 +302,7 @@ def restore_head(model, original, attr_name):
 # Per-OV-head dispatcher
 # ---------------------------------------------------------------------------
 
-class MultiHeadOVDispatcher:
+class MultiHeadOVDispatcher(Capturer):
     """Collect per-OV-head pre-W_o slices at one block's o_proj.
 
     o_proj is always called on (B, T, num_heads*head_dim), so head h's pre-W_o

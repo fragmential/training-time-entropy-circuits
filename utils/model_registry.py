@@ -2,6 +2,7 @@
 from __future__ import annotations
 import os
 import re
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Callable, Protocol
@@ -336,7 +337,19 @@ def _cov_proj_bias(W: torch.Tensor, b: torch.Tensor, C: torch.Tensor, mu: torch.
     return W @ C @ W.T + Wm[:, None] * b[None, :] + b[:, None] * Wm[None, :] + b[:, None] * b[None, :]
 
 
-class Linear:
+class Transform(ABC):
+    """One derivation step. `ingredients(weights)` binds the weight values it needs (None if
+    unavailable); `recipes()` gives, per output component, its source components + build fn."""
+    kind: str
+
+    @abstractmethod
+    def ingredients(self, wp: WeightProvider) -> tuple | None: ...
+
+    @abstractmethod
+    def recipes(self) -> Recipes: ...
+
+
+class Linear(Transform):
     """Weight matrix (optionally a head column-slice, optionally +bias). `recipes()` gives,
     per output component, its source components + the function that builds it."""
     kind = "linear"
@@ -365,7 +378,7 @@ class Linear:
         }
 
 
-class Norm:
+class Norm(Transform):
     """Nonlinear norm module: produces only `samples` (cov/eigvals reached via conversion)."""
     kind = "norm"
 
@@ -379,9 +392,6 @@ class Norm:
     def recipes(self) -> Recipes:
         return {"samples": [(("samples",), lambda f, X: f(X.float()))],
                 "n":       [(("n",),       lambda f, n: n)]}
-
-
-Transform = Linear | Norm
 
 
 # Each rule: (leaf_regex, build_source_leaf(match)->str, src_quantity, build_Transform(config,match))
