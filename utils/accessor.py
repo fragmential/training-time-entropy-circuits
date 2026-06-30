@@ -5,6 +5,7 @@ optionally in a reference's basis (a projection). `_resolve(leaf, q, component, 
 produces any component: stored -> convert -> derive; projection: store -> rotate -> convert.
 """
 
+import argparse
 import os
 import re
 import torch
@@ -15,7 +16,8 @@ from typing import Callable
 
 from utils.gpu import prefer_gpu, require_gpu, decomp_profiler, run_pipeline
 from utils.hook_names import canonical
-from utils.model_registry import ModelConfig, WeightProvider, derivation, derivable_slots, is_derivable, MLP_OUT, HEAD_CONTRIB
+from utils.model_registry import (ModelConfig, WeightProvider, derivation, derivable_slots,
+                                  is_derivable, load_inference, MLP_OUT, HEAD_CONTRIB)
 
 AtomicComponent = torch.Tensor | int | float
 Component = AtomicComponent | tuple[AtomicComponent, ...]
@@ -385,30 +387,28 @@ class View:
 def _pt_files(path: str) -> list[str]:
     return [path] if path.endswith(".pt") else sorted(glob(os.path.join(path, "**", "*.pt"), recursive=True))
 
-def _out_path(a: dict, f: str) -> str:
+def _out_path(f: str, input: str, output_dir: str | None, output: str | None) -> str:
     """Destination for input `f`: mirror under --output-dir, else --output, else in-place."""
-    root = a["input"] if os.path.isdir(a["input"]) else os.path.dirname(a["input"])
-    return os.path.join(a["output_dir"], os.path.relpath(f, root)) if a.get("output_dir") else (a.get("output") or f)
+    root = input if os.path.isdir(input) else os.path.dirname(input)
+    return os.path.join(output_dir, os.path.relpath(f, root)) if output_dir else (output or f)
 
 def _open(path: str, derive: bool = True, abort: bool = False) -> "DataAccessor":
     """Accessor for a stored file; derive=False -> no weights (skip derivable slots), abort=True -> raise on a weight load."""
     if abort:
         return DataAccessor(path, abort_on_model_load=True)
-    from utils.model_registry import load_inference
     data, config, weights = load_inference(path, derive)
     return DataAccessor(data, config=config, weights=weights)
 
+def _run_pool(worker: Callable[[str], str], files: list[str], workers: int) -> None:
+    run_pipeline(files, lambda f: print(f"  -> {worker(f)}", flush=True), workers=workers)
 
-def _run_pool(worker, tasks: list, workers: int) -> None:
-    run_pipeline(tasks, lambda t: print(f"  -> {worker(t)}", flush=True), workers=workers)
 
-
-# --- CLI: each subcommand owns its parser args; __call__ runs run() with them ---
+# --- CLI: each subcommand owns its parser args + a run() taking those args by name ---
 class AccessorCLIProgram:
     """One CLI subcommand: set `name`, extend args() (super() = the defaults), define run()."""
     name = ""
 
-    def args(self, p) -> None:
+    def args(self, p: argparse.ArgumentParser) -> None:
         p.add_argument("--input", required=True, help=".pt file or directory (recursed)")
         p.add_argument("--output", help="output .pt (single-file input only)")
         p.add_argument("--output-dir", dest="output_dir", help="mirror the input tree here; default in-place")
@@ -417,60 +417,52 @@ class AccessorCLIProgram:
         p.add_argument("--abort-on-model-load", dest="abort", action="store_true",
                        help="raise if a derivation would load weights (guard: this shouldn't need a model)")
 
-    def __call__(self, a) -> None:
-        self.run(**vars(a))
+    def __call__(self, a: argparse.Namespace) -> None:
+        self.run(**{k: v for k, v in vars(a).items() if k != "cmd"})
 
-    def run(self, **a) -> None:
+    def run(self, **_) -> None:
         raise NotImplementedError
 
 
 class Info(AccessorCLIProgram):
     name = "info"
 
-    def args(self, p) -> None:        # read-only: only --input
+    def args(self, p: argparse.ArgumentParser) -> None:   # read-only: only --input
         p.add_argument("--input", required=True, help=".pt file or directory (recursed)")
 
-    def run(self, **a) -> None:
-        for f in _pt_files(a["input"]):
+    def run(self, *, input: str) -> None:
+        for f in _pt_files(input):
             print(f"=== {f} ===\n{DataAccessor(f).info()}\n")
-
-
-def _convert_worker(task: tuple) -> str:
-    path, dst, fmt, overrides, derive, abort = task
-    _open(path, derive, abort).save(dst, format=fmt, overrides=overrides)
-    return path
 
 
 class Convert(AccessorCLIProgram):
     name = "convert"
 
-    def args(self, p) -> None:
+    def args(self, p: argparse.ArgumentParser) -> None:
         super().args(p)
         p.add_argument("--to", required=True, help=f"target format, one of {sorted(FORMATS)}")
         p.add_argument("--materialize", default="", metavar='"+b -o"',
                        help="space-separated ±preset/regex overrides for derived families")
         p.add_argument("--workers", type=int, default=1, help="process this many files in parallel")
 
-    def run(self, **a) -> None:
-        if a["to"] not in FORMATS:
-            raise SystemExit(f"unknown format {a['to']!r}; choose from {sorted(FORMATS)}")
-        _run_pool(_convert_worker, [(f, _out_path(a, f), a["to"], tuple(a["materialize"].split()), not a["no_derive"], a["abort"])
-                                    for f in _pt_files(a["input"])], a["workers"])
+    def run(self, *, input: str, output: str | None, output_dir: str | None, no_derive: bool,
+            abort: bool, to: str, materialize: str, workers: int) -> None:
+        if to not in FORMATS:
+            raise SystemExit(f"unknown format {to!r}; choose from {sorted(FORMATS)}")
+        overrides = tuple(materialize.split())
 
+        def convert(f: str) -> str:
+            _open(f, not no_derive, abort).save(_out_path(f, input, output_dir, output), format=to, overrides=overrides)
+            return f
 
-def _project_worker(task: tuple) -> str:
-    path, dst, ref_path, derive, abort, ref_derive = task
-    ref = _open(ref_path, ref_derive)
-    acc = _open(path, derive, abort)
-    acc.map(lambda v: (r := ref.v.get(f"{v.leaf}.{v.q}")) and v.in_basis(r).persist("eigvals"))
-    acc.save(dst)
-    return path
+        files = _pt_files(input)
+        _run_pool(convert, files, workers)
 
 
 class Project(AccessorCLIProgram):
     name = "project"
 
-    def args(self, p) -> None:
+    def args(self, p: argparse.ArgumentParser) -> None:
         super().args(p)
         p.add_argument("--onto-file", dest="onto_file", required=True,
                        help="reference checkpoint .pt; persists each view's eigvals in its basis")
@@ -478,15 +470,22 @@ class Project(AccessorCLIProgram):
                        help="don't load the reference's weights; project only onto its stored slots")
         p.add_argument("--workers", type=int, default=1, help="process this many files in parallel")
 
-    def run(self, **a) -> None:
-        _run_pool(_project_worker, [(f, _out_path(a, f), a["onto_file"], not a["no_derive"], a["abort"], not a["no_ref_derive"])
-                                   for f in _pt_files(a["input"])], a["workers"])
+    def run(self, *, input: str, output: str | None, output_dir: str | None, no_derive: bool,
+            abort: bool, onto_file: str, no_ref_derive: bool, workers: int) -> None:
+        def project(f: str) -> str:
+            ref = _open(onto_file, not no_ref_derive)
+            acc = _open(f, not no_derive, abort)
+            acc.map(lambda v: (r := ref.v.get(f"{v.leaf}.{v.q}")) and v.in_basis(r).persist("eigvals"))
+            acc.save(_out_path(f, input, output_dir, output))
+            return f
+
+        files = _pt_files(input)
+        _run_pool(project, files, workers)
 
 
 PROGRAMS = [Info(), Convert(), Project()]
 
 if __name__ == "__main__":
-    import argparse
     ap = argparse.ArgumentParser(prog="python -m utils.accessor", description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
     for p in PROGRAMS:
