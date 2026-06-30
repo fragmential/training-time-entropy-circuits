@@ -205,12 +205,13 @@ class HookCollector:
 
     def captured(self) -> dict:
         """Collected data as {leaf: {q-keyed tensors}} under this collector's single
-        leaf. Keys are uniform `{q}_{fmt}` — `acts_cov` (Σxxᵀ) or `acts_samples` (N,d),
-        `acts_n`, `acts_mean`; same for grads. Emits whatever was accumulated."""
+        leaf. Keys are uniform `{q}_{component}` — `acts_gram` (raw Σxxᵀ) or
+        `acts_samples` (N,d), `acts_n`, `acts_mean`; same for grads. Emits whatever
+        was accumulated."""
         e: dict = {}
         if self.mode == "cov":
             if self._acts_cov is not None:
-                e["acts_cov"] = self._acts_cov.cpu()
+                e["acts_gram"] = self._acts_cov.cpu()
                 e["acts_n"] = self._n_acts
                 if self.collect_means and self._acts_sum is not None:
                     e["acts_mean"] = (self._acts_sum / self._n_acts).cpu()
@@ -219,7 +220,7 @@ class HookCollector:
             e["acts_n"] = self._n_acts
 
         if self._grads_cov is not None:
-            e["grads_cov"] = self._grads_cov.cpu()
+            e["grads_gram"] = self._grads_cov.cpu()
             e["grads_n"] = self._n_grads
             if self.collect_means and self._grads_sum is not None:
                 e["grads_mean"] = (self._grads_sum / self._n_grads).cpu()

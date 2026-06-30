@@ -50,16 +50,16 @@ GRADS = "grads"
 
 @pytest.fixture
 def make_factors_dict():
-    """Factors dict as HookCollector.captured() would produce (uniform {q}_{fmt} keys,
-    unnormalized Σxxᵀ at {q}_cov)."""
+    """Factors dict as HookCollector.captured() would produce (uniform {q}_{component}
+    keys; raw unnormalized Σxxᵀ stored at {q}_gram)."""
     def _make(d=64, N=200, with_means=True, with_grad=True):
         acts = torch.randn(N, d, dtype=torch.float64)
-        entry = {f"{ACTS}_cov": acts.T @ acts, f"{ACTS}_n": N}  # unnormalized Σ
+        entry = {f"{ACTS}_gram": acts.T @ acts, f"{ACTS}_n": N}  # unnormalized Σ
         if with_means:
             entry[f"{ACTS}_mean"] = acts.float().mean(0)
         if with_grad:
             grads = torch.randn(N, d, dtype=torch.float64)
-            entry[f"{GRADS}_cov"] = grads.T @ grads
+            entry[f"{GRADS}_gram"] = grads.T @ grads
             entry[f"{GRADS}_n"] = N
             if with_means:
                 entry[f"{GRADS}_mean"] = grads.float().mean(0)

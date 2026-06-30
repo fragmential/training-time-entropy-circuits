@@ -1,47 +1,20 @@
 import numpy as np
 import torch
-from utils.accessor import _eigh, eigh_descending, get_eigenspectrum
+from utils.accessor import _eigh
 from scripts.compute_metrics import fit_powerlaw, stringer_get_powerlaw, rankme_metrics
 
 
 def test_eigh_descending_nonneg(make_cov):
-    C = make_cov(d=32)
-    vals = _eigh(C, None)
+    vals, _ = _eigh(make_cov(d=32))
     assert (vals >= 0).all()
     assert (vals[:-1] >= vals[1:]).all(), "eigenvalues not descending"
 
 
-def test_eigh_k_truncation(make_cov):
-    C = make_cov(d=32)
-    vals = _eigh(C, 10)
-    assert len(vals) == 10
-
-
 def test_eigh_full_reconstruction(make_cov):
     C = make_cov(d=32)
-    vals, vecs = eigh_descending(C)
+    vals, vecs = _eigh(C)
     reconstructed = vecs @ torch.diag(vals.to(vecs.dtype)) @ vecs.T
     assert torch.allclose(reconstructed, C.to(vecs.dtype), atol=1e-4)
-
-
-def test_eigenspectrum_acts_vs_cov_match(make_acts):
-    X = make_acts(N=200, d=32)
-    n = X.shape[0]
-    cov = X.T @ X / n
-    mu = X.mean(0)
-
-    centered_acts, uncentered_acts = get_eigenspectrum(acts=X)
-    centered_cov, uncentered_cov = get_eigenspectrum(cov=cov, mu=mu)
-
-    assert torch.allclose(uncentered_acts, uncentered_cov, atol=1e-4)
-    assert torch.allclose(centered_acts, centered_cov, atol=1e-4)
-
-
-def test_eigenspectrum_centered_vs_uncentered(make_acts):
-    X = make_acts(N=200, d=32) + 5.0  # nonzero mean
-    centered, uncentered = get_eigenspectrum(acts=X)
-    # centered should generally have smaller top eigenvalue (mean removed)
-    assert centered[0] < uncentered[0]
 
 
 def test_fit_powerlaw_recovery(make_powerlaw_eigvals):

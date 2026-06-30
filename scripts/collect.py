@@ -40,6 +40,7 @@ Usage:
 
 import gc
 import os
+import re
 import sys
 import time
 import torch
@@ -63,10 +64,11 @@ from utils.model_registry import (
     get_num_layers,
     prefetch_checkpoint,
     delete_cached_revision,
+    ModelWeights,
 )
 from utils.hooks import HookCollector, MultiHeadOVDispatcher, setup_identity_head, restore_head
 from utils.hook_specs import resolve as resolve_hook_specs
-from utils.accessor import DataAccessor, parse_format_spec
+from utils.accessor import DataAccessor
 from utils.data_utils import (
     get_loader,
     load_and_cache_texts,
@@ -323,6 +325,19 @@ def _prepare_model_for_grad(model):
             m.p = 0.0
 
 
+def _parse_storage_format(spec: str) -> tuple[str, tuple[str, ...]]:
+    """Split a storage-format spec into (base, overrides). +b/+o add the derived-leaf
+    families (MLP_OUT / HEAD_CONTRIB), -b/-o drop them; legacy +m/-m are obsolete
+    (means are in every format)."""
+    m = re.match(r"([^+-]+)((?:[+-][^+-]+)*)$", spec)
+    if not m:
+        raise ValueError(f"Unknown storage format: {spec!r}")
+    base, mods = m.groups()
+    overrides = tuple(f"{sign}{ch}" for sign, chars in re.findall(r"([+-])([^+-]+)", mods)
+                      for ch in chars if ch in ("b", "o"))
+    return base, overrides
+
+
 def _collect_for_checkpoint(
     model, model_config, cfg, texts, tokenizer, packed_ids,
     target_layers, device, boundary_token_ids,
@@ -333,14 +348,9 @@ def _collect_for_checkpoint(
     HookCollectors per block-group pass, runs forward (+ optional backward),
     returns the merged captured dict.
     """
-    storage_base, storage_flags, storage_drop_flags = parse_format_spec(cfg.storage_format)
+    storage_base, _ = _parse_storage_format(cfg.storage_format)
     storage_mode = "acts" if storage_base == "acts" else "cov"
-    if "b" in storage_flags and "m" not in storage_flags and "m" not in storage_drop_flags:
-        print("  NOTE: +b implies +m — storing means for derived .out acts")
-    collect_means = (
-        "m" not in storage_drop_flags
-        and ("m" in storage_flags or "b" in storage_flags or storage_base in ("cov_svd", "eigenvalues"))
-    )
+    collect_means = True   # every storage format includes means
 
     # Resolve patterns once against the model's leaf universe
     single_specs, ov_specs, _candidates = resolve_hook_specs(
@@ -531,7 +541,7 @@ def _entry_quantities(entry: dict):
 def _reconstruct_captured(existing_data: dict) -> dict:
     """Rebuild collector-style raw accumulators ({q}_cov=Σxxᵀ or {q}_samples, {q}_n,
     {q}_mean) from a saved file so a continued run can merge into them."""
-    base_format, _, _ = parse_format_spec(existing_data.get("__format__", "cov"))
+    base_format, _ = _parse_storage_format(existing_data.get("__format__", "cov"))
     raw = {}
     for leaf, entry in existing_data.items():
         if leaf.startswith("__"):
@@ -544,15 +554,15 @@ def _reconstruct_captured(existing_data: dict) -> dict:
                 if f"{q}_samples" in entry:
                     re_entry[f"{q}_samples"] = entry[f"{q}_samples"]
             elif base_format == "cov":
-                if f"{q}_cov" in entry:
-                    re_entry[f"{q}_cov"] = entry[f"{q}_cov"].double()
+                if f"{q}_gram" in entry:
+                    re_entry[f"{q}_gram"] = entry[f"{q}_gram"].double()
             elif base_format in ("cov_svd", "acts_svd"):
                 if f"{q}_eigvals" not in entry:
                     continue
                 if f"{q}_eigvecs" not in entry:
                     raise ValueError(f"Cannot continue {leaf}.{q}: eigvecs missing")
                 V, lam = entry[f"{q}_eigvecs"].double(), entry[f"{q}_eigvals"].double()
-                re_entry[f"{q}_cov"] = (V * lam) @ V.T * n
+                re_entry[f"{q}_gram"] = (V * lam) @ V.T * n
             else:
                 raise ValueError(f"Cannot continue with storage format '{base_format}'")
             if f"{q}_mean" in entry:
@@ -569,9 +579,9 @@ def _merge_with_existing(existing_raw: dict, new_captured: dict) -> dict:
         new = new_captured[leaf]
         for q in _entry_quantities(old):
             old_n, new_n = old[f"{q}_n"], new.get(f"{q}_n", 0)
-            cov_k, samp_k = f"{q}_cov", f"{q}_samples"
-            if cov_k in old:
-                new[cov_k] = old[cov_k].to(new[cov_k].dtype) + new[cov_k] if cov_k in new else old[cov_k]
+            gram_k, samp_k = f"{q}_gram", f"{q}_samples"
+            if gram_k in old:
+                new[gram_k] = old[gram_k].to(new[gram_k].dtype) + new[gram_k] if gram_k in new else old[gram_k]
             elif samp_k in old:
                 new[samp_k] = torch.cat([old[samp_k], new[samp_k]], dim=0) if samp_k in new else old[samp_k]
             mean_k = f"{q}_mean"
@@ -808,12 +818,13 @@ def main(cfg: CollectConfig):
             save_n_chunks = None
             if cfg.packing == "packed" and packed_ids is not None:
                 save_n_chunks = n_chunks_done + len(packed_ids)
-            acc = DataAccessor(captured, model=model, model_config=model_config,
-                               model_name=step_model, revision=revision)
-            acc.save(out_path, format=cfg.storage_format,
-                     cross_basis_refs=cfg.cross_basis_refs,
-                     storage_dtype=cfg.storage_dtype, token_filter=token_filter,
-                     n_chunks=save_n_chunks)
+            run = os.path.basename((cfg.output_dir or "default").rstrip("/"))
+            base_fmt, overrides = _parse_storage_format(cfg.storage_format)
+            acc = DataAccessor(captured, config=model_config,
+                               weights=ModelWeights(model, model_config),
+                               identity=(step_model, revision, run))
+            acc.stamp(token_filter=token_filter, n_chunks=save_n_chunks)
+            acc.save(out_path, format=base_fmt, overrides=overrides)
             t_save += time.time() - _t0
             tqdm.write(f"Step {step_num}: {len(captured)} hook points -> {out_path}")
 

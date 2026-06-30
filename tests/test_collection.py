@@ -1,7 +1,7 @@
 """HookCollector + MultiHeadOVDispatcher + hook-name grammar.
 
 factors() returns {leaf: {q-keyed tensors}} with uniform `{q}_{fmt}` keys:
-`acts_cov` (Σxxᵀ) or `acts_samples`, `acts_n`, `acts_mean`; same for grads."""
+`acts_gram` (Σxxᵀ) or `acts_samples`, `acts_n`, `acts_mean`; same for grads."""
 import torch
 import torch.nn as nn
 
@@ -15,7 +15,7 @@ def test_cov_mode_accumulates_sigma():
     X = torch.randn(50, 16, dtype=torch.float32)
     c = HookCollector(module=None, mode="cov")
     c.accumulate(X)
-    assert torch.allclose(c.captured()["acts"]["acts_cov"], (X.T @ X).double(), atol=1e-4)
+    assert torch.allclose(c.captured()["acts"]["acts_gram"], (X.T @ X).double(), atol=1e-4)
 
 
 def test_acts_mode_stores_samples():
@@ -36,21 +36,21 @@ def test_grad_accumulation():
     G = torch.randn(50, 16, dtype=torch.float32)
     c = HookCollector(module=None, mode="cov", quantities={"grads"}, leaf="grads")
     c.accumulate_grad(G)
-    assert torch.allclose(c.captured()["grads"]["grads_cov"], (G.T @ G).double(), atol=1e-4)
+    assert torch.allclose(c.captured()["grads"]["grads_gram"], (G.T @ G).double(), atol=1e-4)
 
 
 def test_single_leaf():
     c = HookCollector(module=None, mode="cov", leaf="blk0.attn.head0.slice")
     c.accumulate(torch.randn(20, 8))
     entry = c.captured()["blk0.attn.head0.slice"]
-    assert "acts_cov" in entry and "acts_n" in entry
+    assert "acts_gram" in entry and "acts_n" in entry
 
 
 def test_multiple_accumulations_sum():
     X1, X2 = torch.randn(30, 16), torch.randn(20, 16)
     c = HookCollector(module=None, mode="cov")
     c.accumulate(X1); c.accumulate(X2)
-    assert torch.allclose(c.captured()["acts"]["acts_cov"], (X1.T @ X1 + X2.T @ X2).double(), atol=1e-4)
+    assert torch.allclose(c.captured()["acts"]["acts_gram"], (X1.T @ X1 + X2.T @ X2).double(), atol=1e-4)
 
 
 def test_n_count():
@@ -89,7 +89,7 @@ def test_fwd_pre_hook_handles_kwarg_call():
     c.set_token_mask(torch.ones(2, 4, dtype=torch.bool))
     m(torch.randn(2, 4, 8))
     f = c.captured(); c.close()
-    assert f["acts"]["acts_cov"].shape == (8, 8) and f["acts"]["acts_n"] == 8
+    assert f["acts"]["acts_gram"].shape == (8, 8) and f["acts"]["acts_n"] == 8
 
 
 def test_fwd_pre_hook_handles_positional_call():
@@ -115,7 +115,7 @@ def test_fwd_post_unwraps_tuple_output():
     mod(x)
     entry = c.captured()["acts"]; c.close()
     expected = ((2 * x).reshape(-1, 8).T @ (2 * x).reshape(-1, 8)).double()
-    assert torch.allclose(entry["acts_cov"], expected, atol=1e-3) and entry["acts_n"] == 8
+    assert torch.allclose(entry["acts_gram"], expected, atol=1e-3) and entry["acts_n"] == 8
 
 
 # --- MultiHeadOVDispatcher ---
@@ -156,7 +156,7 @@ def test_dispatcher_slice_leaf_keys_and_shape():
     f = disp.captured(); disp.close()
     assert set(f) == {f"blk7.attn.head{h}.slice" for h in range(num_heads)}
     for h in range(num_heads):
-        assert f[f"blk7.attn.head{h}.slice"]["acts_cov"].shape == (head_dim, head_dim)
+        assert f[f"blk7.attn.head{h}.slice"]["acts_gram"].shape == (head_dim, head_dim)
 
 
 def test_dispatcher_cov_matches_manual_outer():
@@ -170,7 +170,7 @@ def test_dispatcher_cov_matches_manual_outer():
     f = disp.captured(); disp.close()
     for h in range(num_heads):
         a = x[..., h * head_dim:(h + 1) * head_dim].reshape(-1, head_dim)
-        assert torch.allclose(f[f"blk0.attn.head{h}.slice"]["acts_cov"], (a.T @ a).double(), atol=1e-3)
+        assert torch.allclose(f[f"blk0.attn.head{h}.slice"]["acts_gram"], (a.T @ a).double(), atol=1e-3)
 
 
 # --- leaf-name grammar ---

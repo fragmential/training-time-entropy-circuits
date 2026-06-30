@@ -119,8 +119,8 @@ def test_covariance_shapes(model_and_config, texts_and_packed):
 
     # One leaf carries both quantities (acts + grads captured at the same input side).
     entry = factors["blk0.mlp.up.in"]
-    assert entry["acts_cov"].shape == (d_in, d_in)
-    assert entry["grads_cov"].shape == (d_in, d_in)  # grads input-side -> also d_in x d_in
+    assert entry["acts_gram"].shape == (d_in, d_in)
+    assert entry["grads_gram"].shape == (d_in, d_in)  # grads input-side -> also d_in x d_in
     assert entry["acts_n"] > 0
 
 
@@ -143,17 +143,17 @@ def test_storage_roundtrip_real_data(model_and_config, texts_and_packed):
     collector.set_token_mask(mask)
     with torch.no_grad():
         model(x)
-    # factors() already keys by leaf -> {quantity dict}; that is the storage dict.
+    # captured() keys by leaf -> {quantity dict}; that is the storage dict.
     factors = collector.captured()
     collector.close()
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Save as cov+m → convert to cov_svd
+        # Save as cov → convert to cov_svd (means are in both component sets)
         cov_path = os.path.join(tmpdir, "cov.pt")
-        DataAccessor(factors).save(cov_path, format="cov+m")
+        DataAccessor(factors, identity=(MODEL, STEP, "test")).save(cov_path, format="cov")
 
         svd_path = os.path.join(tmpdir, "svd.pt")
-        DataAccessor(cov_path).save(svd_path, format="cov_svd+m")
+        DataAccessor(cov_path).save(svd_path, format="cov_svd")
 
         # Read via accessor
         acc = DataAccessor(svd_path)
@@ -227,8 +227,8 @@ def test_B_equals_WAWt(model_and_config, texts_and_packed):
         oc.close()
 
         n = a_factors["acts_n"]
-        in_cov = a_factors["acts_cov"].float() / n
-        out_cov = b_factors["acts_cov"].float() / n  # output collector's captured acts = the MLP output
+        in_cov = a_factors["acts_gram"].float() / n
+        out_cov = b_factors["acts_gram"].float() / n  # output collector's captured acts = the MLP output
         W = layer.weight.detach().float()
         b = layer.bias.detach().float() if layer.bias is not None else None
         mu = a_factors["acts_mean"]

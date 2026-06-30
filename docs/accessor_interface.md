@@ -93,3 +93,21 @@ Consequence: `gram`/`lvecs` rename existing on-disk `{q}_cov`(raw)/`{q}_U,S,V` �
 - `WeightProvider` exact methods; hard-abort-on-load.
 - pyright scope.
 - Read-side section above still uses pre-rebuild names (`fmt`, `_view`/`_leaf_quantities`) — sweep in the broader doc pass.
+
+## Remaining to land the rebuild
+Rebuild is a ~415-line read/resolve/save/derive/projection core; `model_registry` supplies the derivation side (`WeightProvider`, `Transform.recipes()/ingredients()`, `MLP_OUT`/`HEAD_CONTRIB`, `derived_leaves`). **Nothing imports it yet — still parallel.** (Interface-detail decisions are in *Open / TBD* above.)
+
+**Checkpoint 2 — minimal core passes tests**
+- [ ] Wire in: swap `accessor_rebuild.py` → `accessor.py` (or point a test subset at it) so tests exercise it.
+- [ ] Migrate consumer + test call-sites to the new surface: tree-only reads (`_resolve`/`_view` private; `leaves`/`leaf_quantities` gone → `prewarm`); `save(path, format, overrides)` — `storage_dtype`/`token_filter`/`n_chunks`/`cross_basis_refs` gone (token_filter/n_chunks via `stamp(**meta)`; projections via `View.persist`); `compute_metrics` imports (`eigvalsh_descending` gone; `decomp_profiler` is now a decorator) + walk via `.v`/`children()`/`get()`; `activation_ratio` `leaves()`+`view()` → tree.
+- [ ] Migrator: old `{q}_cov`(raw)/`{q}_U,S,V` → `{q}_gram`/`{q}_lvecs` (+ backup; invariant: keep collected `.pt` readable).
+- [ ] Verify: snapshots **unchanged** (numeric parity — watch fp32 eigvals + the gram/lvecs rename), `test_pipeline` value snapshot, GPU e2e via `srun`.
+
+**Land it fully**
+- [ ] CLI (`__main__`): re-add `info`/`convert`/`project`/`set-filter` (convert→`save(format)`, project→`in_basis`+`persist`, set-filter→mutate-`data`+`save`).
+- [ ] `collect.py`: `stamp` identity at save — `__hf_model__`/`__revision__`/`__run__` (run = output-dir; currently unstamped).
+- [ ] GPU context: integrate prewarm-owns-context with `compute_metrics`' `Pool`/gpu-lock (old `_gpu_ctx` monkey-patch is gone).
+
+**Enforcement + docs (deferred)**
+- [ ] pyright `reportPrivateUsage` + import-linter contracts (scope to accessor + consumers first).
+- [ ] Sweep this doc's stale read-side names; retire it once the code is the source of truth.

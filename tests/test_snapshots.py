@@ -25,6 +25,7 @@ import torch
 import numpy as np
 
 SNAPSHOT_DIR = os.path.join(os.path.dirname(__file__), "snapshots")
+_ID = ("EleutherAI/pythia-14m", "step0", "test")   # save asserts a complete identity
 
 
 def _snapshot_path(name):
@@ -77,23 +78,12 @@ def _fixed_seed():
 
 def test_snapshot_eigendecomp(request):
     _fixed_seed()
-    from utils.accessor import _eigh, eigh_descending
+    from utils.accessor import _eigh
     C = torch.randn(32, 10, dtype=torch.float64)
     C = C @ C.T + 0.01 * torch.eye(32, dtype=torch.float64)
-    vals = _eigh(C, None)
-    vals_full, vecs_full = eigh_descending(C)
+    vals, vecs = _eigh(C)            # one decomposition, (eigvals, eigvecs) descending; fp64 in -> fp64 out
     _compare_or_update("eigendecomp", {
-        "eigvals": vals, "eigvals_full": vals_full, "eigvecs": vecs_full,
-    }, request)
-
-
-def test_snapshot_eigenspectrum(request):
-    _fixed_seed()
-    from utils.accessor import get_eigenspectrum
-    X = torch.randn(200, 32, dtype=torch.float64)
-    centered, uncentered = get_eigenspectrum(acts=X)
-    _compare_or_update("eigenspectrum", {
-        "centered": centered, "uncentered": uncentered,
+        "eigvals": vals, "eigvals_full": vals, "eigvecs": vecs,
     }, request)
 
 
@@ -125,10 +115,10 @@ def test_snapshot_storage_cov_svd(request, tmp_path):
     from utils.accessor import DataAccessor
     d, N = 32, 200
     X = torch.randn(N, d, dtype=torch.float64)
-    factors = {"after_final_norm": {"acts_cov": X.T @ X, "acts_n": N,
+    factors = {"after_final_norm": {"acts_gram": X.T @ X, "acts_n": N,
                                     "acts_mean": X.float().mean(0)}}
     path = str(tmp_path / "svd.pt")
-    DataAccessor(factors).save(path, format="cov_svd+m")
+    DataAccessor(factors, identity=_ID).save(path, format="cov_svd")
     data = torch.load(path, map_location="cpu", weights_only=False)
     entry = data["after_final_norm"]
     _compare_or_update("storage_cov_svd", {
@@ -143,10 +133,10 @@ def test_snapshot_storage_convert_chain(request, tmp_path):
     from utils.accessor import DataAccessor
     d, N = 32, 200
     X = torch.randn(N, d, dtype=torch.float64)
-    factors = {"after_final_norm": {"acts_cov": X.T @ X, "acts_n": N}}
+    factors = {"after_final_norm": {"acts_gram": X.T @ X, "acts_n": N}}
 
     cov_path = str(tmp_path / "cov.pt")
-    DataAccessor(factors).save(cov_path, format="cov")
+    DataAccessor(factors, identity=_ID).save(cov_path, format="cov")
     svd_path = str(tmp_path / "svd.pt")
     DataAccessor(cov_path).save(svd_path, format="cov_svd")
     eig_path = str(tmp_path / "eig.pt")
@@ -168,7 +158,7 @@ def test_snapshot_accessor_from_cov(request):
     cov = (X.T @ X / N).float()
     mu = X.float().mean(0)
     data = {
-        "after_final_norm": {"acts_cov": cov * N, "acts_n": N, "acts_mean": mu},
+        "after_final_norm": {"acts_gram": cov * N, "acts_n": N, "acts_mean": mu},
         "__format__": "cov",
     }
     acc = DataAccessor(data)
@@ -261,7 +251,7 @@ def test_snapshot_hook_cov(request):
     c.accumulate(X)
     factors = c.captured()["acts"]
     _compare_or_update("hook_cov", {
-        "acts": factors["acts_cov"], "n": factors["acts_n"], "acts_mean": factors["acts_mean"],
+        "acts": factors["acts_gram"], "n": factors["acts_n"], "acts_mean": factors["acts_mean"],
     }, request)
 
 

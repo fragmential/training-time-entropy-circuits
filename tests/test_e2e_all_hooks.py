@@ -10,7 +10,7 @@ never touches).
 
 `_collect_for_checkpoint` returns {leaf: {quantity-keyed dict}} where leaves are
 full nested paths (e.g. blk0.mlp.up.in, blk0.attn.in, blk0.attn.head0.slice), each
-entry keyed by uniform `{q}_{fmt}` — acts_cov / acts_n / acts_mean / grads_cov / ...
+entry keyed by uniform `{q}_{fmt}` — acts_gram / acts_n / acts_mean / grads_gram / ...
 
 Uses each model's final checkpoint so weights are cached once under $HF_HOME
 and reused. Prefetch with:
@@ -93,7 +93,7 @@ def _n(entry):
 
 
 def _assert_square_cov(leaf, entry, quantity):
-    key = f"{quantity}_cov"
+    key = f"{quantity}_gram"
     assert key in entry, f"{leaf}: missing {key!r}"
     cov = entry[key]
     assert cov.ndim == 2 and cov.shape[0] == cov.shape[1], \
@@ -115,11 +115,11 @@ def test_all_hooks_collect(model_name):
 
         # Whatever quantity this leaf carries must be a finite square cov. MLP
         # K-FAC splits acts (.in) and grads (.out) across sibling leaves.
-        if "acts_cov" in entry:
+        if "acts_gram" in entry:
             _assert_square_cov(leaf, entry, "acts")
-        if "grads_cov" in entry:
+        if "grads_gram" in entry:
             _assert_square_cov(leaf, entry, "grads")
-        assert "acts_cov" in entry or "grads_cov" in entry, f"{leaf}: no quantity stored"
+        assert "acts_gram" in entry or "grads_gram" in entry, f"{leaf}: no quantity stored"
         assert _n(entry) > 0, f"{leaf}: zero tokens accumulated"
 
     # Every kind the family exposes must have been collected.

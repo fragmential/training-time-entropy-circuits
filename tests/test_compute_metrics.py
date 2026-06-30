@@ -145,13 +145,13 @@ def _cov(d, n=200):
 def _walk_data():
     d = 16
     return {
-        "blk0.attn.in":  {"acts_cov": _cov(d), "acts_n": 200, "acts_mean": torch.randn(d).float(),
-                          "grads_cov": _cov(d), "grads_n": 200},
-        "blk0.attn.out": {"acts_cov": _cov(d), "acts_n": 200, "grads_cov": _cov(d), "grads_n": 200},
-        "blk0.mlp.up.in":   {"acts_cov": _cov(d), "acts_n": 200},
-        "blk0.mlp.up.out":  {"grads_cov": _cov(d), "grads_n": 200},
-        "blk0.mlp.down.in": {"acts_cov": _cov(d), "acts_n": 200},
-        "blk0.mlp.down.out": {"grads_cov": _cov(d), "grads_n": 200},
+        "blk0.attn.in":  {"acts_gram": _cov(d), "acts_n": 200, "acts_mean": torch.randn(d).float(),
+                          "grads_gram": _cov(d), "grads_n": 200},
+        "blk0.attn.out": {"acts_gram": _cov(d), "acts_n": 200, "grads_gram": _cov(d), "grads_n": 200},
+        "blk0.mlp.up.in":   {"acts_gram": _cov(d), "acts_n": 200},
+        "blk0.mlp.up.out":  {"grads_gram": _cov(d), "grads_n": 200},
+        "blk0.mlp.down.in": {"acts_gram": _cov(d), "acts_n": 200},
+        "blk0.mlp.down.out": {"grads_gram": _cov(d), "grads_n": 200},
         "__format__": "cov",
     }
 
@@ -228,7 +228,7 @@ def test_merge_step_does_not_mutate_inputs():
 
 def _resbasis_data(d=16):
     torch.manual_seed(0)
-    leaf = lambda: {"acts_cov": _cov(d), "acts_n": 200, "acts_mean": torch.randn(d).float()}
+    leaf = lambda: {"acts_gram": _cov(d), "acts_n": 200, "acts_mean": torch.randn(d).float()}
     return {
         "blk0.attn.out": leaf(),
         "blk0.mlp.out": leaf(),
@@ -245,7 +245,7 @@ def test_quantity_metrics_stores_mean_vec():
 
 
 def _blkres_data(d=16, d2=32):
-    leaf = lambda dim: {"acts_cov": _cov(dim), "acts_n": 200, "acts_mean": torch.randn(dim).float()}
+    leaf = lambda dim: {"acts_gram": _cov(dim), "acts_n": 200, "acts_mean": torch.randn(dim).float()}
     return {
         "blk0.mlp.in":     leaf(d),    # residual into the mlp sub-block
         "blk0.mlp.out":    leaf(d),     # mlp's contribution (same space)
@@ -271,8 +271,41 @@ def test_blk_mean_metrics_matches_direct():
     data = _blkres_data()
     res = compute_metrics_for_checkpoint(DataAccessor(data))
     acc = DataAccessor(data)
-    evals, evecs = acc.view("blk0.mlp.in", "acts").eigh_centered
-    mean = acc.view("blk0.mlp.out", "acts").mean
+    v_in = acc["blk0.mlp.in"].acts
+    evals, evecs = v_in.eigvals_centered, v_in.eigvecs_centered
+    mean = acc["blk0.mlp.out"].acts.mean
     ref = mean_metrics(evecs, evals, mean)
     got = res["blk0.mlp"]["mean_metrics_blk_vs_res"]
     assert abs(got["rayleigh"] - ref["rayleigh"]) < 1e-9
+
+
+def test_main_parallel_path_does_not_deadlock(tmp_path):
+    """main() runs its workers as THREADS sharing one GPU lock. The GPU funnel is re-entrant,
+    so that lock must be an RLock — a plain Lock self-deadlocks. Run the real threaded main()
+    (CPU, synthetic data) under a join-timeout: a regression to a non-reentrant lock then
+    surfaces as a failure, not a frozen suite. (The funnel runs on CPU when no GPU is present,
+    so this reproduces the deadlock without one.)"""
+    import threading
+    from scripts.compute_metrics import main
+    from utils.gpu import set_gpu_lock
+
+    d, N = 32, 64
+    mdir = tmp_path / "cfg" / "pythia-14m"
+    mdir.mkdir(parents=True)
+    for step in (0, 1):
+        acts = torch.randn(N, d, dtype=torch.float64)
+        torch.save({"after_final_norm": {"acts_gram": acts.T @ acts, "acts_n": N,
+                                          "acts_mean": acts.float().mean(0)}, "__format__": "cov"},
+                   mdir / f"step{step}.pt")
+
+    t = threading.Thread(target=main, kwargs=dict(
+        config_directory="cfg", model_name="pythia-14m", num_workers=2, derive=False,
+        data_root=str(tmp_path), output_root=str(tmp_path / "res")), daemon=True)
+    try:
+        t.start()
+        t.join(timeout=30)
+        assert not t.is_alive(), "main() deadlocked — the GPU lock must be reentrant (RLock)"
+        res = np.load(str(tmp_path / "res" / "cfg" / "results_pythia-14m.npy"), allow_pickle=True).item()
+        assert set(res) == {0, 1}
+    finally:
+        set_gpu_lock(None)

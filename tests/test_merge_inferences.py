@@ -13,7 +13,7 @@ META = {"__format__": "cov", "__hf_model__": "EleutherAI/pythia-14m",
 
 def _entry(d=4, n=20):
     X = torch.randn(n, d, dtype=torch.float64)
-    return {"acts_cov": X.T @ X, "acts_n": n}
+    return {"acts_gram": X.T @ X, "acts_n": n}
 
 
 def _file(leaves, **meta_over):
@@ -54,19 +54,19 @@ def test_overlapping_leaf_merges_disjoint_keys():
     # base has acts at the leaf, add has grads at the SAME leaf -> both kept (no loss)
     G = torch.randn(20, 4, dtype=torch.float64)
     base = _file([]); add = _file([])
-    base["blk0.attn.in"] = {"acts_cov": _entry()["acts_cov"], "acts_n": 20}
-    add["blk0.attn.in"] = {"grads_cov": G.T @ G, "grads_n": 20}
+    base["blk0.attn.in"] = {"acts_gram": _entry()["acts_gram"], "acts_n": 20}
+    add["blk0.attn.in"] = {"grads_gram": G.T @ G, "grads_n": 20}
     m = merge_inference(base, add)
-    assert set(m["blk0.attn.in"]) == {"acts_cov", "acts_n", "grads_cov", "grads_n"}
+    assert set(m["blk0.attn.in"]) == {"acts_gram", "acts_n", "grads_gram", "grads_n"}
 
 
 def test_overlapping_key_keeps_base_not_add(capsys):
     base = _file([]); add = _file([])
-    e_base, e_add = _entry()["acts_cov"], _entry()["acts_cov"]
-    base["blk0.attn.in"] = {"acts_cov": e_base, "acts_n": 20}
-    add["blk0.attn.in"] = {"acts_cov": e_add, "acts_n": 99}   # conflicts
+    e_base, e_add = _entry()["acts_gram"], _entry()["acts_gram"]
+    base["blk0.attn.in"] = {"acts_gram": e_base, "acts_n": 20}
+    add["blk0.attn.in"] = {"acts_gram": e_add, "acts_n": 99}   # conflicts
     m = merge_inference(base, add)
-    assert m["blk0.attn.in"]["acts_cov"] is e_base            # base wins, not overwritten
+    assert m["blk0.attn.in"]["acts_gram"] is e_base            # base wins, not overwritten
     assert m["blk0.attn.in"]["acts_n"] == 20
     assert "keeping base" in capsys.readouterr().out          # conflict noted
 
@@ -101,4 +101,4 @@ def test_merge_files_roundtrip_and_readable(tmp_path):
     merged = torch.load(op, map_location="cpu", weights_only=False)
     assert _leaves(merged) == {"blk0.attn.in", "blk0.mlp.raw_out"}
     acc = DataAccessor(merged)
-    assert acc.view("blk0.mlp.raw_out", "acts").eigvals is not None
+    assert acc["blk0.mlp.raw_out"].acts.eigvals is not None
