@@ -1,160 +1,154 @@
-# Codebase Architecture
+# Architecture
 
-## Overview
+Tracks how LLM representations evolve during pretraining via spectral methods (RankMe,
+α power-law) and K-FAC curvature. Two families: Pythia (GPTNeoX) and OLMo-2 (LLaMA-style).
 
-This project tracks how LLM representations evolve during pretraining through spectral methods (RankMe, alpha/power-law exponent) and K-FAC covariance curvature analysis. The codebase has three main processes: **collection**, **metric computation**, and **storage operations**. Each is described below with its call chain, responsibilities, and boundaries.
-
----
-
-## The Three Main Processes
-
-### 1. Collection
-
-The central pipeline. Given a config YAML, it orchestrates:
-- Loading a dataset (via `data/` loaders + `utils/data_utils.py` for caching, packing, padding)
-- Iterating over checkpoints of a model (discovered via `utils/model_registry.py`)
-- Running forward (and optionally backward) passes with hooks attached
-- Accumulating statistics in `HookCollector` instances (`utils/hooks.py`)
-- Converting accumulated data to a storage format and saving to disk (via `DataAccessor.save()` in `utils/accessor.py`)
-
-Key design: HookCollector does the accumulation (covariance or raw acts), but knows nothing about storage formats. `collect.py` wraps raw accumulators in a `DataAccessor` and calls `.save()`, which transforms them into the chosen format (acts/cov/cov_svd/eigenvalues) and writes to disk.
-
-### 2. Metric Computation
-
-A post-processing step, completely decoupled from collection. It:
-- Reads stored `.pt` files via `DataAccessor` (`utils/accessor.py`)
-- The accessor abstracts away which storage format was used -- it can derive eigenvalues from cov, cov from acts, B from A+weights, etc.
-- Computes spectral metrics (RankMe, alpha, K-FAC log-det, generalized eigenvalues) using `scripts/compute_metrics.py`
-- Saves results as `.npy` dicts keyed by step and hook name
-
-### 3. Post-hoc Storage Operations
-
-Format conversion, cross-basis projection, and metadata editing on already-collected `.pt` files, via `DataAccessor` and the `python -m utils.accessor` CLI:
-- `convert`: implemented as `DataAccessor(input).save(..., format=...)`
-- `project`: cross-basis eigenvalue projections (same-layer G<->B or cross-checkpoint)
-- `set-filter`: edit token selection metadata
-- `info`: inspect file contents
+The whole system is one data model — the **address axis** — plus three processes that read
+and write it: **collection**, **metric computation**, and **storage operations**.
 
 ---
 
-## Responsibility Map
+## The address axis
 
-| Component | Responsibility | Does NOT do |
-|-----------|---------------|-------------|
-| `scripts/collect.py` | Orchestration: data loading, checkpoint loop, hook setup, batch loop, save | Metric computation (except optional inline), format conversion after the fact |
-| `utils/hooks.py` | Real-time accumulation during forward/backward pass (cov or raw acts); `MultiHeadOVDispatcher` for per-OV-head decomposition | Storage format decisions, token mask computation, pattern resolution |
-| `utils/hook_specs.py` | Resolves the `hooks` leaf-patterns (`<leaf>[:acts\|:grads\|:both]` + `preset:<name>`) against the model's family-aware leaf universe; produces concrete `SingleHookSpec` (leaf + quantities) / `OVHeadSpec` lists; hard-errors on projection-node targets. | Registering hooks on the model (collect.py does that), accumulation |
-| `utils/accessor.py` | Format transformation, disk I/O, CLI post-processing, format-agnostic read with lazy derivation (B from A + MLP weights; O from A + o_proj weight slice for per-OV-head entries), eigendecomposition | Running models for collection |
-| `utils/model_registry.py` | Model config, checkpoint discovery, model/tokenizer loading, architecture introspection (per-family block-boundary + per-OV-head module resolution), selective weight loading, single-tensor on-disk weight cache (`data/weight_cache/`) read/write-through inside `_load_selective_tensors`, step-to-token-count | Data loading, metric computation |
-| `utils/data_utils.py` | Text loading/caching, packing/padding, token mask computation, label computation | Model loading, storage |
-| `data/` loaders | HuggingFace streaming dataset access | Tokenization, caching (that's data_utils) |
-| `scripts/compute_metrics.py` | Orchestrates metric computation over checkpoints; parallelization | Collection, storage format conversion |
+Every value has one address: **`leaf . quantity . component`**, optionally viewed in a
+`reference`'s basis (a projection).
 
----
+- **leaf** — a dotted capture path, e.g. `blk3.mlp.up.in`, `blk3.attn.out`, `after_final_norm`.
+  On the collection side a leaf is a *hook* (one physical capture point); on the accessor side
+  it is a *node in the tree*. Same string, two contexts.
+- **quantity** — `acts` or `grads` (what flowed through the leaf).
+- **component** — a representation of that quantity:
+  `gram` (Σxxᵀ, unnormalized), `n`, `mask`, `samples`, `mean`, `cov` (=gram/n), `cov_centered`,
+  `eigvals`/`eigvecs` (+ `_centered`), `lvecs` (left singular vectors). See `COMPONENTS` in
+  `utils/accessor.py`.
 
-## Key Architectural Observations
-
-1. **HookCollector has two modes** (cov vs acts) and the choice is made by `collect.py` based on `storage_format`. The collector doesn't know about storage formats -- it just accumulates what it's told to.
-
-2. **`utils/accessor.py` handles both read and write.** `DataAccessor` is the unified interface: `.save()` writes in a specific format, property access reads any format and derives what's missing. The accessor also does B-derivation (needing model weights via model_registry's selective loading) and post-norm derivation.
-
-3. **Token masking has a split**: MLP projection leaves (`blk*.mlp.{up,down,gate}.{in,out}`) always use "all" tokens (per-spec, set by the resolver); residual + block-boundary + per-OV-head leaves use the config's `token_selection` (last or all). Per-leaf `token_selection` lives on the `SingleHookSpec` / `OVHeadSpec` produced by `hook_specs.resolve`, not on the collector itself.
-
-4. **A hook IS a leaf** — one physical capture-point. `CollectConfig` exposes `hooks: list[str]`; each entry is `<leaf-pattern>[:acts|:grads|:both]` (default `:acts`) or `preset:<name>`. `:quantity` means the same thing at every leaf — capture acts and/or grads there. `utils/hook_specs.resolve` matches against the model's family-aware leaf universe and returns concrete specs; K-FAC is just two leaves (`…in:acts` + `…out:grads`, or `preset:kfac`), and an MLP projection *node* (`blk*.up`) hard-errors. The orthogonal `fast_final_norm: bool` captures `after_final_norm` acts via output-head replacement (forward-only — errors if any hook needs grads).
-
-5. **The data loaders in `data/` are thin** -- they just return HF streaming iterators. All the intelligence (caching, filtering, packing) is in `data_utils.py`.
-
-6. **`compute_metrics.py` has two parallelization modes**: simple multiprocessing (when no model weights needed) and threaded derive mode (when B-derivation or post-norm derivation needs selective weight loading).
+**Quantities live at leaves; metrics live at nodes.** A metric is an interaction *across* a
+node's children (K-FAC = acts at one child ⊗ grads at another) and is never stored in the
+collected `.pt` — it is computed on read and written only to the results `.npy`, keyed by node path.
 
 ---
 
-## Process 1: Collection
+## Dependency spine (enforced)
+
+One-way: foundation → library top → consumers. `utils/accessor.py` is the top of the library;
+`scripts/` are its consumers.
 
 ```
-slurm/collect.sh
-  └─▶ scripts/collect.py
-        ├─▶ data/__init__.py
-        │     └─▶ data/<dataset>_loader.py    (fineweb, pile, olmomix, etc.)
-        ├─▶ utils/data_utils.py
-        ├─▶ utils/model_registry.py
-        ├─▶ utils/hook_specs.py               (resolve cfg.hooks leaf-patterns against model)
-        │     └─▶ utils/model_registry.py
-        ├─▶ utils/hooks.py                    (HookCollector, MultiHeadOVDispatcher)
-        ├─▶ utils/accessor.py                 (DataAccessor.save() + optional derive/inline metrics)
-        │     └─▶ utils/model_registry.py
-        └─▶ scripts/compute_metrics.py        (optional: inline metrics)
-              └─▶ (see Process 2)
+scripts/collect.py ─┐                       scripts/compute_metrics.py ─┐
+  model_registry    │                         accessor                  │
+  hooks             ├── consumers             gpu                       ├── consumers
+  hook_specs        │                         model_registry            │
+  accessor          │                                                   │
+  data_utils       ─┘                                                  ─┘
+        │                                            │
+        ▼                                            ▼
+   utils/accessor.py  ── the library top (imports gpu, hook_names, model_registry) ──
+        │
+        ▼   foundation (no intra-utils deps): model_registry · hooks · hook_names · data_utils · gpu
+   utils/hook_specs.py → (hook_names, model_registry)
 ```
 
-## Process 2: Metric Computation
-
-```
-slurm/compute_metrics.sh
-  └─▶ scripts/compute_metrics.py
-        └─▶ utils/accessor.py
-              └─▶ utils/model_registry.py     (selective weight loading for B derivation)
-```
-
-## Process 3: Storage Operations
-
-```
-slurm/storage.sh
-  └─▶ utils/accessor.py  (python -m utils.accessor)
-```
+Two `import-linter` contracts in `pyproject.toml` make this machine-checked (`uv run lint-imports`):
+1. nothing in `utils` imports `utils.accessor` (it sits at the top),
+2. `utils` never imports `scripts` (the library never imports its consumers).
 
 ---
 
-## Shared Dependencies
+## Module responsibilities
 
-```
-                    scripts/                          utils/
-              ┌─────────────────┐            ┌──────────────────────┐
-              │  collect.py     │───────────▶│  model_registry.py   │
-              │                 │            │  hooks.py            │
-              │                 │───────────▶│  accessor.py         │
-              │                 │            │  data_utils.py       │
-              └────────┬────────┘            └──────────────────────┘
-                       │
-              ┌────────┴────────┐
-              │compute_metrics.py│──────────▶│  accessor.py         │
-              └─────────────────┘            └──────────────────────┘
-
-              utils/ internal dependencies:
-              ┌─────────────────────────────────────────────────────┐
-              │  accessor.py ──────▶ model_registry.py             │
-              │                      (selective weight loading)    │
-              │                                                     │
-              │  hook_specs.py ────▶ model_registry.py             │
-              │                      (block boundaries, o_proj)    │
-              │                                                     │
-              │  hooks.py ─────────▶ (no utils/ dependencies)      │
-              │  data_utils.py ────▶ (no utils/ dependencies)      │
-              │  model_registry.py ▶ (no utils/ dependencies)      │
-              └─────────────────────────────────────────────────────┘
-
-              utils/revisions/ contains 1b_revisions.txt, 7b_revisions.txt
-```
+| Module | Owns |
+|--------|------|
+| `utils/model_registry.py` | Model/family facts (`ModelConfig`, the `_Family` table), checkpoint discovery, model/tokenizer loading, weight providers (`ModelWeights` live / `LazyWeights` lazy+cache), derivation transforms (`Linear`/`Norm`), the on-disk weight cache. |
+| `utils/hooks.py` | Real-time capture during forward/backward: `HookCollector` (one leaf) and `MultiHeadOVDispatcher` (per-OV-head), both `Capturer`. Accumulates `gram`/`samples`/`mean`; knows nothing about storage formats. |
+| `utils/hook_specs.py` | Resolves the `hooks` config patterns (`<leaf>[:acts\|:grads\|:both]`, `preset:kfac`) against the model's family-aware leaf universe → `SingleHookSpec`/`OVHeadSpec`. |
+| `utils/hook_names.py` | Pure leaf-name grammar (parse / classify / Pythia-alias `canonical`). No model, no torch. |
+| `utils/data_utils.py` | Text load+cache, packing/padding, token masks, labels. |
+| `utils/gpu.py` | GPU-execution policy (see below). |
+| `utils/accessor.py` | The reader/converter/saver: one `_resolve` over `CONVERSIONS`/`FORMATS`/`PROJECTIONS` tables; the `Node`/`View` tree; `save`; projections; identity/metadata; the `python -m utils.accessor` CLI. |
+| `scripts/collect.py` | Orchestration: data → checkpoint loop → register hooks → forward/backward → `captured()` → `DataAccessor.save`. |
+| `scripts/compute_metrics.py` | Walks the tree, computes spectral + node metrics, writes results `.npy`. |
 
 ---
 
-## Storage Format Lifecycle
+## Process 1 — Collection (`scripts/collect.py`)
 
 ```
-Collection                    Post-hoc conversion              Metric computation
-─────────                     ────────────────────             ──────────────────
-
-HookCollector                 accessor.py CLI                  DataAccessor
-accumulates:                  convert command:                 reads any format,
-  - raw acts (N,d)              acts -> cov                   derives what's missing:
-  - cov matrix (d,d)           cov -> cov_svd                  cov_svd -> eigvals
-  - sample count n             cov_svd -> eigenvalues          cov -> eigh -> eigvals
-        │                      acts -> acts_svd                acts -> PCA -> eigvals
-        ▼                      (reverse paths too)             A + W -> B (derive)
-DataAccessor.save()                   │                               │
-transforms to                         ▼                               ▼
-storage format:               .pt files on disk               spectral_metrics()
-  acts, cov, cov_svd,        (same format, different          rankme, alpha, kfac
-  eigenvalues, acts_svd        compression level)
-  (+m for means,
-   +b for B derivation)
+config YAML ─▶ CollectConfig
+  data_utils (texts, packing, masks)
+  model_registry (checkpoint schedule, load_model)
+  hook_specs.resolve(cfg.hooks) ─▶ SingleHookSpec / OVHeadSpec
+  hooks: HookCollector / MultiHeadOVDispatcher  ── forward (+ backward if any :grads)
+  captured()  ─▶ {leaf: {acts_gram, acts_n, acts_mean?, grads_gram, ...}}
+  DataAccessor(captured, config=, weights=ModelWeights(model,config), identity=(model,rev,run))
+       .stamp(token_filter=…, n_chunks=…)
+       .save(path, format=<base>, overrides=<±b/±o/…>)
+  [optional inline] compute_metrics_for_checkpoint(acc) ─▶ save_step_metrics(...)
 ```
+
+A K-FAC pair is just two ordinary leaves (`…in:acts` + `…out:grads`, or `preset:kfac`); the
+projection's output acts (old "B") are *derived* on read, never collected. `fast_final_norm`
+swaps the output head for `Identity()` to capture `after_final_norm` acts forward-only (errors
+if any hook needs grads). Token masking is per-spec: MLP-projection leaves force `all` tokens;
+residual/boundary/OV leaves use the config's `token_selection`.
+
+## Process 2 — Metric computation (`scripts/compute_metrics.py`)
+
+```
+slurm/compute_metrics.sh ─▶ main() ─▶ run_pipeline (threads, RLock GPU funnel, checkpoint prefetch)
+  per file: DataAccessor(data, config, weights=LazyWeights|abort)
+    prewarm("eigvecs","eigvecs_centered")   # warm the shared eigendecompositions
+    get_metrics(acc.v)                        # recursive tree walk, results keyed by node.path
+    _to_numpy(...)                            # the single torch→numpy boundary
+    save_step_metrics(results_path, step, metrics)   # the ONE results-.npy writer
+```
+
+`get_metrics` writes, per node: the per-quantity spectral family (`{q}_uncentered`,
+`{q}_centered`, `{q}_mean_metrics`, `{q}_mean_vec`, cross-checkpoint `{q}_cross_*`), plus any
+`METRICS` whose operands resolve there — `gen` (a leaf's acts vs grads), `kfac` (proj node:
+`in.acts`⊗`out.grads`), `projections_kfac` (mlp node: `up.in.acts`⊗`down.out.grads`),
+`mean_metrics_blk_vs_res` (residual sub-block nodes). `save_step_metrics` is the single owner
+of results-`.npy` writes, called by both `main()` and collect's inline path so they can't diverge.
+
+## Process 3 — Storage operations (`python -m utils.accessor`)
+
+`slurm/storage.sh` → the accessor CLI: `info` (inspect), `convert --to <format> [--materialize ±b/±o/regex]`
+(re-materialize a format), `project --onto-file <ref>` (persist each view's eigvals in a
+reference checkpoint's basis). All three share `_pt_files`/`_out_path`/`_run_pool`.
+
+---
+
+## On disk
+
+A collected `.pt` is `{leaf: {"<q>_<component>": tensor, ...}, "__meta__": ...}`. Metadata keys
+are dunder (`__hf_model__`, `__revision__`, `__run__`, `__format__`, `__token_filter__`,
+`__n_chunks__`); persisted projections live under `__<q>_projections__`. A **format** is just a
+named set of components to write (`FORMATS` in `utils/accessor.py`: `acts`, `acts_svd`, `cov`,
+`cov_svd`, `eigenvalues`); `save` materializes those and anything a reload couldn't reconstruct.
+On read, `_resolve` produces any requested component: **stored → convert (same leaf/quantity via
+`CONVERSIONS`) → derive (another leaf via a `model_registry` transform + weights)**, memoized and
+cycle-guarded. Derivation is what turns `.in` acts into `.out` acts (via the projection weight),
+head `.slice` into `.contrib`, and `before_final_norm` into `after_final_norm`.
+
+---
+
+## GPU execution (`utils/gpu.py`)
+
+Not an accessor concern. Every GPU op (eigh, svd, `W@C@Wᵀ` derivation) funnels through
+`prefer_gpu`/`require_gpu`, which run on-device under a process-wide lock and return to CPU.
+`run_pipeline` is the one shared parallel-over-files mechanism (a producer thread prefetches the
+next checkpoint; `workers` consumer *threads* share one CUDA context; GPU work serializes through
+a **reentrant** `RLock` — derivation nests GPU ops, so a plain `Lock` self-deadlocks). Both
+`compute_metrics.main()` and the accessor CLI use it.
+
+---
+
+## Structural enforcement (how to keep it from rotting)
+
+- **Imports** — `uv run lint-imports` (contracts above).
+- **Types** — pyright (`typeCheckingMode = "basic"`, py3.14). `reportPrivateUsage` is off inside
+  `utils` (Node/View/DataAccessor are one unit) but `error` in `scripts/` — a consumer boundary:
+  scripts read through the tree, never reach into protected members.
+- **Rule-sets** — `Capturer` (ABC over the two collectors), `WeightProvider` (Protocol), `Transform`
+  (ABC: `Linear`/`Norm`).
+- **Behaviour** — `pytest -m "not e2e"` (login) + e2e on GPU via `srun`; snapshot values are frozen
+  (relabel, never regenerate).
