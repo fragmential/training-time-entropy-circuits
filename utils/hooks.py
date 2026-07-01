@@ -9,7 +9,6 @@ decides which hooks register; everything lands under the single `leaf` name.
 import torch
 import torch.nn as nn
 from abc import ABC, abstractmethod
-from typing import Optional
 
 _DTYPE_MAP = {
     "float32": torch.float32, "fp32": torch.float32,
@@ -64,14 +63,14 @@ class HookCollector(Capturer):
 
     def __init__(
         self,
-        module: Optional[nn.Module] = None,
+        module: nn.Module | None = None,
         capture: str = "input",
         quantities=("acts",),
         mode: str = "cov",
         collect_means: bool = False,
         accumulation_dtype: str = "fp64",
         activation_dtype: str = "fp32",
-        token_selection: str = None,
+        token_selection: str | None = None,
         leaf: str = "acts",
     ):
         assert mode in ("cov", "acts"), f"Unknown mode: {mode}"
@@ -88,20 +87,18 @@ class HookCollector(Capturer):
         self._act_dtype = _DTYPE_MAP.get(activation_dtype, torch.float32)
 
         # Token mask — set externally per batch
-        self._token_mask: Optional[torch.BoolTensor] = None
+        self._token_mask: torch.BoolTensor | None = None
 
         # Forward (acts) storage (lazy-initialized on first data)
-        self._acts_init = False
-        self._acts_cov = None    # (d, d) covariance or None
+        self._acts_cov: torch.Tensor | None = None   # (d, d) covariance
         self._n_acts = 0
-        self._acts_sum = None    # (d,) running sum for means
-        self._acts_list = [] if mode == "acts" else None
+        self._acts_sum: torch.Tensor | None = None    # (d,) running sum for means
+        self._acts_list: list | None = [] if mode == "acts" else None
 
         # Backward (grads) storage (lazy-initialized)
-        self._grads_init = False
-        self._grads_cov = None
+        self._grads_cov: torch.Tensor | None = None
         self._n_grads = 0
-        self._grads_sum = None   # (d,) running sum for gradient means
+        self._grads_sum: torch.Tensor | None = None   # (d,) running sum for gradient means
 
         # Register hooks: forward for acts (side decides pre/post), backward for grads.
         self._handles = []
@@ -118,7 +115,7 @@ class HookCollector(Capturer):
     # Token masking
     # ------------------------------------------------------------------
 
-    def set_token_mask(self, mask: Optional[torch.BoolTensor]):
+    def set_token_mask(self, mask: torch.BoolTensor | None):
         """Set per-batch token mask. Shape: (batch, seq_len). True = include."""
         self._token_mask = mask
 
@@ -148,16 +145,17 @@ class HookCollector(Capturer):
 
         if self.mode == "cov":
             d = x_f.size(1)
-            if not self._acts_init:
+            if self._acts_cov is None:
                 self._acts_cov = torch.zeros(d, d, dtype=self._acc_dtype, device=x_f.device)
-                if self.collect_means:
-                    self._acts_sum = torch.zeros(d, dtype=torch.float32, device=x_f.device)
-                self._acts_init = True
             self._acts_cov.add_((x_f.T @ x_f).to(dtype=self._acc_dtype))
             self._n_acts += n
             if self.collect_means:
+                if self._acts_sum is None:
+                    self._acts_sum = torch.zeros(d, dtype=torch.float32, device=x_f.device)
                 self._acts_sum.add_(x_f.float().sum(dim=0))
         else:
+            if self._acts_list is None:
+                self._acts_list = []
             self._acts_list.append(x_f.cpu())
             self._n_acts += n
 
@@ -167,14 +165,13 @@ class HookCollector(Capturer):
             return
         g_f = g_flat.to(dtype=self._act_dtype)
         d = g_f.size(1)
-        if not self._grads_init:
+        if self._grads_cov is None:
             self._grads_cov = torch.zeros(d, d, dtype=self._acc_dtype, device=g_f.device)
-            if self.collect_means:
-                self._grads_sum = torch.zeros(d, dtype=torch.float32, device=g_f.device)
-            self._grads_init = True
         self._grads_cov.add_((g_f.T @ g_f).to(dtype=self._acc_dtype))
         self._n_grads += g_f.size(0)
         if self.collect_means:
+            if self._grads_sum is None:
+                self._grads_sum = torch.zeros(d, dtype=torch.float32, device=g_f.device)
             self._grads_sum.add_(g_f.float().sum(dim=0))
 
     def feed(self, raw: torch.Tensor):
@@ -315,7 +312,7 @@ class MultiHeadOVDispatcher(Capturer):
 
     def __init__(
         self,
-        o_proj_module: nn.Module,
+        o_proj_module: nn.Linear,
         num_heads: int,
         head_dim: int,
         block_idx: int,
@@ -325,7 +322,7 @@ class MultiHeadOVDispatcher(Capturer):
         collect_means: bool = False,
         accumulation_dtype: str = "fp64",
         activation_dtype: str = "fp32",
-        token_selection: str = None,
+        token_selection: str | None = None,
     ):
         self.num_heads = num_heads
         self.head_dim = head_dim
@@ -334,7 +331,7 @@ class MultiHeadOVDispatcher(Capturer):
         if selected_heads is None:
             selected_heads = list(range(num_heads))
         self.selected_heads = list(selected_heads)
-        self._weight_ref = o_proj_module.weight  # (d_model, num_heads * head_dim)
+        self._weight_ref: torch.Tensor = o_proj_module.weight  # (d_model, num_heads * head_dim)
         self.collectors = {
             h: HookCollector(
                 module=None, mode=mode,

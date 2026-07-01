@@ -24,9 +24,9 @@ class ModelConfig:
     dtype: str            # "float16" or "bfloat16"
     trust_remote_code: bool
     pad_token_from_eos: bool
-    training_dataset: str = None      # dataset name for "native" resolution
-    revisions_file: str = None        # path to file mapping step→revision hash
-    early_training_model: str = None  # separate HF repo for early checkpoints
+    training_dataset: str | None = None      # dataset name for "native" resolution
+    revisions_file: str | None = None        # path to file mapping step→revision hash
+    early_training_model: str | None = None  # separate HF repo for early checkpoints
 
 
 # Per-model overrides for fields that differ within a family.
@@ -136,7 +136,7 @@ def _read_revisions_file(filepath: str) -> dict:
 class _Family:
     """Every architecture fact that varies by model family, in one place. `blocks` /
     `final_norm` / `oproj` double as live-module dotted paths AND state-dict prefixes."""
-    schedule: object        # (config, max_checkpoints, spacing) -> [(step, rev, repo), ...]
+    schedule: Callable      # (config, max_checkpoints, spacing) -> [(step, rev, repo), ...]
     blocks: str             # dotted path to the block list (e.g. "gpt_neox.layers")
     final_norm: str         # dotted path / sd-prefix of the final norm
     norm_kind: str          # "layernorm" | "rmsnorm"
@@ -191,7 +191,7 @@ def _getattr_path(obj, dotted):
     return obj
 
 
-def get_checkpoint_schedule(config, max_checkpoints=50, checkpoint_spacing="linear"):
+def get_checkpoint_schedule(config, max_checkpoints: int | None = 50, checkpoint_spacing="linear"):
     """Return list of (step_num, revision_str, hf_model_name) tuples."""
     return _fam(config).schedule(config, max_checkpoints, checkpoint_spacing)
 
@@ -646,22 +646,25 @@ class LazyWeights(WeightProvider):
     snapshot / on-disk cache on first request, then memoizes."""
     def __init__(self, config: ModelConfig, hf_repo: str, revision: str) -> None:
         self._config, self._hf_repo, self._revision = config, hf_repo, revision
-        self._cache: dict[str, object] = {}
+        self._weights: dict[str, SimpleNamespace | None] = {}   # sd_prefix -> namespace(.weight/.bias)
+        self._norm: NormFn | None = None
+        self._norm_loaded = False
 
     def weight(self, sd_prefix: str) -> WeightBias:
-        if sd_prefix not in self._cache:
-            self._cache[sd_prefix] = load_selective_weights(
+        if sd_prefix not in self._weights:
+            self._weights[sd_prefix] = load_selective_weights(
                 self._config, self._hf_repo, self._revision, {sd_prefix}).get(sd_prefix)
-        ns = self._cache[sd_prefix]
+        ns = self._weights[sd_prefix]
         if ns is None:
             return None
         return ns.weight.detach().float(), (ns.bias.detach().float() if ns.bias is not None else None)
 
-    def norm(self) -> NormFn:
-        if "__norm__" not in self._cache:
-            self._cache["__norm__"] = load_selective_weights(
+    def norm(self) -> NormFn | None:
+        if not self._norm_loaded:
+            self._norm = load_selective_weights(
                 self._config, self._hf_repo, self._revision, set(), need_norm=True).get("__norm__")
-        return self._cache["__norm__"]
+            self._norm_loaded = True
+        return self._norm
 
 
 class ModelWeights(WeightProvider):
@@ -675,6 +678,7 @@ class ModelWeights(WeightProvider):
         except AttributeError:
             return None
         b = getattr(m, "bias", None)
+        assert isinstance(m.weight, torch.Tensor)
         return m.weight.detach().float(), (b.detach().float() if b is not None else None)
 
     def norm(self) -> NormFn:

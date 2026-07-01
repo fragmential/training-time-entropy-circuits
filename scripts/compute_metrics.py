@@ -17,7 +17,7 @@ import re
 import numpy as np
 import torch
 from multiprocessing import Pool
-from typing import Callable
+from typing import Callable, overload
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -123,7 +123,7 @@ _STEP_RE = re.compile(r"step(\d+)\.pt$")
 # Spectral metrics from an eigenvalue array
 # ---------------------------------------------------------------------------
 
-def spectral_metrics(eigen: torch.Tensor, damping: float = 1e-6, mean: torch.Tensor = None) -> dict:
+def spectral_metrics(eigen: torch.Tensor, damping: float = 1e-6, mean: torch.Tensor | None = None) -> dict:
     """Compute RankMe, alpha, R2, log-det from an eigenspectrum (descending, non-negative).
 
     eigen must be a torch.Tensor (descending, non-negative).
@@ -256,12 +256,12 @@ def mean_metrics(eigvecs: torch.Tensor, eigvals: torch.Tensor, mean: torch.Tenso
 # K-FAC metrics
 # ---------------------------------------------------------------------------
 
-def _top_k_outer_products(a: torch.Tensor, b: torch.Tensor, k: int) -> torch.Tensor:
+def _top_k_outer_products(a_t: torch.Tensor, b_t: torch.Tensor, k: int) -> torch.Tensor:
     """Top-k products from outer(a, b) where a, b are sorted descending (numpy internally).
 
     Uses flat outer product for small dims, priority queue for large.
     """
-    a, b = a.detach().cpu().numpy(), b.detach().cpu().numpy()
+    a, b = a_t.detach().cpu().numpy(), b_t.detach().cpu().numpy()
     m, n = len(a), len(b)
     if m * n <= 2_000_000:
         prods = np.outer(a, b).ravel()
@@ -288,13 +288,13 @@ def _top_k_outer_products(a: torch.Tensor, b: torch.Tensor, k: int) -> torch.Ten
     return torch.from_numpy(np.ascontiguousarray(out))
 
 
-def _sample_outer_products_linspace(a: torch.Tensor, b: torch.Tensor, k: int) -> torch.Tensor:
+def _sample_outer_products_linspace(a_t: torch.Tensor, b_t: torch.Tensor, k: int) -> torch.Tensor:
     """Sample k products linearly spaced across the full outer-product distribution
     (descending; numpy internally).
 
     Small matrices sample exactly; >2M products approximate via sorted-index mapping.
     """
-    a, b = a.detach().cpu().numpy(), b.detach().cpu().numpy()
+    a, b = a_t.detach().cpu().numpy(), b_t.detach().cpu().numpy()
     m, n = len(a), len(b)
     total = m * n
     if total <= k:
@@ -316,7 +316,7 @@ def _sample_outer_products_linspace(a: torch.Tensor, b: torch.Tensor, k: int) ->
     return torch.from_numpy(np.ascontiguousarray(out))
 
 
-def _histogram_outer_product(a: torch.Tensor, b: torch.Tensor, bins: int = 1024,
+def _histogram_outer_product(a_t: torch.Tensor, b_t: torch.Tensor, bins: int = 1024,
                              chunk_limit: int = 2_000_000) -> dict:
     """Histogram the full K-FAC outer product a ⊗ b in linear and log-spaced bins
     (numpy internally; returns torch tensors).
@@ -325,8 +325,8 @@ def _histogram_outer_product(a: torch.Tensor, b: torch.Tensor, bins: int = 1024,
     Returns density-normalised histograms (integral = 1) plus the edges and
     n_total = |a|*|b| so counts can be recovered as `density * n_total * diff(edges)`.
     """
-    a = a.detach().cpu().numpy().astype(np.float64)
-    b = b.detach().cpu().numpy().astype(np.float64)
+    a = a_t.detach().cpu().numpy().astype(np.float64)
+    b = b_t.detach().cpu().numpy().astype(np.float64)
     m, n = len(a), len(b)
     total = m * n
 
@@ -347,6 +347,7 @@ def _histogram_outer_product(a: torch.Tensor, b: torch.Tensor, bins: int = 1024,
         chunk = np.outer(a[i:i + chunk_rows], b).ravel()
         lin_counts += np.histogram(chunk, bins=lin_edges)[0]
         if has_log:
+            assert log_counts is not None and log_edges is not None  # has_log ⇒ both set
             log_counts += np.histogram(chunk, bins=log_edges)[0]
 
     out = {
@@ -355,6 +356,7 @@ def _histogram_outer_product(a: torch.Tensor, b: torch.Tensor, bins: int = 1024,
         "n_total": total,
     }
     if has_log:
+        assert log_counts is not None and log_edges is not None  # has_log ⇒ both set
         out["loghistogram"] = torch.from_numpy(log_counts / (total * np.diff(log_edges)))
         out["loghistogram_edges"] = torch.from_numpy(log_edges)
     return out
@@ -509,34 +511,44 @@ METRICS = [
 ]
 
 
+def _t(x: object) -> torch.Tensor:
+    """Narrow an atomic component to the Tensor it always is here (eigvals/vecs/mean are never scalars)."""
+    assert isinstance(x, torch.Tensor), f"expected a Tensor component, got {type(x).__name__}"
+    return x
+
+
 def _quantity_metrics(q: Quantity, fv: View, path: str) -> dict:
     """Spectral family for one (leaf, quantity): uncentered/centered/mean/cross."""
     out = {}
     ev = fv.eigvals
     if ev is None:
         return out
+    ev = _t(ev)
+    mu = _t(fv.mean) if fv.mean is not None else None
     _check_negative_eigenvalues(ev, f"{path}.{q}")
-    out[f"{q}_uncentered"] = spectral_metrics(ev, mean=fv.mean)
+    out[f"{q}_uncentered"] = spectral_metrics(ev, mean=mu)
 
-    if fv.mean is not None:
-        out[f"{q}_mean_vec"] = fv.mean   # raw μ (d,) for cross-leaf cosine analysis
+    if mu is not None:
+        out[f"{q}_mean_vec"] = mu   # raw μ (d,) for cross-leaf cosine analysis
 
     cvec, cval = fv.eigvecs_centered, fv.eigvals_centered
     if cval is not None:
-        out[f"{q}_centered"] = spectral_metrics(cval)
+        out[f"{q}_centered"] = spectral_metrics(_t(cval))
 
-    if all(x is not None for x in (fv.mean, cvec, cval)):
-        out[f"{q}_mean_metrics"] = mean_metrics(cvec, cval, fv.mean)
+    if all(x is not None for x in (mu, cvec, cval)):
+        out[f"{q}_mean_metrics"] = mean_metrics(_t(cvec), _t(cval), _t(mu))
 
     # persisted cross-checkpoint projections of this same (leaf, quantity): each is the
     # rotated (uncentered) covariance, so only its uncentered spectrum is meaningful.
     isource, ileaf, iq = fv.identity
     for proj in fv.projections():
+        if proj.reference is None:
+            continue
         psource, pleaf, pq = proj.reference.identity
         if psource == isource or pleaf != ileaf or pq != iq:
             continue                                  # only cross-checkpoint, same leaf+quantity
         if proj.eigvals is not None:
-            out[f"{q}_cross_{'-'.join(str(x) for x in psource)}_uncentered"] = spectral_metrics(proj.eigvals)
+            out[f"{q}_cross_{'-'.join(str(x) for x in psource)}_uncentered"] = spectral_metrics(_t(proj.eigvals))
     return out
 
 
@@ -547,7 +559,7 @@ def get_metrics(node: Node, results: dict | None = None) -> dict:
         get_metrics(child, results)
     out = {}
     for q in ("acts", "grads"):
-        fv: View = node.get(q)
+        fv = node.get(q)
         if fv is not None:
             out.update(_quantity_metrics(q, fv, node.path))
     for m in METRICS:
@@ -561,7 +573,7 @@ def get_metrics(node: Node, results: dict | None = None) -> dict:
     return results
 
 
-def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False):
+def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False) -> dict:
     import time
     if verbose:
         decomp_profiler.enable()
@@ -576,7 +588,7 @@ def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False
         print(f"    metrics: {time.time()-t0:.1f}s ({len(results)} nodes)")
         print(decomp_profiler.summary())
         decomp_profiler.disable()
-    return _to_numpy(results)   # numpy boundary: analysis/results never see torch
+    return _to_numpy(results)   # numpy boundary: analysis/results never see torch (dict→dict overload)
 
 
 def _merge_step(old: dict, new: dict) -> dict:
@@ -596,7 +608,7 @@ def save_step_metrics(results_path: str, step: int, metrics: dict) -> dict:
     res_dict = _load_existing(results_path)
     res_dict[step] = _merge_step(res_dict.get(step, {}), metrics)
     os.makedirs(os.path.dirname(results_path) or ".", exist_ok=True)
-    np.save(results_path, res_dict)
+    np.save(results_path, res_dict)  # type: ignore[arg-type]  # dict saved as a 0-d object array (pickle)
     return res_dict
 
 
@@ -604,6 +616,10 @@ def save_step_metrics(results_path: str, step: int, metrics: dict) -> dict:
 # Per-file metric computation (called by workers)
 # ---------------------------------------------------------------------------
 
+@overload
+def _to_numpy(o: dict) -> dict: ...
+@overload
+def _to_numpy(o: object) -> object: ...
 def _to_numpy(o):
     """Recursively convert torch tensors to numpy so Pool results pickle by value —
     avoids torch's shared-memory IPC, which exhausts mmaps on big models (d~4096+)."""
@@ -649,7 +665,7 @@ def _resolve_data_root(data_root: str, config_directory: str):
 def main(
     config_directory: str,
     model_name: str,
-    num_workers: int = None,
+    num_workers: int | None = None,
     recompute: bool = False,
     derive: bool = True,
     data_root: str = "data/inferences",
@@ -701,7 +717,7 @@ def main(
     if num_workers is None:
         # half the allocated CPUs: GPU work is serialized, so the extra threads only
         # overlap I/O / CPU walks; more than that just adds RAM pressure from loaded checkpoints.
-        num_workers = max(1, int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count())) // 2)
+        num_workers = max(1, int(os.environ.get("SLURM_CPUS_PER_TASK") or os.cpu_count() or 1) // 2)
     print(
         f"Computing metrics for {len(to_compute)}/{len(step_files)} steps "
         f"using {num_workers} workers (derive={derive})..."
