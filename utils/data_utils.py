@@ -14,6 +14,7 @@ from datasets import load_dataset
 # (hf_repo, default_kwargs) — all loaders follow load_dataset(repo, **kwargs, split=split, streaming=streaming)
 _REGISTRY = {
     "fineweb":                ("HuggingFaceFW/fineweb", {"name": "sample-10BT"}),
+    "fineweb_edu_100b":       ("karpathy/fineweb-edu-100b-shuffle", {}),
     "wikitext":               ("wikitext", {"name": "wikitext-103-raw-v1"}),
     "sciq":                   ("sciq", {}),
     "pile":                   ("EleutherAI/the_pile_deduplicated", {}),

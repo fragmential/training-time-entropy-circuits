@@ -42,6 +42,33 @@ def test_spectral_metrics_small_dim():
     assert out["d"] == 32 and out["rankme"] > 0  # crashed (index OOB) before the fix
 
 
+# Degenerate spectra occur in the wild: nanochat zero-inits c_proj, so attn.out /
+# mlp.out are exactly (or numerically) zero at the earliest checkpoints.
+def test_spectral_metrics_zero_and_low_rank_spectra():
+    out = spectral_metrics(torch.zeros(128, dtype=torch.float64))
+    assert out["trace"] == 0.0 and np.isnan(out["alpha"]) and np.isnan(out["rankme"])
+
+    low_rank = torch.zeros(128, dtype=torch.float64)
+    low_rank[:5] = torch.tensor([5.0, 4.0, 3.0, 2.0, 1.0])  # < 12 positive: no fit window
+    out = spectral_metrics(low_rank)
+    assert np.isnan(out["alpha"]) and out["rankme"] > 0
+
+
+def test_mixture_with_zero_trace_component():
+    from scripts.compute_metrics import _mixture, _spectral_entropy
+    d = 16
+    lam = torch.linspace(4.0, 0.5, d).double()
+    cov = torch.diag(lam)
+    zero = torch.zeros(d, dtype=torch.float64)
+    out = _mixture([lam, zero], [cov, torch.zeros(d, d, dtype=torch.float64)])
+    assert out is not None
+    w, s, s_mix = out
+    assert w.tolist() == [1.0, 0.0] and s[1] == 0.0
+    assert abs(s_mix - _spectral_entropy(lam)) < 1e-9   # mix collapses to the live component
+    assert _mixture([zero, zero], [cov * 0, cov * 0]) is None
+    assert _spectral_entropy(zero) == 0.0
+
+
 def test_spectral_metrics_trace():
     # Need >= 100 eigenvalues for stringer_get_powerlaw (uses trange 11-100)
     eigvals = torch.tensor([10.0 / (i + 1) for i in range(200)])

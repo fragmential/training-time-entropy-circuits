@@ -18,6 +18,7 @@ dependencies = [
     "scikit-learn",
     "tqdm",
     "jsonargparse",
+    "tiktoken>=0.13.0",
 ]
 
 [project.optional-dependencies]

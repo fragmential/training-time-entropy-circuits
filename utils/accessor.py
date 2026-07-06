@@ -51,16 +51,27 @@ QUANTITIES = ("acts", "grads")
 @require_gpu
 @decomp_profiler
 def _eigh(cov: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """One decomposition shared by eigvals + eigvecs; descending, eigvals clamped >= 0."""
-    vals, vecs = torch.linalg.eigh(cov)
+    """One decomposition shared by eigvals + eigvecs; descending, eigvals clamped >= 0.
+    cusolver fails to converge on (near-)zero matrices — real inputs, e.g. nanochat's
+    zero-initialized c_proj outputs at step 0 — so fall back to CPU LAPACK."""
+    try:
+        vals, vecs = torch.linalg.eigh(cov)
+    except torch.linalg.LinAlgError:  # type: ignore[reportPrivateImportUsage]  # public name, stub marks it private
+        vals, vecs = torch.linalg.eigh(cov.cpu())
+        vals, vecs = vals.to(cov.device), vecs.to(cov.device)
     return vals.flip(0).clamp(min=0).contiguous(), vecs.flip(1).contiguous()
 
 @require_gpu
 @decomp_profiler
 def eigvalsh_descending(M: torch.Tensor) -> torch.Tensor:
     """Public GPU-funneled eigvalsh (descending, clamped >= 0) for one-off symmetric matrices
-    (e.g. compute_metrics' generalized eigenproblem) — goes through the same GPU lock."""
-    return torch.linalg.eigvalsh(M).flip(0).clamp(min=0)
+    (e.g. compute_metrics' generalized eigenproblem) — goes through the same GPU lock.
+    Same cusolver-vs-degenerate-matrix fallback as _eigh."""
+    try:
+        vals = torch.linalg.eigvalsh(M)
+    except torch.linalg.LinAlgError:  # type: ignore[reportPrivateImportUsage]  # public name, stub marks it private
+        vals = torch.linalg.eigvalsh(M.cpu()).to(M.device)
+    return vals.flip(0).clamp(min=0)
 
 def _cov(samples: torch.Tensor) -> torch.Tensor:
     X = samples.float()

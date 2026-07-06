@@ -136,9 +136,19 @@ def spectral_metrics(eigen: torch.Tensor, damping: float = 1e-6, mean: torch.Ten
     eps = damping * trace / max(d, 1)
     log_det = float(torch.sum(torch.log(eigen + eps)))
 
-    eigen = eigen / eigen.sum()  # normalise into sum 1
-    rm = rankme_metrics(eigen)
-    alpha_fit, ypred, fit_r2, fit_r2_100 = stringer_get_powerlaw(eigen, torch.arange(11, min(100, int((eigen > 0).sum()))))  # window capped to positive-eigval count (stringer drops zeros; O is 128-d but rank d_head)
+    # Degenerate spectra happen legitimately: nanochat zero-inits c_proj, so attn.out /
+    # mlp.out are exactly zero at step 0. Normalization and the powerlaw window both
+    # need positive mass — fall back to NaNs instead of crashing the whole checkpoint.
+    n_pos = int((eigen > 0).sum())
+    if trace > 0:
+        eigen = eigen / eigen.sum()  # normalise into sum 1
+        rm = rankme_metrics(eigen)
+    else:
+        rm = {k: float("nan") for k in ("matrix_entropy", "sv_entropy", "rankme", "true_rankme")}
+    if n_pos > 12:  # the stringer fit window starts at index 11
+        alpha_fit, ypred, fit_r2, fit_r2_100 = stringer_get_powerlaw(eigen, torch.arange(11, min(100, n_pos)))  # window capped to positive-eigval count (stringer drops zeros; O is 128-d but rank d_head)
+    else:
+        alpha_fit, ypred, fit_r2, fit_r2_100 = float("nan"), None, None, None
     out = {
         "d": d,
         "eigenspectrum": eigen,
@@ -471,7 +481,7 @@ def generalized_eigenvalues(
     M = C @ C.T                                   # symmetric PSD
 
     if not vecs:
-        return torch.linalg.eigvalsh(M).flip(0).clamp(min=0).cpu()   # M is synthetic, decomposed in place
+        return eigvalsh_descending(M).cpu()   # M is synthetic; the funnel adds the degenerate-matrix CPU fallback
     lam, U = torch.linalg.eigh(M)                 # U columns are coordinates in the acts eigenbasis
     return lam.flip(0).clamp(min=0).cpu(), U.flip(1).cpu()
 
@@ -538,18 +548,29 @@ def _tr_fro(eigvals: torch.Tensor) -> tuple[float, float]:
 
 
 def _spectral_entropy(eigvals: torch.Tensor) -> float:
-    p = eigvals.clamp(min=0) / eigvals.sum()
+    eigvals = eigvals.clamp(min=0)
+    if not float(eigvals.sum()) > 0:
+        return 0.0   # zero spectrum: the w→0 limit of w·S is 0, keep it finite
+    p = eigvals / eigvals.sum()
     p = p[p > 0]
     return float(-(p * p.log()).sum())
 
 
-def _mixture(lams: list[torch.Tensor], covs: list[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor, float]:
+def _mixture(lams: list[torch.Tensor], covs: list[torch.Tensor]) -> "tuple[torch.Tensor, torch.Tensor, float] | None":
     """Trace weights w, per-component entropies s, and the mixture entropy S(Σ w_i ρ_i) —
-    the shared core of the 2- / 3- / M-component overlap metrics."""
+    the shared core of the 2- / 3- / M-component overlap metrics.
+
+    Zero-trace components occur for real (nanochat zero-inits c_proj, so block outputs
+    are 0 at step 0): they get weight 0 and entropy 0 (the w→0 limit) and are dropped
+    from the mix sum, which would otherwise be 0/0 = NaN. All-zero → None (no mixture)."""
     tr = torch.tensor([float(l.sum()) for l in lams], dtype=torch.float64)
+    if not float(tr.sum()) > 0:
+        return None
     w = tr / tr.sum()
-    s = torch.tensor([_spectral_entropy(l) for l in lams], dtype=torch.float64)
-    mix = reduce(torch.add, (float(wk / tk) * C.double() for wk, tk, C in zip(w, tr, covs)))
+    s = torch.tensor([_spectral_entropy(l) if t > 0 else 0.0 for l, t in zip(lams, tr)],
+                     dtype=torch.float64)
+    mix = reduce(torch.add, (float(wk / tk) * C.double()
+                             for wk, tk, C in zip(w, tr, covs) if tk > 0))
     return w, s, _spectral_entropy(eigvalsh_descending(mix))
 
 
@@ -663,7 +684,9 @@ def _incremental_overlap(node: Node) -> dict | None:
     if not (v := _c_r(node)) or not (g := _comps(v[1].eigvals_centered, v[0].eigvals_centered,
                                                  v[1].cov_centered, v[0].cov_centered)):
         return None
-    w, s, s_mix = _mixture(g[:2], g[2:])
+    if (m := _mixture(g[:2], g[2:])) is None:
+        return None
+    w, s, s_mix = m
     chi, h_w = s_mix - float((w * s).sum()), _spectral_entropy(w)
     return {"chi": chi, "h_w": h_w, "chi_frac": chi / h_w if h_w > 0 else 0.0, "w": float(w[0]),
             "s_in": float(s[0]), "s_out": float(s[1]), "s_mix": s_mix}
@@ -693,7 +716,9 @@ def _block_ledger(node: Node) -> dict | None:
             or not (g := _comps(*(v.eigvals_centered for v in views),
                                 *(v.cov_centered for v in views), r_next.eigvals_centered)):
         return None
-    w, s, s_mix = _mixture(g[:len(views)], g[len(views):-1])
+    if (m := _mixture(g[:len(views)], g[len(views):-1])) is None:
+        return None
+    w, s, s_mix = m
     s_next = _spectral_entropy(g[-1])
     chi = s_mix - float((w * s).sum())
     return {"delta_s": s_next - float(s[0]), "chi": chi, "quality": float((w * (s - s[0])).sum()),
@@ -715,7 +740,9 @@ def _overlap_chi(node: Node) -> dict | None:
     if len(views) < 2 or not (g := _comps(*(v.eigvals_centered for _, v in views),
                                           *(v.cov_centered for _, v in views))):
         return None
-    w, s, s_mix = _mixture(g[:len(views)], g[len(views):])
+    if (m := _mixture(g[:len(views)], g[len(views):])) is None:
+        return None
+    w, s, s_mix = m
     chi, h_w = s_mix - float((w * s).sum()), _spectral_entropy(w)
     return {"chi": chi, "h_w": h_w, "chi_frac": chi / h_w if h_w > 0 else 0.0, "w": w}
 

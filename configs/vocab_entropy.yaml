@@ -1,0 +1,39 @@
+output_dir: data/inferences/vocab_entropy
+# Vocabulary-entropy lens (utils/entropy_lens.py) over the block_representations_all
+# model sweep: per-layer mean next-token-distribution entropy, teacher-forced on the
+# same packed mixes / checkpoint schedule so steps line up with the existing results.
+# Results land in data/results/vocab_entropy/results_<model>.npy under node
+# "vocab_entropy"; fold into the main results with:
+#   python scripts/merge_results.py data/results/block_representations data/results/vocab_entropy
+# The one hook below just keeps the collection non-empty (eigenvalues of the final
+# residual are tiny); the lens itself rides the forward pass via forward hooks.
+
+model_name:
+  - "allenai/OLMo-2-0425-1B"
+  - "allenai/OLMo-2-1124-7B"
+  - "EleutherAI/pythia-1b-deduped"
+  - "EleutherAI/pythia-6.9b-deduped"
+
+#            OL1B OL7B Py1b Py6.9b
+batch_size: [  48,  32,  256,  72]
+
+packed_data_path:
+  allenai/*: data/mixes/olmo_mix_30M_512.pt
+  EleutherAI/*: data/mixes/pile_30M_512.pt
+
+max_tokens: 1_200_000
+seq_len: 512
+min_length: 32
+max_checkpoints: 30
+checkpoint_spacing: sqrt
+packing: packed
+token_selection: all
+
+hooks:
+  - after_final_norm
+
+max_layers_per_pass: 0
+storage_format: eigenvalues
+compute_metrics: True
+vocab_entropy: True
+keep_cached: False

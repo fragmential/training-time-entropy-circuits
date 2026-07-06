@@ -89,6 +89,19 @@ acts | acts_svd | cov | cov_svd | eigenvalues (+`+b/+m/+o` modifiers). Samples-m
 persist tiny `eigenvalues` files; crosses/ledger are computed inline and are NOT recomputable
 offline (samples aren't persisted). cov_svd is required for geneig work (needs eigvecs).
 
+### nanochat family
+Vendored (`utils/nanochat_gpt.py`), locally trained Karpathy-nanochat fork: 2 gateless MLP
+projections, param-free RMSNorm, logit softcap. Checkpoints + tokenizer load from
+`$NANOCHAT_DIR` (default `/projects/prjs1815/nanochat`), no HF hub; names `nanochat-<tag>`
+(e.g. `nanochat-d12`); packed collection only (no padding-mask support).
+
+### Vocabulary-entropy lens
+`vocab_entropy: true` in a collect config (requires `compute_metrics`) rides the collection
+forward passes and stores per-layer mean next-token-distribution entropy (`utils/entropy_lens.py`)
+under node `vocab_entropy`, metric `entropy_lens`, in the results .npy. `configs/vocab_entropy.yaml`
+runs it over the block_representations_all sweep; fold into existing results with
+`scripts/merge_results.py`.
+
 ### DataAccessor
 Address = `leaf.quantity.format` (formats: cov, eigvals, eigvecs, eigh, *_centered, mean,
 samples, n); resolver derives greedily; `View.cross(partner)` gives in-memory cross-covariances

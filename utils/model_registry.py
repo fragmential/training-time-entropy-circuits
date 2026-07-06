@@ -68,7 +68,17 @@ def get_model_config(model_name: str) -> ModelConfig:
             training_dataset="olmo_mix",
             **overrides,
         )
-    raise ValueError(f"Unknown model family for '{model_name}'. Expected 'pythia' or 'olmo' in the name.")
+    if "nanochat" in name:
+        return ModelConfig(
+            family="nanochat",
+            hf_repo=model_name,          # local tag (e.g. "nanochat-d12"); nothing is downloaded
+            model_class="NanochatGPT",
+            dtype="bfloat16",
+            trust_remote_code=False,
+            pad_token_from_eos=False,
+            training_dataset="fineweb_edu_100b",
+        )
+    raise ValueError(f"Unknown model family for '{model_name}'. Expected 'pythia', 'olmo', or 'nanochat' in the name.")
 
 
 # --- Checkpoint discovery ---
@@ -117,6 +127,14 @@ def _olmo_checkpoints(config, max_checkpoints, spacing="linear"):
     return schedule
 
 
+def _nanochat_checkpoints(config, max_checkpoints, spacing="linear"):
+    from utils.nanochat_gpt import checkpoint_steps
+    steps = checkpoint_steps(config)
+    early = [s for s in steps if s <= 512]
+    later = _subsample([s for s in steps if s > 512], max_checkpoints, spacing)
+    return [(s, f"step{s}", config.hf_repo) for s in early + later]
+
+
 def _read_revisions_file(filepath: str) -> dict:
     """{step: revision_str} from a revisions file. Path resolves relative to the
     repo root, so cwd doesn't matter; a missing/empty file raises (no silent {})."""
@@ -139,11 +157,13 @@ class _Family:
     schedule: Callable      # (config, max_checkpoints, spacing) -> [(step, rev, repo), ...]
     blocks: str             # dotted path to the block list (e.g. "gpt_neox.layers")
     final_norm: str         # dotted path / sd-prefix of the final norm
-    norm_kind: str          # "layernorm" | "rmsnorm"
+    norm_kind: str          # "layernorm" | "rmsnorm" | "rmsnorm_bare" (no learnable params)
     mlp_projs: dict         # {leaf-name: submodule-name under block.mlp}
     mlp_bias: bool          # MLP projections carry a bias
     oproj: str              # attention output-proj path under a block
     boundaries: tuple       # ((leaf-suffix, submodule-path-under-block, capture), ...)
+    head: str = "lm_head"   # dotted path to the unembedding (Pythia: "embed_out")
+    logit_softcap: "float | None" = None   # tanh softcap applied after the head (nanochat: 15)
 
 
 _FAMILY = {
@@ -155,6 +175,7 @@ _FAMILY = {
         mlp_projs={"up": "dense_h_to_4h", "down": "dense_4h_to_h"},
         mlp_bias=True,
         oproj="attention.dense",
+        head="embed_out",
         boundaries=(
             ("attn.in",  "input_layernorm", "input"),
             ("attn.out", "attention",       "output"),
@@ -176,6 +197,23 @@ _FAMILY = {
             ("mlp.in",       "mlp",                        "input"),
             ("mlp.raw_out",  "mlp",                        "output"),
             ("mlp.out",      "post_feedforward_layernorm", "output"),
+        ),
+    ),
+    "nanochat": _Family(
+        schedule=_nanochat_checkpoints,
+        blocks="transformer.h",
+        final_norm="final_norm",
+        norm_kind="rmsnorm_bare",   # param-free RMSNorm: no weight in the state dict
+        mlp_projs={"up": "c_fc", "down": "c_proj"},
+        mlp_bias=False,
+        oproj="attn.c_proj",
+        logit_softcap=15.0,
+        boundaries=(
+            # pre-norm sequential: x = x + attn(ln1(x)); x = x + mlp(ln2(x))
+            ("attn.in",  "ln1",  "input"),
+            ("attn.out", "attn", "output"),
+            ("mlp.in",   "ln2",  "input"),
+            ("mlp.out",  "mlp",  "output"),
         ),
     ),
 }
@@ -200,6 +238,9 @@ def get_checkpoint_schedule(config, max_checkpoints: int | None = 50, checkpoint
 
 def load_model(config, hf_repo, revision):
     """Load model on CPU with appropriate class and dtype for the model family."""
+    if config.model_class == "NanochatGPT":
+        from utils.nanochat_gpt import load_nanochat_model
+        return load_nanochat_model(config, revision)
     if config.model_class == "GPTNeoXForCausalLM":
         from transformers import GPTNeoXForCausalLM
         return GPTNeoXForCausalLM.from_pretrained(hf_repo, revision=revision, torch_dtype=config.dtype)
@@ -211,6 +252,9 @@ def load_model(config, hf_repo, revision):
 
 def load_tokenizer(config, revision=None):
     """Load tokenizer with appropriate settings for the model family."""
+    if config.model_class == "NanochatGPT":
+        from utils.nanochat_gpt import load_nanochat_tokenizer
+        return load_nanochat_tokenizer(config)
     from transformers import AutoTokenizer
     kwargs = {}
     if config.trust_remote_code:
@@ -276,6 +320,20 @@ def get_block_boundary_hooks(model, config, block_idx):
     block = _getattr_path(model, fam.blocks)[block_idx]
     return [(f"blk{block_idx}.{suf}", _getattr_path(block, sub), cap)
             for suf, sub, cap in fam.boundaries]
+
+
+def get_output_head(model, config):
+    """Return a callable h -> next-token logits through the model's own final norm +
+    unembedding (+ logit softcap where the family applies one). Binds the current
+    module references, so it stays correct even if fast_final_norm later swaps the
+    head attribute for Identity."""
+    fam = _fam(config)
+    norm = _getattr_path(model, fam.final_norm)
+    head = _getattr_path(model, fam.head)
+    cap = fam.logit_softcap
+    if cap is None:
+        return lambda h: head(norm(h))
+    return lambda h: cap * torch.tanh(head(norm(h)) / cap)
 
 
 def get_attention_output_proj(model, config, block_idx):
@@ -505,16 +563,17 @@ def _load_selective_tensors(snap_dir, keys):
 
 
 class _RMSNorm:
-    """Minimal callable RMSNorm (no nn.Module overhead)."""
+    """Minimal callable RMSNorm (no nn.Module overhead). weight=None → param-free."""
     def __init__(self, weight, eps=1e-6):
         self.weight = weight
         self.eps = eps
 
     def __call__(self, x):
-        return x * (x.float().pow(2).mean(-1, keepdim=True) + self.eps).rsqrt() * self.weight.float()
+        y = x * (x.float().pow(2).mean(-1, keepdim=True) + self.eps).rsqrt()
+        return y if self.weight is None else y * self.weight.float()
 
     def float(self):
-        return _RMSNorm(self.weight.float(), self.eps)
+        return _RMSNorm(None if self.weight is None else self.weight.float(), self.eps)
 
 
 # --- Weight cache (single-tensor on-disk cache for derived factors) ---
@@ -594,7 +653,7 @@ def load_selective_weights(config, hf_repo, revision, sd_prefixes, need_norm=Fal
         all_keys.add(f"{prefix}.bias")
 
     norm_prefix = None
-    if need_norm:
+    if need_norm and _fam(config).norm_kind != "rmsnorm_bare":  # bare norms have no weights to fetch
         norm_prefix = _norm_sd_prefix(config)
         all_keys.add(f"{norm_prefix}.weight")
         all_keys.add(f"{norm_prefix}.bias")
@@ -609,9 +668,13 @@ def load_selective_weights(config, hf_repo, revision, sd_prefixes, need_norm=Fal
             missing.add(k)
 
     if missing:
-        from huggingface_hub import snapshot_download
-        snap_dir = snapshot_download(hf_repo, revision=revision)
-        loaded = _load_selective_tensors(snap_dir, missing)
+        if config.family == "nanochat":
+            from utils.nanochat_gpt import load_sd_tensors
+            loaded = load_sd_tensors(config, revision, missing)
+        else:
+            from huggingface_hub import snapshot_download
+            snap_dir = snapshot_download(hf_repo, revision=revision)
+            loaded = _load_selective_tensors(snap_dir, missing)
         for k, t in loaded.items():
             _cache_store(config.family, hf_repo, revision, k, t)
         tensors.update(loaded)
@@ -622,6 +685,8 @@ def load_selective_weights(config, hf_repo, revision, sd_prefixes, need_norm=Fal
         if w is not None:
             result[prefix] = SimpleNamespace(weight=w, bias=tensors.get(f"{prefix}.bias"))
 
+    if need_norm and _fam(config).norm_kind == "rmsnorm_bare":
+        result["__norm__"] = _RMSNorm(None)
     if norm_prefix:
         w = tensors.get(f"{norm_prefix}.weight")
         if w is not None:
@@ -699,10 +764,15 @@ PYTHIA_TOKENS_PER_STEP = 2_097_152
 
 _token_count_cache = {}
 
+NANOCHAT_TOKENS_PER_STEP = 524_288   # total_batch_size of the d12 training run
+
+
 def get_token_count(model_name: str, step_num: int) -> int:
     """Return the number of pretraining tokens at a given step for a model."""
     if 'pythia' in model_name.lower():
         return step_num * PYTHIA_TOKENS_PER_STEP
+    if 'nanochat' in model_name.lower():
+        return step_num * NANOCHAT_TOKENS_PER_STEP
 
     config = get_model_config(model_name)
     if config.revisions_file is None:

@@ -174,6 +174,10 @@ class CollectConfig:
     # $TMPDIR and mmap-reloads it next iteration. NOTE: $TMPDIR is RAM-backed tmpfs on the
     # GPU nodes, so the spill counts against the job's memory — 7B-scale runs leave this off.
     drift_metrics: "bool | dict[str, bool] | list[bool]" = False
+    # Per-layer vocabulary-entropy lens (utils/entropy_lens.py): mean next-token-distribution
+    # entropy of each residual depth, computed teacher-forced on the collection batches.
+    # Saved into the results file under node "vocab_entropy" (requires compute_metrics).
+    vocab_entropy: bool = False
 
     # --- Cache ---
     keep_cached: bool = False  # don't delete HF checkpoints after processing
@@ -788,6 +792,8 @@ def main(cfg: CollectConfig):
     # Main loop
     device = "cuda" if torch.cuda.is_available() else "cpu"
     executor = ThreadPoolExecutor(max_workers=1)
+    if cfg.vocab_entropy and not cfg.compute_metrics:
+        raise ValueError("vocab_entropy results are saved via the metrics path; set compute_metrics: true")
     drift_spill = (os.path.join(os.environ.get("TMPDIR") or tempfile.gettempdir(),
                                 f"drift_prev_{short_name}.pt")
                    if cfg.drift_metrics and cfg.compute_metrics else None)
@@ -829,11 +835,17 @@ def main(cfg: CollectConfig):
             if cfg.sample_labels and cfg.seed is not None:
                 torch.manual_seed(cfg.seed + step_num)
 
+            lens = None
+            if cfg.vocab_entropy:
+                from utils.entropy_lens import EntropyLens
+                lens = EntropyLens(model, model_config)
+
             t_load += time.time() - _t0; _t0 = time.time()
             captured = _collect_for_checkpoint(
                 model, model_config, cfg, texts, tokenizer, packed_ids,
                 blocks, device, boundary_token_ids,
             )
+            entropy_result = lens.close() if lens is not None else None
 
             # Merge with existing data if continuing a previous run
             if cfg.continue_from:
@@ -875,6 +887,8 @@ def main(cfg: CollectConfig):
                 ctx = ({"prev": DataAccessor(torch.load(drift_spill, mmap=True, weights_only=False)).v}
                        if drift_spill and os.path.exists(drift_spill) else {})
                 step_metrics = compute_metrics_for_checkpoint(acc, verbose=cfg.profile_metrics, ctx=ctx)
+                if entropy_result is not None:
+                    step_metrics["vocab_entropy"] = {"entropy_lens": entropy_result}
                 metrics_dir = (cfg.output_dir.replace("inferences", "results", 1)
                                if cfg.output_dir else "data/results")
                 metrics_path = os.path.join(metrics_dir, f"results_{short_name}.npy")

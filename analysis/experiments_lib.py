@@ -217,6 +217,8 @@ def _parse_param_count(model_name):
         size_str = model_name.split('pythia-')[-1].split('-deduped')[0]
     elif 'olmo' in name:
         size_str = model_name.split('-')[-1]
+    elif 'nanochat' in name:
+        return 185e6   # d12; ~185.6M params (nanochat names carry depth tags, not counts)
     else:
         raise ValueError(f"Cannot extract param count from {model_name}")
     multiplier = 1e6 if size_str[-1].lower() == 'm' else 1e9
@@ -352,6 +354,9 @@ def get_ls(label: str, xvar: str = None, exceptions: dict = {}):
 
 def get_model_label(model_name: str):
     parts = model_name.replace('_','-').split('-')
+
+    if parts[0] == 'nanochat':
+        return ' '.join(['Nanochat', *[p.upper() for p in parts[1:]]])
 
     if parts[0] == 'pythia':
         if len(parts) > 2:
