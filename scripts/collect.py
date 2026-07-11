@@ -495,8 +495,7 @@ def _collect_for_checkpoint(
 
                 # fast_final_norm: model output IS the post-norm residual — feed it manually
                 if fast_norm_head is not None and fast_norm_collector is not None:
-                    acts_masked = fast_norm_collector._apply_mask(outputs.logits.detach())
-                    fast_norm_collector.accumulate(acts_masked)
+                    fast_norm_collector.feed(outputs.logits.detach())
 
         # --- Collect captured data and clean up (collectors yield {leaf: {...}}) ---
         for collector in collectors.values():
