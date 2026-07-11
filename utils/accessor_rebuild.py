@@ -6,6 +6,7 @@ Implemented: resolve core, derive tier, prewarm, GPU guard. Stubbed: save, proje
 """
 
 import os
+import re
 import torch
 from collections import namedtuple
 from collections.abc import Iterator
@@ -13,7 +14,7 @@ from functools import partial, wraps
 from typing import Callable
 
 from utils.hook_names import canonical
-from utils.model_registry import ModelConfig, WeightProvider, derivation, derived_leaves
+from utils.model_registry import ModelConfig, WeightProvider, derivation, derived_leaves, MLP_OUT, HEAD_CONTRIB
 
 Component = torch.Tensor | int | float
 Identity = namedtuple("Identity", "model revision run")
@@ -53,6 +54,15 @@ def _cov(samples: torch.Tensor) -> torch.Tensor:
     X = samples.float()
     return X.T @ X / X.shape[0]
 
+@require_gpu
+def _svd(samples: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """One SVD; lvecs comes off it (and eigvecs/eigvals could, secondarily). X = U·diag(S)·Vᵀ."""
+    U, S, Vt = torch.linalg.svd(samples.float(), full_matrices=False)
+    return U, S, Vt.T
+
+def _fp32(t: Component) -> Component:
+    return t.float() if isinstance(t, torch.Tensor) else t
+
 
 # component -> [(source components, fn)], tried in priority order. `_eigh` is private
 # (View blocks `_`), kept so eigvals + eigvecs share one decomposition.
@@ -72,11 +82,23 @@ CONVERSIONS: dict[str, list[tuple[tuple[str, ...], Callable]]] = {
     "eigvecs_centered": [(("_eigh_centered",),    lambda e: e[1])],
     "mean":             [(("samples", "mask"),    lambda X, m: X[m.bool()].float().mean(0)),
                          (("samples",),           lambda X: X.float().mean(0))],
-    "lvecs":            [(("samples", "eigvals", "eigvecs", "n"),
+    "_svd":             [(("samples",), _svd)],
+    "lvecs":            [(("_svd",),                 lambda s: s[0]),    # primary: one shared svd
+                         (("samples", "eigvals", "eigvecs", "n"),
                           lambda X, l, V, n: X.float() @ V / (l * n).sqrt())],
     "samples":          [(("lvecs", "eigvals", "eigvecs", "n"),
                           lambda U, l, V, n: (U * (l * n).sqrt()) @ V.T)],
 }
+
+
+FORMATS: dict[str, tuple[str, ...]] = {
+    "acts":        ("samples", "mask", "mean", "n"),
+    "acts_svd":    ("lvecs", "eigvals", "eigvecs", "mask", "mean", "n"),
+    "cov":         ("gram", "mean", "n"),
+    "cov_svd":     ("eigvals", "eigvecs", "eigvals_centered", "mean", "n"),
+    "eigenvalues": ("eigvals", "eigvals_centered", "mean", "n"),
+}
+MATERIALIZE_PRESETS = {"b": MLP_OUT, "o": HEAD_CONTRIB}   # derived-leaf families for save(materialize=…)
 
 
 def _build_tree(acc: "DataAccessor", leaves: list[str]) -> "Node":
@@ -103,8 +125,8 @@ class DataAccessor:
         self._derive = derive
         self._cache: dict[tuple[str, str, str], Component | tuple[torch.Tensor, torch.Tensor]] = {}
         self._resolving: set[tuple[str, str, str]] = set()   # cycle guard
-        present = [k for k in self.data if not k.startswith("__")]
-        self._leaves = sorted(set(present) | derived_leaves(present))   # present + derivable
+        self._present = {k for k in self.data if not k.startswith("__")}
+        self._leaves = sorted(self._present | derived_leaves(self._present))   # present + derivable
         self.v = _build_tree(self, self._leaves)
 
     @property
@@ -162,11 +184,41 @@ class DataAccessor:
                 for c in (components or COMPONENTS):
                     self._resolve(leaf, q, c)
 
-    # --- public surface: signatures only (save discussed next) ---
-    def save(self, path: str, format: str | None = None, *, storage_dtype=None,
-             token_filter: dict | None = None, n_chunks: int | None = None,
-             persist_projections: bool = False) -> str:
-        raise NotImplementedError
+    # --- save: a format is just the set of components it writes (FORMATS) ---
+    def save(self, path: str, format: str | None = None, overrides: tuple[str, ...] = ()) -> str:
+        fmt = format or self.data.get("__format__")
+        if fmt is None:
+            raise ValueError(f"cannot save {path}: no format given and data has no __format__")
+        out = self._materialize(format, overrides) if format else dict(self.data)
+        out.update({k: v for k, v in self.data.items() if k.startswith("__")} | {"__format__": fmt})
+
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        torch.save(out, path)
+        return path
+
+    def _materialize_keys(self, leaf: str, format: str, exclude: "DataAccessor | None" = None) -> dict:
+        """The `{q}_{component}` keys for `leaf` (fp32) that resolve here but NOT in `exclude`."""
+        return {f"{q}_{c}": _fp32(v)
+                for q in QUANTITIES for c in FORMATS[format]
+                if (exclude is None or exclude._resolve(leaf, q, c) is None)
+                and (v := self._resolve(leaf, q, c)) is not None}
+
+    def _materialize(self, format: str, overrides: tuple[str, ...] = ()) -> dict:
+        """Present leaves, plus any derived leaf a reload couldn't reproduce (a lossy
+        format's orphans), then `±<regex|preset>` overrides add/remove leaves."""
+        out = {L: e for L in self._present if (e := self._materialize_keys(L, format))}
+        reload = DataAccessor(out, weights=self._weights, config=self._config)
+        out |= {L: e for L in self._leaves if L not in self._present
+                if (e := self._materialize_keys(L, format, reload))}
+
+        for sign, *rest in overrides:
+            name = "".join(rest)
+            rx = MATERIALIZE_PRESETS.get(name) or re.compile(name)
+            hits = {L for L in self._leaves if rx.search(L)}
+            out = out | {L: self._materialize_keys(L, format) for L in hits} if sign == "+" \
+                  else {L: e for L, e in out.items() if L not in hits}
+
+        return out
 
     def needs_model_weights(self) -> bool:
         raise NotImplementedError

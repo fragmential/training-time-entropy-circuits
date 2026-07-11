@@ -299,8 +299,8 @@ def get_attention_output_proj(model, config, block_idx):
 # Transform the accessor applies. The only place that knows derivation edges + weight
 # state-dict locations.
 
-_MLP_OUT = re.compile(r"(.*)\.mlp\.(up|down|gate)\.out$")
-_HEAD_CONTRIB = re.compile(r"(.*)\.attn\.head(\d+)\.contrib$")
+MLP_OUT = re.compile(r"(.*)\.mlp\.(up|down|gate)\.out$")
+HEAD_CONTRIB = re.compile(r"(.*)\.attn\.head(\d+)\.contrib$")
 
 
 def _proj_sd_prefix(config, idx, proj):
@@ -391,12 +391,12 @@ Transform = Linear | Norm
 
 # Each rule: (leaf_regex, build_source_leaf(match)->str, src_quantity, build_Transform(config,match))
 _DERIVATIONS = [
-    (_MLP_OUT,
+    (MLP_OUT,
      lambda m: f"{m.group(1)}.mlp.{m.group(2)}.in",
      "acts",
      lambda cfg, m: Linear(_proj_sd_prefix(cfg, _blk_idx(m.group(1)), m.group(2)),
                            bias=_fam(cfg).mlp_bias)),
-    (_HEAD_CONTRIB,
+    (HEAD_CONTRIB,
      lambda m: f"{m.group(1)}.attn.head{m.group(2)}.slice",
      "acts",
      lambda cfg, m: Linear(_oproj_sd_prefix(cfg, _blk_idx(m.group(1))), head=int(m.group(2)))),

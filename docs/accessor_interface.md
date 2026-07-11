@@ -16,7 +16,7 @@
 | Member | Signature | Contract |
 |---|---|---|
 | construct | `DataAccessor(data: dict \| str, *, weights: WeightProvider \| None = None, config: ModelConfig \| None = None, derive: bool = True)` | `data` is a dict or a path. No `model_name`. Identity (model/revision/run) is read from metadata. `derive=False` ⇒ weight-derived quantities resolve to `None` (never loads). |
-| `save` | `save(path: str, format: str \| None = None, *, storage_dtype=None, token_filter: dict \| None = None, n_chunks: int \| None = None, persist_projections: bool = False) -> str` | `format=None` = **preserve** (current data + corrected metadata). Computed projections live in the resolver cache; `persist_projections=True` writes the cached ones into `__projections__` (opt-in). |
+| `save` | `save(path: str, format: str \| None = None, *, storage_dtype=None, token_filter: dict \| None = None, n_chunks: int \| None = None) -> str` | `format=None` = **preserve** (write current data + corrected metadata); else materialize the component set `FORMATS[format]` (see **Save** below). |
 | read entry | `v -> Node` ; `__getitem__(path: str) -> Node` | Only public read entry. |
 | `prewarm` | `prewarm(fmts: list[str] \| None = None) -> None` | `None` warms everything, else the listed formats. **Owns the GPU context internally** (no external `_gpu_ctx`). |
 | `needs_model_weights` | `() -> bool` | Any required derived `acts` needs weights not already stored. |
@@ -45,7 +45,7 @@ class View:
 ```
 | Member | Contract |
 |---|---|
-| `view.<format>` | Finite set: `cov, eigvals, eigvecs, eigh, eigvals_centered, eigvecs_centered, mean, samples, svd, n` → `Tensor`/`tuple`/`None`. Unbacked (`acc is None`) → always `None`. |
+| `view.<component>` | Finite set (`COMPONENTS`): `gram, n, mask, samples, mean, lvecs, cov, cov_centered, eigvals, eigvecs, eigvals_centered, eigvecs_centered` → `Tensor`/scalar/`None`. Unbacked (`acc is None`) → always `None`. |
 | `in_basis(reference: View) -> View` | This quantity in `reference`'s basis. **Sole** projection door; cache-aware/memoized via the resolver. `reference` data-backed ⇒ may compute; unbacked ⇒ only a cached hit resolves (else `None`). Local & cross-checkpoint are the same call. |
 | `projections() -> list[View]` | The cached projections of this quantity, each a **readable** projected View (their `reference` is an unbacked identity View from cache → no reference files loaded). |
 | `.identity -> Identity` ; `.reference -> View \| None` | Own identity; the basis it's projected onto (`None` for a plain quantity). |
@@ -62,9 +62,34 @@ A projection is just `resolve(leaf, q, fmt, reference=…)` — one resolver. On
 - **Identity stamped at collection** — `collect.py` writes `__hf_model__`/`__revision__`/`__run__`. This **removes `_stamp_from_path`** (no filename reverse-engineering) and `_resolve_hf_name` (the model label is metadata; *loading* is the `WeightProvider`'s job).
 - **`decomp_profiler`** stays active as a profiling side-channel — **never written into results**. The `gpu_wait` field and external `_gpu_ctx` monkey-patch are dropped (prewarm owns the context).
 
-## Resolved
-`reference` field name = `reference`. `save(persist_projections: bool=False)`. `projections()` on `View`, inlined (no helper yet). `run` = output-dir name.
+## Save (implemented — minimum viable)
+A **format** is just the set of **components** it writes — one dict, no per-case logic:
 
-## Open / TBD at implementation
-- `WeightProvider` exact methods; how hard-abort-on-load folds in.
-- pyright scope (start at `utils/accessor.py` + consumers, widen later).
+```python
+FORMATS = {
+    "acts":        ("samples", "mask", "mean", "n"),
+    "acts_svd":    ("lvecs", "eigvals", "eigvecs", "mask", "mean", "n"),
+    "cov":         ("gram", "mean", "n"),
+    "cov_svd":     ("eigvals", "eigvecs", "eigvals_centered", "mean", "n"),
+    "eigenvalues": ("eigvals", "eigvals_centered", "mean", "n"),
+}
+```
+- `save(path, format=None, overrides=()) -> str` — `format=None` preserves; else materialize. Errors if no format given **and** data has no `__format__` (no `"unknown"` fallback).
+- `_materialize(format, overrides=()) -> dict` — present leaves + any **derived leaf a reload can't reproduce** (dynamic orphan-detection: a throwaway `DataAccessor` over the written present-leaves; bake only the components it can't resolve), then `±<regex|preset>` overrides. `_materialize_keys(leaf, format, exclude=None)` is the shared per-leaf comprehension. **Zero `if`-statements.**
+- Metadata: `save` carries every `__*__` key verbatim + sets `__format__` (one line; no `_stamp_from_path`, no `_metadata` method).
+- **fp32 everywhere** (`_fp32` helper) — dtype map retired.
+
+`token_filter`/`n_chunks` are **not** save params — pure provenance (merge-compatibility + continue-from keys, never touched in resolve/save), stamped at collection and carried verbatim. The old `set-filter` becomes mutate-`data`-then-`save()`.
+
+**Overrides** (old `+b/+o/+m`, now axis-separated + implemented): `+m` (mean) is **gone** — mean is always a component in FORMATS. Derived-leaf materialization is the **`overrides`** param: a list of `±<regex|preset>` specs (presets `b`→`MLP_OUT`, `o`→`HEAD_CONTRIB`, reusing `model_registry`'s leaf regexes), pattern-matched `for sign, *rest in overrides`. Default `()` = **max-preservation** (orphaned derived leaves auto-baked); `-b` drops them, `+<regex>` force-materializes even derivable ones.
+
+Consequence: `gram`/`lvecs` rename existing on-disk `{q}_cov`(raw)/`{q}_U,S,V` → one-shot migrator (schema change, allowed with backup).
+
+## Resolved
+`reference` = `reference`. `projections()` on `View`, inlined. `run` = output-dir name. **`persist_projections` removed** — projection caching/persistence is not controlled via a save flag.
+
+## Open / TBD
+- `FORMATS` contents: `eigvals_centered` derivable in `cov_svd` (eigvecs+mean) but not `eigenvalues` → store-both (parity) vs drop-from-`cov_svd`; `mean` derivable in `acts`/`acts_svd` → keep (tiny) vs drop; casting defaults.
+- `WeightProvider` exact methods; hard-abort-on-load.
+- pyright scope.
+- Read-side section above still uses pre-rebuild names (`fmt`, `_view`/`_leaf_quantities`) — sweep in the broader doc pass.
