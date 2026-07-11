@@ -607,6 +607,16 @@ def _merge_step(old: dict, new: dict) -> dict:
     return out
 
 
+def save_step_metrics(results_path: str, step: int, metrics: dict) -> dict:
+    """Single owner of results-.npy writes: load existing, merge this step, save.
+    Used by both `main` (batch) and collect.py's inline path so they can't diverge."""
+    res_dict = _load_existing(results_path)
+    res_dict[step] = _merge_step(res_dict.get(step, {}), metrics)
+    os.makedirs(os.path.dirname(results_path) or ".", exist_ok=True)
+    np.save(results_path, res_dict)
+    return res_dict
+
+
 # ---------------------------------------------------------------------------
 # Per-file metric computation (called by workers)
 # ---------------------------------------------------------------------------
@@ -725,20 +735,18 @@ def main(
     from multiprocessing import get_context
     mp_ctx = get_context("spawn") if os.environ.get("CUDA_VISIBLE_DEVICES") else get_context()
     worker = partial(_compute_metrics_for_file, derive=derive)
+    final = res_dict
     with mp_ctx.Pool(processes=num_workers) as pool:
-        for i, (step, metrics) in enumerate(pool.imap_unordered(worker, to_compute), 1):
-            res_dict[step] = _merge_step(res_dict.get(step, {}), metrics)
+        for step, metrics in pool.imap_unordered(worker, to_compute):
+            final = save_step_metrics(results_path, step, metrics)   # saves every step
             hooks = list(metrics.keys())
             print(
                 f"  Step {step}: {len(hooks)} hook points "
                 f"({', '.join(hooks[:3])}{'...' if len(hooks) > 3 else ''})",
                 flush=True,
             )
-            if i % 5 == 0:
-                np.save(results_path, res_dict)   # incremental: don't lose a long run
 
-    np.save(results_path, res_dict)
-    print(f"Saved {len(res_dict)} results to {results_path}")
+    print(f"Saved {len(final)} results to {results_path}")
 
 
 def _load_existing(results_path):
