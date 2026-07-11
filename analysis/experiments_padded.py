@@ -475,7 +475,7 @@ grid_show()
 
 # %%
 # block_representations_samples: raw-sample runs at EVERY layer, crosses computed inline.
-BLOCK_SAMPLES = "block_representations_samples"
+BLOCK_SAMPLES = "block_representations_samples_padded"   # padded/last-token twin
 n_blocks_bs = {'pythia-1b-deduped': 16, 'pythia-6.9b-deduped': 32,
                'OLMo-2-0425-1B': 16, 'OLMo-2-1124-7B': 32}
 bs_out = lambda model, family: [(BLOCK_SAMPLES, (f'blk{l}.{s}.out', family), f'{s} {l}')

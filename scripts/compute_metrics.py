@@ -477,8 +477,10 @@ def generalized_eigenvalues(
 # .in/.out leaves); `projections_kfac` only at blk.mlp (up.in x down.out).
 
 class _Metric:
-    def __init__(self, name, operands, fn, node_re=None):
+    def __init__(self, name: str, operands: dict[str, str], fn: Callable,
+                 node_re: str | None = None, external: str | None = None):
         self.name, self.operands, self.fn = name, operands, fn
+        self.external = external                 # ctx key merged into args (e.g. "prev"); skip if absent
         self.match: Callable = re.compile(node_re).match if node_re else lambda _ : True
 
 
@@ -510,13 +512,20 @@ def _blk_mean_metrics(a_in, a_out):
 _BLOCK_OUT_RE = re.compile(r"blk(\d+)\.(attn|mlp)\.out$")
 
 
-def _c_r(node: Node) -> tuple[View, View, View] | None:
+def _views(*vs: "View | Node | None") -> tuple[View, ...] | None:
+    """The arguments as a tuple, or None unless every one is a View."""
+    return vs if all(isinstance(v, View) for v in vs) else None  # type: ignore[return-value]
+
+
+def _comps(*xs: object) -> list[torch.Tensor] | None:
+    """Narrowed tensor components, or None if any is missing — the one guard per metric."""
+    return None if any(x is None for x in xs) else [_t(x) for x in xs]
+
+
+def _c_r(node: Node) -> tuple[View, ...] | None:
     """(c_k, r_<k, r) views for a blk*.{attn,mlp}.out node."""
-    c = node.get("acts")
-    r_in = node.root.get(node.path.removesuffix(".out") + ".in.acts")
-    r = node.root.get("before_final_norm.acts")
-    ok = isinstance(c, View) and isinstance(r_in, View) and isinstance(r, View)
-    return (c, r_in, r) if ok else None  # type: ignore[return-value]  # ok ⇒ all Views
+    return _views(node.get("acts"), node.root.get(node.path.removesuffix(".out") + ".in.acts"),
+                  node.root.get("before_final_norm.acts"))
 
 
 def _tr_fro(eigvals: torch.Tensor) -> tuple[float, float]:
@@ -528,6 +537,20 @@ def _spectral_entropy(eigvals: torch.Tensor) -> float:
     p = eigvals.clamp(min=0) / eigvals.sum()
     p = p[p > 0]
     return float(-(p * p.log()).sum())
+
+
+def _mixture(lams: list[torch.Tensor], covs: list[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor, float]:
+    """Trace weights w, per-component entropies s, and the mixture entropy S(Σ w_i ρ_i) —
+    the shared core of the 2- / 3- / M-component overlap metrics."""
+    tr = torch.tensor([float(l.sum()) for l in lams], dtype=torch.float64)
+    w = tr / tr.sum()
+    s = torch.tensor([_spectral_entropy(l) for l in lams], dtype=torch.float64)
+    mix = reduce(torch.add, (float(wk / tk) * C.double() for wk, tk, C in zip(w, tr, covs)))
+    return w, s, _spectral_entropy(eigvalsh_descending(mix))
+
+
+_mean_cos = prefer_gpu(lambda A, B: ((A.float() * B.float()).sum(1)
+                                     / (A.float().norm(dim=1) * B.float().norm(dim=1))).mean())
 
 
 def _block_out_views(root: Node) -> list[tuple[str, View]]:
@@ -550,18 +573,17 @@ def _block_residual_coupling(node: Node) -> dict | None:
         R_over_ck: float  # tr(R_k)/tr(Σ_ck) — fraction of the block's own energy
         R_over_r:  float  # tr(R_k)/tr(Σ_r)  — block's signed share of the final
         cka_cr:    float  # CKA(c_k, r) ∈ [0,1], unsigned coupling strength
+        cos_cr:    float  # mean per-token cos(c_i, r_i) — democratic, unlike the energy-weighted traces
     """
-    if (crr := _c_r(node)) is None:
+    if not (v := _c_r(node)) or not (g := _comps(v[0].cross(v[1]).cov_centered, v[0].cross(v[2]).cov_centered,
+                                                 v[0].eigvals_centered, v[2].eigvals_centered)):
         return None
-    c, r_in, r = crr
-    P, R, lc, lr = c.cross(r_in).cov_centered, c.cross(r).cov_centered, c.eigvals_centered, r.eigvals_centered
-    if any(x is None for x in (P, R, lc, lr)):
-        return None
-    tr_P, tr_R = float(_t(P).trace()), float(_t(R).trace())
-    (tr_c, fro_c), (tr_r, fro_r) = _tr_fro(_t(lc)), _tr_fro(_t(lr))
+    P, R, lc, lr = g
+    tr_P, tr_R, (tr_c, fro_c), (tr_r, fro_r) = float(P.trace()), float(R.trace()), _tr_fro(lc), _tr_fro(lr)
+    cos = {"cos_cr": float(_mean_cos(*s))} if (s := _comps(v[0].samples, v[2].samples)) else {}
     return {"tr_P": tr_P, "tr_R": tr_R, "tr_Q": tr_R - tr_P - tr_c,
             "R_over_ck": tr_R / tr_c, "R_over_r": tr_R / tr_r,
-            "cka_cr": float(_t(R).square().sum()) / (fro_c * fro_r)}
+            "cka_cr": float(R.square().sum()) / (fro_c * fro_r), **cos}
 
 
 def _ablation_contribution(node: Node) -> dict | None:
@@ -572,15 +594,12 @@ def _ablation_contribution(node: Node) -> dict | None:
         rankme_ablated: float  # RankMe(Σ_{r\\k})
         delta_rankme:   float  # RankMe(Σ_r) - RankMe(Σ_{r\\k})
     """
-    if (crr := _c_r(node)) is None:
+    if not (v := _c_r(node)) or not (g := _comps(v[0].cross(v[2]).cov_centered, v[0].cov_centered,
+                                                 v[2].cov_centered, v[2].eigvals_centered)):
         return None
-    c, _, r = crr
-    R, Sc, Sr, lr = c.cross(r).cov_centered, c.cov_centered, r.cov_centered, r.eigvals_centered
-    if any(x is None for x in (R, Sc, Sr, lr)):
-        return None
-    ablated = rankme_metrics(eigvalsh_descending(_t(Sr) - _t(R) - _t(R).T + _t(Sc)))["rankme"]
-    return {"rankme_ablated": ablated,
-            "delta_rankme": rankme_metrics(_t(lr).clamp(min=0))["rankme"] - ablated}
+    R, Sc, Sr, lr = g
+    ablated = rankme_metrics(eigvalsh_descending(Sr - R - R.T + Sc))["rankme"]
+    return {"rankme_ablated": ablated, "delta_rankme": rankme_metrics(lr.clamp(min=0))["rankme"] - ablated}
 
 
 def _eigendirection_attribution(node: Node) -> dict | None:
@@ -590,13 +609,9 @@ def _eigendirection_attribution(node: Node) -> dict | None:
     Returns:
         contrib: torch.Tensor  # (d,) v_iᵀ R_k v_i, ordered by Σ_r eigenrank
     """
-    if (crr := _c_r(node)) is None:
+    if not (v := _c_r(node)) or not (g := _comps(v[0].cross(v[2]).cov_centered, v[2].eigvecs_centered)):
         return None
-    c, _, r = crr
-    R, V = c.cross(r).cov_centered, r.eigvecs_centered
-    if R is None or V is None:
-        return None
-    return {"contrib": prefer_gpu(lambda Rm, Vm: ((Rm @ Vm) * Vm).sum(0))(_t(R), _t(V))}
+    return {"contrib": prefer_gpu(lambda R, V: ((R @ V) * V).sum(0))(*g)}
 
 
 def _gen_block_vs_residual(node: Node) -> dict | None:
@@ -607,13 +622,15 @@ def _gen_block_vs_residual(node: Node) -> dict | None:
         eigvals: torch.Tensor  # (d,) generalized spectrum, descending
         **spectral_metrics(eigvals)
     """
-    if (crr := _c_r(node)) is None:
+    return _gen_pair(v[0], v[2]) if (v := _c_r(node)) else None
+
+
+def _gen_pair(a: View, b: View) -> dict | None:
+    """Generalized eigenvalues Σ_a v = λ Σ_b v (centered) + spectral family."""
+    if not (g := _comps(a.eigvals_centered, a.eigvecs_centered, b.eigvals_centered, b.eigvecs_centered)):
         return None
-    c, _, r = crr
-    ec, vc, er, vr = c.eigvals_centered, c.eigvecs_centered, r.eigvals_centered, r.eigvecs_centered
-    if any(x is None for x in (ec, vc, er, vr)):
-        return None
-    gen = generalized_eigenvalues(_t(ec), _t(vc), _t(er), _t(vr))
+    ea, va, eb, vb = g
+    gen = generalized_eigenvalues(ea, va, eb, vb)
     return {"eigvals": gen, **(spectral_metrics(gen) if len(gen) >= 11 else {})}
 
 
@@ -628,20 +645,48 @@ def _incremental_overlap(node: Node) -> dict | None:
         h_w:      float  # H(w) = binary entropy of (w, 1-w); the ceiling
         chi_frac: float  # χ_k / H(w) ∈ [0,1], fraction orthogonal at this step
         w:        float  # trace weight of r_<k (scalar here)
+        s_in:     float  # spectral entropy of the stream (r_<k)
+        s_out:    float  # spectral entropy of the block output (c_k)
+        s_mix:    float  # spectral entropy of the interference-free mix (the ledger's I needs it)
     """
-    if (crr := _c_r(node)) is None:
+    if not (v := _c_r(node)) or not (g := _comps(v[1].eigvals_centered, v[0].eigvals_centered,
+                                                 v[1].cov_centered, v[0].cov_centered)):
         return None
-    c, r_in, _ = crr
-    lc, lin, Sc, Sin = c.eigvals_centered, r_in.eigvals_centered, c.cov_centered, r_in.cov_centered
-    if any(x is None for x in (lc, lin, Sc, Sin)):
+    w, s, s_mix = _mixture(g[:2], g[2:])
+    chi, h_w = s_mix - float((w * s).sum()), _spectral_entropy(w)
+    return {"chi": chi, "h_w": h_w, "chi_frac": chi / h_w if h_w > 0 else 0.0, "w": float(w[0]),
+            "s_in": float(s[0]), "s_out": float(s[1]), "s_mix": s_mix}
+
+
+def _block_ledger(node: Node) -> dict | None:
+    """Exact per-block rank ledger for the step r_next = r_in + attn.out + mlp.out
+    (order-independent, so it holds for parallel Pythia and sequential OLmo alike):
+    ΔS = χ + Σ_i w_i (S_i − S_in) + I, with I = S(next) − S(mix) the pure interference.
+    log RankMe(final) − log RankMe(embeddings) telescopes as Σ_blocks ΔS.
+
+    Returns:
+        delta_s:      float         # S(ρ_next) − S(ρ_in), this block's rank-entropy change
+        chi:          float         # subspace-overlap term of the {in, attn, mlp} mix
+        quality:      float         # Σ_i w_i (S_i − S_in): spectral quality of the writes
+        interference: float         # S(ρ_next) − S(ρ_mix): the cross-covariance effect
+        w:            torch.Tensor  # (2 or 3,) trace weights, [in, attn?, mlp?] order
+        s:            torch.Tensor  # matching spectral entropies, + s_mix / s_next below
+        s_mix:        float
+        s_next:       float
+    """
+    k = int(node.path.removeprefix("blk"))
+    parts = [node.get("attn.in.acts"), node.get("attn.out.acts"), node.get("mlp.out.acts")]
+    r_next = node.root.get(f"blk{k + 1}.attn.in.acts") or node.root.get("before_final_norm.acts")
+    views = [v for v in parts if isinstance(v, View)]
+    if len(views) < 2 or not isinstance(parts[0], View) or not isinstance(r_next, View) \
+            or not (g := _comps(*(v.eigvals_centered for v in views),
+                                *(v.cov_centered for v in views), r_next.eigvals_centered)):
         return None
-    tr_c, tr_in = float(_t(lc).sum()), float(_t(lin).sum())
-    w = tr_in / (tr_in + tr_c)
-    mix = w / tr_in * _t(Sin).double() + (1 - w) / tr_c * _t(Sc).double()
-    chi = _spectral_entropy(eigvalsh_descending(mix)) \
-        - w * _spectral_entropy(_t(lin)) - (1 - w) * _spectral_entropy(_t(lc))
-    h_w = float(-(w * np.log(w) + (1 - w) * np.log(1 - w))) if 0 < w < 1 else 0.0
-    return {"chi": chi, "h_w": h_w, "chi_frac": chi / h_w if h_w > 0 else 0.0, "w": w}
+    w, s, s_mix = _mixture(g[:len(views)], g[len(views):-1])
+    s_next = _spectral_entropy(g[-1])
+    chi = s_mix - float((w * s).sum())
+    return {"delta_s": s_next - float(s[0]), "chi": chi, "quality": float((w * (s - s[0])).sum()),
+            "interference": s_next - s_mix, "w": w, "s": s, "s_mix": s_mix, "s_next": s_next}
 
 
 def _overlap_chi(node: Node) -> dict | None:
@@ -656,16 +701,11 @@ def _overlap_chi(node: Node) -> dict | None:
         w:        torch.Tensor  # (M,) variance shares w_k
     """
     views = _block_out_views(node)
-    lams = [v.eigvals_centered for _, v in views]
-    covs = [v.cov_centered for _, v in views]
-    if len(views) < 2 or any(x is None for x in lams + covs):
+    if len(views) < 2 or not (g := _comps(*(v.eigvals_centered for _, v in views),
+                                          *(v.cov_centered for _, v in views))):
         return None
-    tr = torch.tensor([float(_t(l).sum()) for l in lams], dtype=torch.float64)
-    w = tr / tr.sum()
-    mix = reduce(torch.add, (float(wk / tk) * _t(C).double() for wk, tk, C in zip(w, tr, covs)))
-    chi = _spectral_entropy(eigvalsh_descending(mix)) - float(
-        sum(wk * _spectral_entropy(_t(l)) for wk, l in zip(w, lams)))
-    h_w = _spectral_entropy(w)
+    w, s, s_mix = _mixture(g[:len(views)], g[len(views):])
+    chi, h_w = s_mix - float((w * s).sum()), _spectral_entropy(w)
     return {"chi": chi, "h_w": h_w, "chi_frac": chi / h_w if h_w > 0 else 0.0, "w": w}
 
 
@@ -678,6 +718,7 @@ def _block_block_coupling(node: Node) -> dict | None:
         leaves:       list[str]     # (M,) leaf paths, the row/column order
         cka:          torch.Tensor  # (M, M) CKA(c_j, c_k) ∈ [0,1], symmetric
         signed_trace: torch.Tensor  # (M, M) normalized signed tr Cov(c_j, c_k) ∈ [-1,1]
+        mean_cos:     torch.Tensor  # (M, M) mean per-token cos(c_j, c_k) — democratic counterpart
     """
     views = _block_out_views(node)
     comps = [(v.samples, v.mean, v.eigvals_centered) for _, v in views]
@@ -686,15 +727,17 @@ def _block_block_coupling(node: Node) -> dict | None:
     tr, fro = zip(*(_tr_fro(_t(l)) for *_, l in comps))
     stats = prefer_gpu(lambda Xj, mj, Xk, mk: (
         C := Xj.float().T @ Xk.float() / Xj.shape[0] - torch.outer(mj, mk),
-        C.trace(), C.square().sum())[1:])
+        C.trace(), C.square().sum(),
+        ((Xj.float() * Xk.float()).sum(1) / (Xj.float().norm(dim=1) * Xk.float().norm(dim=1))).mean())[1:])
     M = len(views)
-    cka, st = torch.eye(M), torch.eye(M)
+    cka, st, mc = torch.eye(M), torch.eye(M), torch.eye(M)
     for j in range(M):
         for k in range(j + 1, M):
-            trC, froC2 = stats(comps[j][0], comps[j][1], comps[k][0], comps[k][1])
+            trC, froC2, cos = stats(comps[j][0], comps[j][1], comps[k][0], comps[k][1])
             cka[j, k] = cka[k, j] = float(froC2) / (fro[j] * fro[k])
             st[j, k] = st[k, j] = float(trC) / (tr[j] * tr[k]) ** 0.5
-    return {"leaves": [p for p, _ in views], "cka": cka, "signed_trace": st}
+            mc[j, k] = mc[k, j] = float(cos)
+    return {"leaves": [p for p, _ in views], "cka": cka, "signed_trace": st, "mean_cos": mc}
 
 
 def _mean_migration(node: Node, m: int = 32) -> dict | None:
@@ -704,32 +747,41 @@ def _mean_migration(node: Node, m: int = 32) -> dict | None:
     Returns:
         migration: float  # ‖V_bot_centeredᵀ V_top_uncentered‖_F² / m ∈ [0,1]
     """
-    v = node.get("acts")
-    if not isinstance(v, View) or v.eigvecs_centered is None or v.eigvecs is None:
+    if not (v := _views(node.get("acts"))) or not (g := _comps(v[0].eigvecs_centered, v[0].eigvecs)):
         return None
-    m = min(m, _t(v.eigvecs).shape[1])
-    return {"migration": float((_t(v.eigvecs_centered)[:, -m:].T @ _t(v.eigvecs)[:, :m]).square().sum() / m)}
+    Vc, Vu = g
+    m = min(m, Vu.shape[1])
+    return {"migration": float((Vc[:, -m:].T @ Vu[:, :m]).square().sum() / m)}
 
 
-def _cka_drift(node: Node) -> dict | None:
-    """CKA of this leaf's acts now vs the previous checkpoint over SHARED tokens — needs a
-    cross-checkpoint partner view (two accessors co-loaded; not in the per-checkpoint walk yet).
+def _drift_pair(node: Node, prev: Node) -> tuple[View, ...] | None:
+    """(now, prev) acts views for the same leaf across two checkpoints."""
+    return _views(node.get("acts"), prev.get(f"{node.path}.acts"))
+
+
+def _cka_drift(node: Node, prev: Node) -> dict | None:
+    """CKA of this leaf's acts now vs the previous checkpoint over SHARED tokens (every
+    checkpoint sweeps identical batches; the crossed n guards alignment).
 
     Returns:
         cka_drift: float  # CKA(c^{(t)}, c^{(t-1)}) ∈ [0,1]; 1 = unchanged
     """
-    return None  # TODO
+    if not (v := _drift_pair(node, prev)) or not (g := _comps(v[0].cross(v[1]).cov_centered,
+                                                              v[0].eigvals_centered, v[1].eigvals_centered)):
+        return None
+    C, lv, lp = g
+    return {"cka_drift": float(C.square().sum()) / (_tr_fro(lv)[1] * _tr_fro(lp)[1])}
 
 
-def _geneig_drift(node: Node) -> dict | None:
-    """Generalized eigenvalues Σ^{(t)} v = λ Σ^{(t-1)} v: directions gained/lost between
-    checkpoints. Autocovariance-only, but still needs the previous checkpoint co-loaded.
+def _geneig_drift(node: Node, prev: Node) -> dict | None:
+    """Generalized eigenvalues Σ^{(t)} v = λ Σ^{(t-1)} v (centered): directions gained
+    (large λ) / lost (small λ) between checkpoints. Autocovariance-only.
 
     Returns:
         eigvals: torch.Tensor  # (d,) drift spectrum, descending
         **spectral_metrics(eigvals)
     """
-    return None  # TODO
+    return _gen_pair(*v) if (v := _drift_pair(node, prev)) else None
 
 
 METRICS = [
@@ -738,13 +790,15 @@ METRICS = [
     _Metric("projections_kfac", {"a": "up.in.acts", "g": "down.out.grads"},  _kfac_metric),
     _Metric("mean_metrics_blk_vs_res", {"a_in": "in.acts", "a_out": "out.acts"},  _blk_mean_metrics,
             node_re=r"blk\d+\.(attn|mlp)$"),  # residual sub-block nodes only, not projections
-    # Block-composition stubs ({"node": ""} = the node itself). Drift fns unregistered: they
-    # need the previous checkpoint co-loaded.
+    # Block-composition metrics ({"node": ""} = the node itself); drift ones need ctx["prev"].
+    _Metric("cka_drift",               {"node": ""}, _cka_drift,               external="prev"),
+    _Metric("geneig_drift",            {"node": ""}, _geneig_drift,            external="prev"),
     _Metric("block_residual_coupling", {"node": ""}, _block_residual_coupling, node_re=r"blk\d+\.(attn|mlp)\.out$"),
     _Metric("ablation_contribution",   {"node": ""}, _ablation_contribution,   node_re=r"blk\d+\.(attn|mlp)\.out$"),
     _Metric("eigendirection_attrib",   {"node": ""}, _eigendirection_attribution, node_re=r"blk\d+\.(attn|mlp)\.out$"),
     _Metric("gen_block_vs_residual",   {"node": ""}, _gen_block_vs_residual,   node_re=r"blk\d+\.(attn|mlp)\.out$"),
     _Metric("incremental_overlap",     {"node": ""}, _incremental_overlap,     node_re=r"blk\d+\.(attn|mlp)\.out$"),
+    _Metric("block_ledger",            {"node": ""}, _block_ledger,            node_re=r"blk\d+$"),
     _Metric("mean_migration",          {"node": ""}, _mean_migration,          node_re=r"blk\d+\.(attn|mlp)\.out$"),
     _Metric("overlap_chi",             {"node": ""}, _overlap_chi,             node_re=r"^$"),
     _Metric("block_block_coupling",    {"node": ""}, _block_block_coupling,    node_re=r"^$"),
@@ -792,11 +846,12 @@ def _quantity_metrics(q: Quantity, fv: View, path: str) -> dict:
     return out
 
 
-def get_metrics(node: Node, results: dict | None = None) -> dict:
-    """Recursively walk the hook tree; each node writes its own flat result entry."""
+def get_metrics(node: Node, results: dict | None = None, ctx: dict[str, Node] | None = None) -> dict:
+    """Recursively walk the hook tree; each node writes its own flat result entry.
+    `ctx` carries external operands (e.g. "prev" = previous checkpoint's root Node)."""
     results = {} if results is None else results
     for child in node.children():
-        get_metrics(child, results)
+        get_metrics(child, results, ctx)
     out = {}
     for q in ("acts", "grads"):
         fv = node.get(q)
@@ -804,6 +859,8 @@ def get_metrics(node: Node, results: dict | None = None) -> dict:
             out.update(_quantity_metrics(q, fv, node.path))
     for m in METRICS:
         args = {k: node.get(rel) for k, rel in m.operands.items()}
+        if m.external:
+            args[m.external] = (ctx or {}).get(m.external)
         if all(v is not None for v in args.values()) and m.match(node.path):
             r = m.fn(**args)
             if r is not None:
@@ -813,7 +870,8 @@ def get_metrics(node: Node, results: dict | None = None) -> dict:
     return results
 
 
-def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False) -> dict:
+def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False,
+                                   ctx: dict[str, Node] | None = None) -> dict:
     import time
     if verbose:
         decomp_profiler.enable()
@@ -823,7 +881,7 @@ def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False
     accessor.prewarm("eigvecs", "eigvecs_centered")
     if verbose:
         print(f"    prewarm: {time.time()-t0:.1f}s")
-    results = get_metrics(accessor.v)
+    results = get_metrics(accessor.v, ctx=ctx)
     if verbose:
         print(f"    metrics: {time.time()-t0:.1f}s ({len(results)} nodes)")
         print(decomp_profiler.summary())

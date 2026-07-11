@@ -42,6 +42,7 @@ import gc
 import os
 import re
 import sys
+import tempfile
 import time
 import torch
 import torch.nn as nn
@@ -82,7 +83,7 @@ from utils.data_utils import (
 # Fields that may vary per model in a sweep (accept scalar, list, or dict).
 VECTORIZABLE_FIELDS = {"batch_size", "max_checkpoints", "max_layers_per_pass", "dataset_name",
                        "accumulation_dtype", "activation_dtype", "packed_data_path", "max_tokens",
-                       "num_samples"}
+                       "num_samples", "drift_metrics"}
 
 
 def _resolve_wildcard_dict(d: dict, model_name: str, default=None):
@@ -169,6 +170,10 @@ class CollectConfig:
 
     # --- Metrics ---
     compute_metrics: bool = False  # compute spectral metrics inline while model is loaded
+    # Inline drift metrics vs the previous checkpoint: spills each checkpoint's raw data to
+    # $TMPDIR and mmap-reloads it next iteration. NOTE: $TMPDIR is RAM-backed tmpfs on the
+    # GPU nodes, so the spill counts against the job's memory — 7B-scale runs leave this off.
+    drift_metrics: "bool | dict[str, bool] | list[bool]" = False
 
     # --- Cache ---
     keep_cached: bool = False  # don't delete HF checkpoints after processing
@@ -262,6 +267,7 @@ class ScalarConfig(CollectConfig):
     max_layers_per_pass: int
     max_tokens: "int | None"
     num_samples: int
+    drift_metrics: bool
     max_checkpoints: "int | None"   # main() clears it to None when an explicit checkpoints list wins
 
 
@@ -782,6 +788,11 @@ def main(cfg: CollectConfig):
     # Main loop
     device = "cuda" if torch.cuda.is_available() else "cpu"
     executor = ThreadPoolExecutor(max_workers=1)
+    drift_spill = (os.path.join(os.environ.get("TMPDIR") or tempfile.gettempdir(),
+                                f"drift_prev_{short_name}.pt")
+                   if cfg.drift_metrics and cfg.compute_metrics else None)
+    if drift_spill and os.path.exists(drift_spill):
+        os.remove(drift_spill)      # a stale spill from a dead run is NOT this run's prev
 
     print(f"Processing {len(to_process)} remaining checkpoints...")
     print(f"  hooks    = {cfg.hooks}")
@@ -861,11 +872,15 @@ def main(cfg: CollectConfig):
             if cfg.compute_metrics:
                 _t0 = time.time()
                 from scripts.compute_metrics import compute_metrics_for_checkpoint, save_step_metrics
-                step_metrics = compute_metrics_for_checkpoint(acc, verbose=cfg.profile_metrics)
+                ctx = ({"prev": DataAccessor(torch.load(drift_spill, mmap=True, weights_only=False)).v}
+                       if drift_spill and os.path.exists(drift_spill) else {})
+                step_metrics = compute_metrics_for_checkpoint(acc, verbose=cfg.profile_metrics, ctx=ctx)
                 metrics_dir = (cfg.output_dir.replace("inferences", "results", 1)
                                if cfg.output_dir else "data/results")
                 metrics_path = os.path.join(metrics_dir, f"results_{short_name}.npy")
                 save_step_metrics(metrics_path, step_num, step_metrics)
+                if drift_spill:
+                    torch.save(acc.data, drift_spill)
                 t_metrics += time.time() - _t0
                 tqdm.write(f"  Metrics: {len(step_metrics)} hooks -> {metrics_path}")
 
@@ -874,7 +889,9 @@ def main(cfg: CollectConfig):
             import traceback
             traceback.print_exc()
         finally:
-            del model
+            # Release THIS checkpoint's model, samples and resolver caches now — otherwise
+            # they stay bound through the next checkpoint's collection (double residency).
+            model = captured = acc = None
             gc.collect()
             torch.cuda.empty_cache()
 
@@ -884,6 +901,8 @@ def main(cfg: CollectConfig):
             delete_cached_revision(step_model, revision)
 
     executor.shutdown(wait=True)
+    if drift_spill and os.path.exists(drift_spill):
+        os.remove(drift_spill)
     print(f"Completed! Output saved to {output_dir}")
 
     total = t_load + t_collect + t_save + t_metrics

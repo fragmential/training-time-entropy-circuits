@@ -43,7 +43,7 @@ def test_collect_main_multicheckpoint_samples_mode(tmp_path):
     from scripts.collect import main
     from scripts.compute_metrics import main as metrics_main
     main(_cfg(tmp_path, collect_format="acts", storage_format="eigenvalues",
-              activation_dtype="bf16", compute_metrics=True))
+              activation_dtype="bf16", compute_metrics=True, drift_metrics=True))
 
     for s, data in _saved(tmp_path).items():
         assert data["__format__"] == "eigenvalues"
@@ -57,6 +57,9 @@ def test_collect_main_multicheckpoint_samples_mode(tmp_path):
     res = np.load(res_path, allow_pickle=True).item()
     assert set(res) == set(STEPS)
     assert "rankme" in res[STEPS[0]]["before_final_norm"]["acts_uncentered"]
+    # drift: absent at the first checkpoint, present (vs spilled prev) at the second
+    assert "cka_drift" not in res[STEPS[0]]["before_final_norm"]
+    assert 0.0 <= res[STEPS[1]]["before_final_norm"]["cka_drift"]["cka_drift"] <= 1.0 + 1e-6
 
     # compute_metrics.py main() over the same files (separate output) agrees on the keys
     metrics_main(config_directory=str(tmp_path), model_name=MODEL.split("/")[-1],

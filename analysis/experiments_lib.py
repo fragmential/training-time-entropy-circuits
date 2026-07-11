@@ -117,6 +117,12 @@ virtual_hooks = {
     "cos_drift_ema": ([{'yvar': 'acts_mean_vec'}], _drift_ema, 'series'),
 }
 
+def _try_get(d, path):
+    try:
+        return reduce(getitem, path, d)
+    except (TypeError, KeyError):
+        return None
+
 def _operand(req, hook, model):
     if isinstance(req, str): return hook, req
     node, k = req.get('node', hook[0]), req.get('key')
@@ -135,7 +141,12 @@ def get_ys(source_file, model_name, hook, yvar, yvar_kwargs={}):
         res, step_nums = load_results(source_file, model_name)
         if step_nums is None:
             return None, None
-        ys = [reduce(getitem, hookpath, res[s]) for s in step_nums]
+        # keep only steps carrying the hook (e.g. drift metrics start at the 2nd checkpoint);
+        # a hook present at no step falls through to the virtual-hook path as before
+        pairs = [(y, s) for s in step_nums if (y := _try_get(res[s], hookpath)) is not None]
+        if not pairs:
+            raise KeyError(hookpath)
+        ys, step_nums = map(list, zip(*pairs))
 
     except (TypeError, KeyError) as e:
         if step_nums is None: raise e

@@ -37,4 +37,6 @@ max_layers_per_pass: 0
 collect_format: acts
 storage_format: eigenvalues
 compute_metrics: True
+#               OL1B  OL7B   Py1b  Py6.9b   (drift is 1B-only, like the packed run)
+drift_metrics: [True, False, True, False]
 keep_cached: False

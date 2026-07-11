@@ -62,8 +62,8 @@ python scripts/collect.py --model_name EleutherAI/pythia-70m-deduped \
     --config configs/reproduce_rankme_alpha.yaml
 
 # Model sweep via SLURM wrapper
-./slurm/run_collect.sh configs/rankme_alpha_packed.yaml
-./slurm/run_collect.sh configs/full.yaml --time 12:00:00
+./slurm/collect.sh configs/rankme_alpha_packed.yaml
+./slurm/collect.sh configs/full.yaml --time 12:00:00
 
 # CLI flags override config values
 python scripts/collect.py --config configs/full_limited.yaml \
@@ -226,8 +226,8 @@ run downloads weights to `$HF_HOME` (optionally prewarm: `uv run python -m tests
 export HF_HOME="/projects/prjs1815/hf_cache"
 cd ~/Tracing-representation-geometry-reproduction
 
-./slurm/run_collect.sh configs/rankme_alpha_packed.yaml
-./slurm/run_collect.sh configs/full_limited.yaml --time 4:00:00
+./slurm/collect.sh configs/rankme_alpha_packed.yaml
+./slurm/collect.sh configs/full_limited.yaml --time 4:00:00
 ```
 
 - Staging partition: CPU-only, I/O bound work (metrics, storage conversions)

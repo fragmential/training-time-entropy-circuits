@@ -126,6 +126,20 @@ def _heatmap_panel(data_sources, model_names, opts):
         V = np.array([np.asarray(vecs[k][si], dtype=float) for k in range(len(vecs))])
         V /= np.linalg.norm(V, axis=1, keepdims=True)
         frames.append(V @ V.T)
+    return _matrix_spec(frames, labels, opts), steps
+
+
+def _matrix_panel(yvar, data_sources, model_names, opts):
+    """A stored matrix-valued metric series, animated directly (e.g. the samples runs'
+    block_block_coupling matrices: cka / signed_trace / mean_cos at the root node)."""
+    (src, hook, *_), mn = data_sources[0], model_names[0]
+    frames, steps = _bk('get_ys')(src, mn, hook, yvar)
+    return _matrix_spec([np.asarray(f, dtype=float) for f in frames], opts.get('labels'), opts), steps
+
+
+def _matrix_spec(frames, labels, opts):
+    """dynamic=True -> symmetric range from the off-diagonal max; per_frame picks whether
+    that range is recomputed each frame (full contrast) or pinned once (stable colorbar)."""
     dynamic, per_frame = opts.get('dynamic', True), opts.get('per_frame', False)
     vmin, vmax = opts.get('vmin', -1), opts.get('vmax', 1)
     if dynamic and not per_frame:                       # pin one global symmetric range
@@ -134,14 +148,15 @@ def _heatmap_panel(data_sources, model_names, opts):
     return dict(kind='heatmap', frames=frames, labels=labels,
                 hide_diag=opts.get('hide_diag', True), per_frame=dynamic and per_frame,
                 cmap=opts.get('cmap', 'coolwarm'), vmin=vmin, vmax=vmax,
-                title=opts.get('title')), steps
+                title=opts.get('title'))
 
 
 def _materialize(panels, ncols, fps, model, xvar, prog_bar, suptitle, figsize, smooth=0, peak=0):
     spec_panels, steps = [], None
     for yvar, data_sources, model_names, opts in panels:
-        if opts.get('kind') == 'heatmap':
-            panel, steps = _heatmap_panel(data_sources, model_names, opts)
+        if opts.get('kind') in ('heatmap', 'matrix'):
+            panel, steps = (_heatmap_panel(data_sources, model_names, opts) if opts['kind'] == 'heatmap'
+                            else _matrix_panel(yvar, data_sources, model_names, opts))
             spec_panels.append(panel)
             continue
         palettes = _panel_palettes(data_sources, opts)

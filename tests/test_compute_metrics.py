@@ -388,3 +388,38 @@ def test_incremental_overlap_orthogonal_supports():
                         "__format__": "acts"})
     chi = get_metrics(acc.v)["blk0.attn.out"]["incremental_overlap"]
     assert chi["chi_frac"] > 0.98 and abs(chi["chi"] - chi["h_w"]) < 0.02
+
+
+def test_drift_metrics_with_ctx():
+    from scripts.compute_metrics import get_metrics
+    acc, prev = _composition_acc(), _composition_acc()   # same seed -> identical checkpoints
+    res = get_metrics(acc.v, ctx={"prev": prev.v})
+    out = res["blk0.attn.out"]
+    assert abs(out["cka_drift"]["cka_drift"] - 1.0) < 1e-4
+    gen = out["geneig_drift"]["eigvals"]
+    assert torch.allclose(gen, torch.ones_like(gen), atol=0.05)
+
+
+def test_drift_metrics_skip_without_ctx():
+    from scripts.compute_metrics import get_metrics
+    res = get_metrics(_composition_acc().v)
+    assert "cka_drift" not in res["blk0.attn.out"] and "geneig_drift" not in res["blk0.attn.out"]
+
+
+def test_block_ledger_identity_closes():
+    from scripts.compute_metrics import get_metrics
+    res = get_metrics(_composition_acc().v)
+    led = res["blk0"]["block_ledger"]
+    recon = led["chi"] + led["quality"] + led["interference"]
+    assert abs(led["delta_s"] - recon) < 1e-9          # exact by construction
+    # fixture: before_final_norm = in + attn + mlp, all independent full-rank -> chi ~ 0
+    assert abs(led["chi"]) < 0.05 and len(led["w"]) == 3
+
+
+def test_mean_cos_in_couplings():
+    from scripts.compute_metrics import get_metrics
+    res = get_metrics(_composition_acc().v)
+    # r = in + attn + mlp contains c itself -> E[cos(c, r)] ~ 1/sqrt(3)
+    assert abs(res["blk0.attn.out"]["block_residual_coupling"]["cos_cr"] - 3 ** -0.5) < 0.05
+    mc = res[""]["block_block_coupling"]["mean_cos"]
+    assert torch.allclose(mc.diagonal(), torch.ones(2)) and abs(mc[0, 1]) < 0.2
