@@ -1,0 +1,21 @@
+output_dir: data/inferences/rq2_memorized_olmo_a
+# RQ2 T_mem for OLMo: Merullo et al's OLMo-2-1B memorized set (650 seqs, ~112 tokens each),
+# decoded from reference/memorization_kfac. PACKED all-token (padded/last would give N=650 < d
+# rank-deficient covariance); compare vs rq2_general_packed. NO shuffle seed (cache-key match).
+model_name: "allenai/OLMo-2-0425-1B"
+batch_size: 16
+num_samples: 325
+dataset_name: merullo_memorized_olmo_a
+packing: packed
+token_selection: all
+seq_len: 512
+min_length: 16
+checkpoints: "final"
+hooks:
+  - blk*.attn.in:both
+  - blk*.mlp.up.in:both
+  - before_final_norm:both
+max_layers_per_pass: 0
+storage_format: cov_svd
+compute_metrics: True
+keep_cached: True

@@ -1,0 +1,28 @@
+output_dir: data/inferences/rq2_memorized_b
+# RQ2 T_mem (verbatim): EleutherAI pythia-memorized-evals (deduped.1b), served via the
+# prebuilt text cache data/filtered_texts/pythia_memorized_16384.json (64-token sequences,
+# skewed toward high-entropy strings - keys/hashes/boilerplate - which is the population
+# H2.2 calls "memorised spurious data"). Pythia-only; NO text_shuffle_seed (cache-key match).
+
+model_name:
+  - "EleutherAI/pythia-1b-deduped"
+
+batch_size: 256
+num_samples: 8_192
+dataset_name: pythia_memorized_b
+packing: padded
+token_selection: last
+max_length: 512
+seq_len: 512
+min_length: 32
+checkpoints: "final"
+
+hooks:
+  - blk*.attn.in:both
+  - blk*.mlp.up.in:both
+  - before_final_norm:both
+
+max_layers_per_pass: 0
+storage_format: cov_svd
+compute_metrics: True
+keep_cached: True   # concurrent same-model legs: a finishing job must not delete the cache under the others

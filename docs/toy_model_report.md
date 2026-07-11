@@ -92,17 +92,100 @@ variants: the nonlinear residual toy is the legitimate H3.2 test bed.
 - Dumps: `data/inferences/toy_<variant>/toy-<variant>/step{t}.pt` (44–57 log-spaced ckpts × 8
   variants); metrics: `data/results/toy_<variant>/results_toy-<variant>.npy`; raw trajectories
   for the Fig-4 panels: `data/results/toy/trajectories_<variant>.pt`
-- Figures: `toy/figures/fig4_single.png`, `fig_controls.png`, `fig_multi_*.png`
+- Figures: `toy/figures/fig4_single.png`, `fig_controls.png`, `fig_multi_*.png`, `fig_arch_grid.png`
 - Test: `tests/test_toy_format.py` (dump loads via DataAccessor, no weight derivation needed,
   ledger fires on a 2-block micro-run)
+
+## Architecture knobs — is the concentration mode architecturally selected?
+
+Two `Spec` knobs on the `multi_residual_nonlinear` base test whether the LLM family split
+(Pythia rogue-write/quality vs OLMo aligned-writes/interference, docs/dig_findings.md) is
+architecturally selected. `norm` places an rms normalization: **prenorm** — each write reads
+$\mathrm{rms}(f_k)$, i.e. the read-side norm that *Pythia itself* (like every pre-norm
+transformer) already has; **writenorm** — each write's *output* is per-sample rms-normalized
+before the residual add, $f_{k+1} = f_k + \mathrm{rms}(g_k(f_k))$, the analog of OLMo-2's
+reordered norm (RMSNorm on the sublayer output), which forbids massive write flags by
+construction; **bothnorm** — both. The stream itself always stays raw. `writes: 2` with
+`parallel` (both writes read the block input) vs sequential (the second reads input + first
+write; identical parameter count). Grid {none, prenorm, writenorm, bothnorm} × {parallel,
+sequential} × seeds {0,1,2} — variants `arch[_pre|_wn|_bn]_{par,seq}`, the two writes dumped
+as `blk{k}.{attn,mlp}.out` so the unmodified 3-component `block_ledger` fires. Carrier = the
+most negative Δ(term summed over blocks) from the stream-RankMe peak (centered,
+`before_final_norm`) to the final step ("none" when the stream never declines / every |Δ| <
+0.05); trace ratio = final ledger-`w` write/stream share; "min write" = the write with the
+lowest final centered RankMe. Signature figure: `toy/figures/fig_arch_grid.png` (per-run
+stream RankMe + summed quality term, and the final min-write RankMe vs energy-share rogue
+check, colored by norm cell).
+
+| variant × seed | RankMe peak→final | carrier | Δq / ΔI / Δχ | min write RankMe (ratio) | last-2-mlp signed tr | max_k w_k |
+|---|---|---|---|---|---|---|
+| arch_par s0/s1/s2 | 7.5→2.8, 6.7→2.6, 7.1→2.1 | **quality ×3** | −1.0…−1.4 / −0.2…−0.3 / +0.3…+0.6 | 1.8–2.6 (0.7–1.7×) | +0.82…+0.85 | 0.17–0.19 |
+| arch_seq s0/s1/s2 | 7.2→3.1, 6.2→2.6, 7.1→2.5 | **quality ×3** | −1.1…−1.6 / +0.1…+0.3 / +0.1…+0.5 | 1.7–2.4 (1.2–1.8×) | +0.76…+0.88 | 0.13–0.16 |
+| arch_pre_par s0/s1/s2 | 7.0→4.8, 7.0→4.4, 6.8→4.0 | quality, chi, chi | −0.1…−0.3 / −0.03…−0.16 / +0.04…−0.27 | 3.2–3.9 (0.03–0.13×) | +0.77…+0.83 | 0.14–0.18 |
+| arch_pre_seq s0/s1/s2 | 6.4→4.5, 6.8→4.4, 6.5→4.6 | quality, chi, quality | −0.2…−0.7 / −0.02…+0.4 / −0.1…−0.2 | 3.3–3.8 (0.02–0.08×) | +0.78…+0.87 | 0.12–0.16 |
+| arch_wn_par s0/s1/s2 | 8.7→8.7, 6.9→6.7, 7.2→7.2 | none, chi, none | 0…+0.04 / 0…+0.42 / −0.48…0 | 5.6–7.5 (0.30–0.36×) | +0.45…+0.48 | 0.09–0.10 |
+| arch_wn_seq s0/s1/s2 | 7.7→7.7, 6.9→6.6, 7.7→7.7 | none, chi, none | 0…+0.08 / 0…+0.36 / −0.48…0 | 6.4–6.7 (0.03–81×)† | +0.42…+0.55 | 0.09 |
+| arch_bn_par s0/s1/s2 | 8.5→7.8, 8.0→7.0, 7.1→7.0 | **chi ×3** | −0.1…−0.3 / +0.4…+0.7 / −0.3…−0.5 | 5.1–5.3 (0.41–0.78×) | +0.69…+0.77 | 0.09–0.10 |
+| arch_bn_seq s0/s1/s2 | 7.6→7.4, 7.7→7.1, 7.2→7.2 | chi, chi, none | −0.17…0 / 0…+0.57 / −0.56…0 | 5.4–5.8 (0.04–0.42×) | +0.74…+0.78 | 0.10 |
+
+† the 81× is `blk0.mlp.out` against the near-init (tiny) block-0 stream — a scale artifact of
+adding unit-rms writes to a small early stream, at RankMe 6.7; not a rogue.
+
+Guard: $\max_k w_k$ = 0.12–0.19 (no-norm / prenorm) and 0.09–0.10 (writenorm / bothnorm; the
+per-sample norm equalizes shares almost exactly) — all eight cells are comfortably
+representative; H3.3-evaluable.
+
+**Correction (this round).** The previous round read the prenorm result as "direct toy
+support for OLMo-2's norm changes removing the Pythia mechanism". That was mislabeled:
+prenorm is a *read*-side norm, which is Pythia's own arrangement — real Pythia reads a
+normalized stream *and still* develops the rogue write. So prenorm's suppression here is a
+**toy-vs-LLM discrepancy** (the toy's rogue mechanism depends on raw reads in a way the
+LLM's does not), not evidence about OLMo-2. The architecturally distinctive OLMo-2 feature
+is the *reordered* norm — RMSNorm on the sublayer **output**, i.e. the write itself is
+per-token normalized before joining the stream — which is the `writenorm` cell (OLMo-2, like
+the toy's writenorm, reads the raw stream).
+
+- **No-norm cells reproduce the Pythia signature 6/6 seeds**, robust to wiring: quality
+  carries the post-peak decline, and one write collapses to RankMe ≈ 1.7–2.6 at O(1) energy
+  vs the stream — rogue-like rank collapse (though never Pythia's 20× energy growth).
+- **Prenorm suppresses the mechanism in both wirings, 6/6 seeds**: compression halves (final
+  RankMe 4.0–4.8 vs 2.1–3.1 from similar peaks), the quality decline shrinks 3–7×, the worst
+  write's RankMe roughly doubles (3.2–3.9) and its energy share collapses to 0.02–0.13× the
+  stream — no rogue-like write survives. Per the correction above this is a toy/LLM
+  discrepancy, not an OLMo statement.
+- **Writenorm — the actual OLMo-2 analog — suppresses the rogue/quality mechanism completely,
+  6/6 seeds, both wirings**: in 4/6 runs the stream RankMe never declines from its peak at
+  all (6.9–8.7 held to the final step), the summed quality term stops falling entirely
+  (Δq ≥ 0), and the lowest-rank write finishes at RankMe 5.6–7.5 — no rogue write exists,
+  as the per-sample rms forbids energy concentration by construction. The residual decline
+  in 2/6 runs is small (≤ 0.3) and χ-attributed with ΔI *positive*.
+- **Bothnorm** behaves like writenorm with a slightly larger residual decline (≤ 1.0),
+  χ-attributed 5/6 (none 1/6); ΔI is again positive (+0.4…+0.7).
+- **Interference never becomes the carrier** in any of the 24 runs across the 8-cell grid —
+  where it moves at all under write-side norms it *rises*, the opposite of OLMo's falling I.
+- **Parallel vs sequential selects nothing** — same carrier, same rogue behavior, only ΔI's
+  sign wobbles under no-norm/prenorm.
+- Late writes stay mutually **aligned** in every cell — +0.76…+0.88 (no-norm/prenorm/bothnorm),
+  lowered to +0.42…+0.55 by writenorm but never negative: the toy never reproduces Pythia's
+  anti-aligned late cancellation, knobs or not.
+
+**Verdict: a half-flip, now with the right label on it.** Write-side normalization — the
+OLMo-2 reordered-norm analog — removes the rogue/quality-collapse mechanism by construction
+(more completely than read-norm: mostly no compression phase at all), consistent with OLMo-2
+never developing a massive-flag rogue write. But no knob produces OLMo's
+interference-*driven* compression (a clean bounded negative for this grid), and write wiring
+is irrelevant. The concentration *mode* is architecturally suppressible here, not
+architecturally re-routable. Separately, the prenorm cell shows the toy's mechanism needs raw
+*reads*, which real pre-norm Pythia does not have — a caveat on how literally the toy's rogue
+maps onto Pythia's.
 
 ## What this buys RQ1/RQ3 (next steps, deprioritised)
 
 The toy is now the **component-ablation platform** the LLM scale forbids: the
 quality-vs-interference family split (Pythia's rogue write vs OLMo's aligned late writes,
 docs/dig_findings.md) is untestable by retraining LLMs, but norm-placement / QK-norm-analog /
-parallel-vs-sequential-block variants are one `Spec` field each here. The immediate candidate
-experiment: add a normalization knob and ask whether it flips the toy's ledger signature from
-quality-driven (observed, Pythia-like) toward interference-driven (OLMo-like) — i.e. whether
-*which ledger term carries compression* is an architectural selection, as the cross-family dig
-suggests.
+parallel-vs-sequential-block variants are one `Spec` field each here. The norm-placement
+(read-norm, write-norm, both) and parallel/sequential knobs are done (see "Architecture
+knobs" above: write-norm — the OLMo-2 reordered-norm analog — removes the quality-collapse
+by construction, nothing re-routes it to interference); the remaining candidate is a QK-norm
+analog.

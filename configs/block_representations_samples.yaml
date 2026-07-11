@@ -8,12 +8,14 @@ model_name:
   - "allenai/OLMo-2-1124-7B"
   - "EleutherAI/pythia-1b-deduped"
   - "EleutherAI/pythia-6.9b-deduped"
+  - "EleutherAI/pythia-160m-deduped"
+  - "EleutherAI/pythia-410m-deduped"
 
-#            OL1B    OL7B   Py1b    Py6.9b
-batch_size: [  48,     32,   256,      72]
+#            OL1B    OL7B   Py1b    Py6.9b  Py160m   Py410m
+batch_size: [  48,     32,   256,      72,     256,     256]
 # Peak RSS ≈ samples + resolver caches (+ drift: prev spill in RAM-tmpfs $TMPDIR + prev
 # caches — hence drift is 1B-only; at 7B scale the spill alone is ~85 GB of the share).
-max_tokens: [262_144, 81_920, 262_144, 98_304]
+max_tokens: [262_144, 81_920, 262_144, 98_304, 262_144, 262_144]
 
 packed_data_path:
   allenai/*: data/mixes/olmo_mix_30M_512.pt
@@ -39,6 +41,6 @@ max_layers_per_pass: 0
 collect_format: acts
 storage_format: eigenvalues
 compute_metrics: True
-#               OL1B  OL7B   Py1b  Py6.9b
-drift_metrics: [True, False, True, False]
+#               OL1B  OL7B   Py1b  Py6.9b Py160m Py410m
+drift_metrics: [True, False, True, False, False, False]
 keep_cached: False

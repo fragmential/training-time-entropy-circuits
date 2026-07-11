@@ -1,0 +1,25 @@
+output_dir: data/inferences/rq2_general_packed_d
+# RQ2 split-half null: second G sample (packed), seed 43.
+model_name:
+  - "EleutherAI/pythia-1b-deduped"
+  - "allenai/OLMo-2-0425-1B"
+
+batch_size: [32, 16]   # backward-pass runs: retained graph ~3x forward VRAM
+max_tokens: 2_097_152
+dataset_name: native
+text_shuffle_seed: 45
+packing: packed
+token_selection: all
+seq_len: 512
+min_length: 32
+checkpoints: "final"
+
+hooks:
+  - blk*.attn.in:both
+  - blk*.mlp.up.in:both
+  - before_final_norm:both
+
+max_layers_per_pass: 0
+storage_format: cov_svd
+compute_metrics: True
+keep_cached: True   # concurrent same-model legs: a finishing job must not delete the cache under the others

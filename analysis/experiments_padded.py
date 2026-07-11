@@ -594,8 +594,11 @@ for model in filter_model_names:
 # block — is the head phenomenon written by the last block?
 # Padded caveat: MP broadening at N/d ~ 4 contaminates the deep tail — read the k=128 /
 # 128-512 curves as trends only.
-KS = (0, 1, 2, 8, 32, 128)
-WINDOWS = ((11, 100), (32, 100), (32, 300), (128, 512))
+# Deep band (512, -20): the compression front NEVER reaches it — it flattens monotonically
+# through all of training (no tail fall-off either; band metrics are invariant to head growth).
+# Padded caveat: N/d ~ 4-8 -> MP broadening contaminates the deep band; read trends only.
+KS = (0, 1, 2, 8, 32, 128, 512)
+WINDOWS = ((11, 100), (32, 128), (128, 512), (512, -20))
 _tail = lambda leaf: [(BLOCK_SAMPLES, (leaf, 'acts_centered'), f'k={k}', ('tail_rankme', {'k': k})) for k in KS]
 _alpha_w = lambda leaf: [(BLOCK_SAMPLES, (leaf, 'acts_centered'), f'{k0}-{k1}', ('alpha_window', {'k0': k0, 'k1': k1}))
                          for k0, k1 in WINDOWS]
@@ -630,6 +633,55 @@ def _sub_ledger_grid(model):
 for model in filter_model_names:
     if 'OLMo' in model:
         _sub_ledger_grid(model)
+
+# %% [markdown]
+# ### Write means vs their covariance (Exp 4.7)
+
+# %%
+# mean_frac = ||mu||²/tr (bias-like-ness of a write), top_overlap = |<mû, v1_centered>|,
+# migration = centered-tail ↔ uncentered-top eigvec overlap. Pythia's rogue write is
+# variance-like (mean_frac → 0.003); OLMo's late writes are mean-heavy (mean_frac 0.4–0.6);
+# migration ≈ 0 everywhere (docs/dig_findings.md).
+def _mean_grid(model):
+    grid_start(ncols=2, title=f'Write means vs covariance — {get_model_label(model)}')
+    plot_group('mean_frac', bs_out(model, 'acts_centered'), [model], color_palette='gradient', ylog=True)
+    plot_group('top_overlap', bs_out(model, 'acts_mean_metrics'), [model], color_palette='gradient')
+    plot_group('rayleigh_normed', bs_out(model, 'acts_mean_metrics'), [model], color_palette='gradient')
+    plot_group('migration', bs_out(model, 'mean_migration'), [model], color_palette='gradient')
+    grid_show()
+
+for model in filter_model_names:
+    _mean_grid(model)
+
+# %% [markdown]
+# ### Ledger contribution figure (Exp 4.8)
+
+# %%
+# The three ledger terms summed over blocks, sign-stacked over training: the books balance,
+# so the black ΔS line IS the log-RankMe trajectory relative to the embeddings — no extra
+# weighting (R_over_r would double-count the w_i already inside each term).
+def _ledger_stack(model):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    terms = {y: np.sum([_lib.get_ys(BLOCK_SAMPLES, model, (f'blk{l}', 'block_ledger'), y)[0]
+                        for l in range(n_blocks_bs[model])], axis=0)
+             for y in ('chi', 'quality', 'interference')}
+    xs = _lib.get_xs_tokens(model, _lib.get_ys(BLOCK_SAMPLES, model, ('blk0', 'block_ledger'), 'chi')[1])
+    plt.figure(figsize=(8, 4))
+    pos, neg = np.zeros(len(xs)), np.zeros(len(xs))
+    for name, c in (('chi', 'tab:green'), ('quality', 'tab:red'), ('interference', 'tab:purple')):
+        v, base = terms[name], np.where(terms[name] >= 0, pos, neg)
+        plt.fill_between(xs, base, base + v, label=name, color=c, alpha=0.55)
+        pos, neg = pos + np.clip(v, 0, None), neg + np.clip(v, None, 0)
+    plt.plot(xs, sum(terms.values()), 'k', lw=2.5, label='ΔS total')
+    plt.xscale('log'); plt.xlabel('tokens'); plt.ylabel('rank entropy')
+    plt.legend(); plt.title(f'Ledger contributions — {get_model_label(model)}')
+    plt.show()
+
+for model in filter_model_names:
+    _ledger_stack(model)
+
+
 
 
 # %% [markdown]

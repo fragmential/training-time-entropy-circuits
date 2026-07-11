@@ -107,12 +107,14 @@ def _rankme(evs: np.ndarray) -> float:
     return float(np.exp(-(p * np.log(p)).sum()))
 
 def _alpha(evs: np.ndarray, k0: int = 32, k1: int = 300) -> float:
-    """Stringer-style weighted log-log slope over eigenvalue ranks [k0, k1) (0-based)."""
+    """Stringer-style weighted log-log slope over eigenvalue ranks [k0, k1) (0-based).
+    k1 <= 0 counts back from the end of the positive spectrum (e.g. -20 = drop last 20)."""
     lam = np.asarray(evs, float); lam = lam[lam > 0]
-    r = np.arange(k0, min(k1, len(lam))) + 1.0
+    k1 = min(k1, len(lam)) if k1 > 0 else len(lam) + k1
+    r = np.arange(k0, k1) + 1.0
     x = np.stack([-np.log(r), np.ones_like(r)], 1)
     w = (1.0 / r)[:, None]
-    return float(np.linalg.solve(x.T @ (x * w), (w * x).T @ np.log(lam[k0:min(k1, len(lam))]))[0])
+    return float(np.linalg.solve(x.T @ (x * w), (w * x).T @ np.log(lam[k0:k1]))[0])
 
 virtual_hooks = {
     "peak_eigval": (["eigenspectrum", "trace"], (lambda evs, tr: evs[0].item()*tr)),

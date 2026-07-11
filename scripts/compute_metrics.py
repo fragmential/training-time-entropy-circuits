@@ -443,7 +443,8 @@ def generalized_eigenvalues(
     eigvals_acts: torch.Tensor,
     eigvecs_acts: torch.Tensor,
     eps_factor: float = 1e-6,
-) -> torch.Tensor:
+    vecs: bool = False,
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """Generalized eigenvalues of grads w.r.t. acts: solve (grads) v = λ (acts) v.
 
     Both covariances must be in the same space (d × d). Returns the generalized
@@ -469,7 +470,10 @@ def generalized_eigenvalues(
     C = acts_inv_sqrt.unsqueeze(1) * Q * grads_sqrt.unsqueeze(0)  # (d, d)
     M = C @ C.T                                   # symmetric PSD
 
-    return torch.linalg.eigvalsh(M).flip(0).clamp(min=0).cpu()   # M is synthetic, decomposed in place
+    if not vecs:
+        return torch.linalg.eigvalsh(M).flip(0).clamp(min=0).cpu()   # M is synthetic, decomposed in place
+    lam, U = torch.linalg.eigh(M)                 # U columns are coordinates in the acts eigenbasis
+    return lam.flip(0).clamp(min=0).cpu(), U.flip(1).cpu()
 
 
 # A metric fires at any node where all its operands resolve. `kfac` thus fires at
@@ -625,13 +629,20 @@ def _gen_block_vs_residual(node: Node) -> dict | None:
     return _gen_pair(v[0], v[2]) if (v := _c_r(node)) else None
 
 
-def _gen_pair(a: View, b: View) -> dict | None:
-    """Generalized eigenvalues Σ_a v = λ Σ_b v (centered) + spectral family."""
+def _gen_pair(a: View, b: View, vecs: bool = False) -> dict | None:
+    """Generalized eigenvalues Σ_a v = λ Σ_b v (centered) + spectral family. With vecs, also
+    tail_centroid: mean spectral-rank centroid of the top-8 generalized eigenvectors' energy in
+    b's eigenbasis — where a's excess structure lives in b's spectrum (RQ2 tail locality)."""
     if not (g := _comps(a.eigvals_centered, a.eigvecs_centered, b.eigvals_centered, b.eigvecs_centered)):
         return None
     ea, va, eb, vb = g
-    gen = generalized_eigenvalues(ea, va, eb, vb)
-    return {"eigvals": gen, **(spectral_metrics(gen) if len(gen) >= 11 else {})}
+    gen = generalized_eigenvalues(ea, va, eb, vb, vecs=vecs)
+    gen, U = gen if isinstance(gen, tuple) else (gen, None)
+    out = {"eigvals": gen, **(spectral_metrics(gen) if len(gen) >= 11 else {})}
+    if U is not None:
+        idx = torch.arange(U.shape[0], dtype=torch.float64)
+        out["tail_centroid"] = float((U[:, :8].double().square() * idx[:, None]).sum(0).mean())
+    return out
 
 
 def _incremental_overlap(node: Node) -> dict | None:
@@ -781,14 +792,14 @@ def _geneig_drift(node: Node, prev: Node) -> dict | None:
         eigvals: torch.Tensor  # (d,) drift spectrum, descending
         **spectral_metrics(eigvals)
     """
-    return _gen_pair(*v) if (v := _drift_pair(node, prev)) else None
+    return _gen_pair(v[0], v[1]) if (v := _drift_pair(node, prev)) else None
 
 
 def _gen_vs_ref(node: Node, ref: Node) -> dict | None:
     """Generalized eigenvalues Σ_self v = λ Σ_ref v per quantity, against the same leaf of an
     external reference run (--ref: e.g. task population vs general population)."""
     out = {q: r for q in ("acts", "grads")
-           if (v := _views(node.get(q), ref.get(f"{node.path}.{q}"))) and (r := _gen_pair(*v))}
+           if (v := _views(node.get(q), ref.get(f"{node.path}.{q}"))) and (r := _gen_pair(*v, vecs=True))}
     return out or None
 
 

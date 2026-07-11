@@ -35,6 +35,11 @@ class Spec:
     balanced: bool = False       # init with f^T f = W W^T (the paper's alignment assumption)
     dup: int = 1                 # exact sample replication: identical init -> identical dynamics,
     seed: int = 0                # RankMe-invariant, lifts N above spectral_metrics' 13-eigval floor
+    norm: str = "none"           # "prenorm": each write reads rms(stream) | "writenorm": each write's
+                                 #   output is rms-normalized before the residual add (OLMo-2's
+                                 #   reordered norm) | "bothnorm": both; the stream itself stays raw
+    writes: int = 1              # writes per block; 2 dumps them as blk{k}.{attn,mlp}.out
+    parallel: bool = True        # writes>1: all read the block input | each reads input + prior writes
 
 
 SKEW, UNIFORM = (2, 2, 1, 1), (2, 2, 2, 2)   # the paper's Fig 4 / control class counts
@@ -49,6 +54,16 @@ VARIANTS: dict[str, Spec] = {
     "multi_residual":           MULTI,
     "multi_residual_nonlinear": replace(MULTI, nonlinear=True),
     "multi_plain":              replace(MULTI, residual=False, lr=0.005, steps=100_000),
+    # architecture-knob grid on the multi_residual_nonlinear base (two writes per block,
+    # identical parameter count across parallel/sequential): norm {none, prenorm} x wiring
+    "arch_par":     (MULTI2 := replace(MULTI, nonlinear=True, writes=2)),
+    "arch_seq":     replace(MULTI2, parallel=False),
+    "arch_pre_par": replace(MULTI2, norm="prenorm"),
+    "arch_pre_seq": replace(MULTI2, norm="prenorm", parallel=False),
+    "arch_wn_par":  replace(MULTI2, norm="writenorm"),
+    "arch_wn_seq":  replace(MULTI2, norm="writenorm", parallel=False),
+    "arch_bn_par":  replace(MULTI2, norm="bothnorm"),
+    "arch_bn_seq":  replace(MULTI2, norm="bothnorm", parallel=False),
 }
 
 
@@ -67,14 +82,23 @@ class Toy(torch.nn.Module):
         make = ((lambda: torch.nn.Sequential(torch.nn.Linear(s.d, 4 * s.d), torch.nn.Tanh(),
                                              torch.nn.Linear(4 * s.d, s.d)))
                 if s.nonlinear else (lambda: torch.nn.Linear(s.d, s.d, bias=False)))
-        self.blocks = torch.nn.ModuleList(make() for _ in range(s.depth))
+        self.blocks = torch.nn.ModuleList(make() for _ in range(s.depth * s.writes))
 
-    def forward(self) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
+    def forward(self) -> tuple[list[torch.Tensor], list[list[torch.Tensor]]]:
+        read = _rms if self.s.norm in ("prenorm", "bothnorm") else (lambda x: x)
+        emit = _rms if self.s.norm in ("writenorm", "bothnorm") else (lambda x: x)
         streams, writes = [self.theta + 0], []
-        for g in self.blocks:
-            writes.append(g(streams[-1]))
-            streams.append(streams[-1] + writes[-1] if self.s.residual else writes[-1])
+        for k in range(self.s.depth):
+            f, ws = streams[-1], []
+            for g in self.blocks[k * self.s.writes:(k + 1) * self.s.writes]:
+                ws.append(emit(g(read(f if self.s.parallel else sum(ws, f)))))
+            writes.append(ws)
+            streams.append(sum(ws, f if self.s.residual else torch.zeros_like(f)))
         return streams, writes
+
+
+def _rms(x: torch.Tensor) -> torch.Tensor:
+    return x * x.square().mean(-1, keepdim=True).add(1e-8).rsqrt()
 
 
 def _loss(s: Spec, logits: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -82,10 +106,11 @@ def _loss(s: Spec, logits: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             else F.mse_loss(logits, F.one_hot(y, len(s.counts)).float()))
 
 
-def _leaves(streams: list[torch.Tensor], writes: list[torch.Tensor]) -> dict[str, torch.Tensor]:
+def _leaves(streams: list[torch.Tensor], writes: list[list[torch.Tensor]]) -> dict[str, torch.Tensor]:
     return {"before_final_norm": streams[-1], "after_final_norm": streams[-1],
             **{f"blk{k}.attn.in": f for k, f in enumerate(streams[:-1])},
-            **{f"blk{k}.mlp.out": w for k, w in enumerate(writes)}}
+            **{f"blk{k}.{n}": w for k, ws in enumerate(writes)
+               for n, w in zip(("attn.out", "mlp.out")[-len(ws):], ws)}}
 
 
 class Dumper:
@@ -150,10 +175,13 @@ def train(variant: str, spec: Spec | None = None, output_root: str = "data/infer
     return packed
 
 
-def main(variant: str = "all", checkpoints: int = 60, seed: int | None = None) -> None:
+def main(variant: str = "all", checkpoints: int = 60, seed: int | None = None,
+         seeds: tuple[int, ...] = ()) -> None:
+    """`seeds` sweeps a variant, suffixing dump/results names with _s{seed}."""
     for name in list(VARIANTS) if variant == "all" else [variant]:
-        t = train(name, checkpoints=checkpoints, seed=seed)
-        print(f"{name}: {len(t['steps'])} checkpoints, final loss {t['loss'][-1]:.4f}")
+        for tag, sd in [(f"{name}_s{s}", s) for s in seeds] or [(name, seed)]:
+            t = train(tag, spec=VARIANTS[name], checkpoints=checkpoints, seed=sd)
+            print(f"{tag}: {len(t['steps'])} checkpoints, final loss {t['loss'][-1]:.4f}")
 
 
 if __name__ == "__main__":

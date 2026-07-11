@@ -101,14 +101,15 @@ class HookCollector(Capturer):
         self._grads_sum: torch.Tensor | None = None   # (d,) running sum for gradient means
 
         # Register hooks: forward for acts (side decides pre/post), backward for grads.
+        # Input-side grads go through per-tensor hooks attached in _fwd_pre — module-level
+        # full_backward_hook yields an EMPTY grad_input for kwarg-called modules (OLMo-2).
         self._handles = []
         if module is not None:
-            if "acts" in self.quantities:
-                if capture == "input":
-                    self._handles.append(module.register_forward_pre_hook(self._fwd_pre, with_kwargs=True))
-                else:
-                    self._handles.append(module.register_forward_hook(self._fwd_post))
-            if "grads" in self.quantities:
+            if capture == "input" and self.quantities:
+                self._handles.append(module.register_forward_pre_hook(self._fwd_pre, with_kwargs=True))
+            elif "acts" in self.quantities:
+                self._handles.append(module.register_forward_hook(self._fwd_post))
+            if "grads" in self.quantities and capture != "input":
                 self._handles.append(module.register_full_backward_hook(self._bwd))
 
     # ------------------------------------------------------------------
@@ -189,8 +190,13 @@ class HookCollector(Capturer):
     def _fwd_pre(self, module, args, kwargs):
         if not self.active:
             return
-        x = _hook_input(args, kwargs).detach()
-        self.feed(x)
+        x = _hook_input(args, kwargs)
+        if "acts" in self.quantities:
+            self.feed(x.detach())
+        if "grads" in self.quantities and x.requires_grad:
+            # Full dL/dh at the hookpoint (summed over ALL consumers of the tensor), not the
+            # through-this-module grad_input — the meaningful representation gradient.
+            x.register_hook(lambda g: self.feed_grad(g.detach()))
 
     def _fwd_post(self, module, inp, output):
         if not self.active:
@@ -204,7 +210,7 @@ class HookCollector(Capturer):
     def _bwd(self, module, grad_input, grad_output):
         if not self.active:
             return
-        go = grad_input[0] if self.capture == "input" else grad_output[0]
+        go = grad_output[0]   # input-side grads use tensor hooks (see _fwd_pre), never this path
         if go is None:
             return
         self.feed_grad(go.detach())

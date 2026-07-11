@@ -1,0 +1,22 @@
+output_dir: data/inferences/block_write_id_olmo7b
+# OLMo-1B late-write token identity: raw samples at the aligned late writes, final ckpt.
+model_name: "allenai/OLMo-2-1124-7B"
+batch_size: 32
+max_tokens: 98_304
+packed_data_path: data/mixes/olmo_mix_30M_512.pt
+seq_len: 512
+min_length: 32
+checkpoints: "final"
+packing: packed
+token_selection: all
+activation_dtype: bf16
+hooks:
+  - blk29.mlp.out
+  - blk30.mlp.out
+  - blk31.mlp.out
+  - before_final_norm
+max_layers_per_pass: 0
+collect_format: acts
+storage_format: acts
+compute_metrics: False
+keep_cached: False

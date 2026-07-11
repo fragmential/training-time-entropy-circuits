@@ -94,8 +94,64 @@ $\dot\lambda_i$ with $\lambda_i$ across the compression phase (selection bias, d
 Confirmed if (a)–(c) hold for the final write and fail for mid-stack ones. The toy side of
 this correspondence is RQ3.
 
+### H1.4 — Write-norm placement selects the concentration mode (added after the dig)
+**Statement:** the family split (Pythia: quality-driven via a rogue token-activated write; OLMo-2:
+interference-driven, no rogue) is selected by **norm placement on the write output**: OLMo-2's
+reordered norm (RMSNorm on the sublayer output before the residual add) forbids
+token-activated massive writes by construction (each write is per-token normalized); standard pre-norm (Pythia — the write READS a normalized
+stream but writes unbounded) permits them. Wiring (parallel vs sequential) is predicted
+irrelevant (toy grid already showed this).
+**Confidence:** medium-high for the suppression direction; low for "and nothing else matters".
+**Pre-registered prediction (nanochat, third family):** Karpathy's nanochat-d12 has standard
+pre-norm, sequential wiring, **no write-norm** → it should develop a Pythia-style rogue write
+(an early-mid MLP write collapsing to rank ≈ 1, activated on a delimiter token class, quality-carried
+compression, late-block cancellation) despite OLMo-style wiring. Token-budget caveat: the
+rogue forms at the RankMe peak (1–4% into Pythia's training), so mechanism-ONSET claims are
+robust to nanochat's short run; endpoint comparisons must use pythia-410m at the token-matched
+checkpoint, not final.
+**Decide by:** (a) toy write-norm variant — **DONE, suppression confirmed**: write-norm
+kills the rogue/quality mechanism completely, 6/6 seeds, both wirings (stronger than
+read-norm: 4/6 runs show no post-peak decline at all; min write RankMe 5.6–7.5 vs 1.7–2.6
+without norms); interference never becomes the carrier in any of the 24 grid runs, so the
+suppression half of H1.4 is toy-supported while OLMo's own mode still needs an ingredient
+the toy lacks; (b) nanochat — **DONE, PREDICTION CONFIRMED**: nanochat-d12 shows the full
+Pythia signature (quality-carried, Σχ stable, interference crossing zero; blk3.mlp RankMe 2.7
++ blk4 RankMe 1.7 rank-collapsed writes carrying the collapse; blk10 rank restoration;
+blk11 head-mass 0.95) despite sequential wiring — no write-norm ⇒ rogue, as pre-registered.
+Token attribution + token-matched 410m endpoint comparison remain as refinements; (c) the
+dataset-swap control — **DONE, data explanation ruled OUT** (every finding replicates on
+swapped corpora within a few percent; docs/swap_run_findings.md).
+
+### H1.5 — The rogue direction is functionally inert at the output — **REFUTED**
+**Verdict (intervention run):** projecting the direction out of every post-blk3 stream costs
+**+1.04 nats overall** — massive and DIFFUSE (everywhere-else +1.06, after-newline +0.98,
+predicting-newline +0.53): the direction is heavily load-bearing at ALL positions, and least
+damaged exactly where it activates most. Both predictions wrong. Consistent with the
+massive-activations literature (ablations are catastrophic — the direction is bias/sink-like
+infrastructure, not discardable signal). The cancellation story needs the weaker reading: the
+late blocks reduce the direction's OUTPUT-VARIANCE contribution, but mid-stream it is
+structurally required — its energy is NOT "discarded". Caveat: stream-projection at every
+layer also perturbs LayerNorm statistics (a known confound of massive-activation ablations);
+the diffuse cost pattern is consistent with infrastructure damage either way.
+Original statement below, kept for the record:
+**Statement:** since the late blocks cancel the newline direction before the output (signed trace
+→ −0.65), the direction barely reaches the logits: projecting the rogue direction out of the
+residual stream at inference should cost little loss overall, with any cost concentrated at
+newline-adjacent predictions. The sharp phrasing: *Pythia spends ~22× the stream's energy on
+a signal it then discards* — a framing the intervention refuted (see verdict above). Companion (vocab-entropy lens, from the nanochat-session metrics):
+the compression phase should coincide with an output-entropy drop concentrated at structural
+token positions — the functional face of the direction, if it has one.
+**Confidence:** medium.
+**Decide by:** inference-time projection intervention (loss delta, overall vs newline-adjacent
+positions, across a few checkpoints) + vocab-entropy trajectories at structural vs ordinary
+positions. Refuted if ablation costs are large and diffuse (the direction would then be
+load-bearing, and the cancellation story needs revision).
+
 **Data:** `block_representations_samples` (packed, log/50, all four models — running) + padded
-twin (independent rows, last-token); drift metrics on the 1Bs. Analysis: Exp 4.1–4.4.
+twin (independent rows, last-token); drift metrics on the 1Bs. Analysis: Exp 4.1–4.4. H1.4
+additionally: toy write-norm grid, nanochat-d12 + token-matched pythia-410m,
+`block_representations_samples_swap` (data control). H1.5: projection intervention +
+vocab-entropy metrics (nanochat session).
 
 ---
 

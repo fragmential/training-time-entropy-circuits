@@ -23,6 +23,16 @@ _REGISTRY = {
     "dolmino":                ("allenai/dolmino-mix-1124", {"name": "dclm"}),
     "tulu_sft":               ("allenai/tulu-3-sft-mixture", {}),
     "lam":                    ("lama", {"name": "trex"}),
+    # RQ2 task populations
+    "open_web_math":          ("open-web-math/open-web-math", {}),
+    "gsm8k":                  ("openai/gsm8k", {"name": "main"}),
+    "quotes":                 ("jstet/quotes-500k", {}),
+    "pythia_memorized":       ("EleutherAI/pythia-memorized-evals", {}),  # served via prebuilt text cache
+    "pythia_memorized_a":     ("EleutherAI/pythia-memorized-evals", {}),  # disjoint halves (prebuilt caches)
+    "pythia_memorized_b":     ("EleutherAI/pythia-memorized-evals", {}),  # for split-half coherence
+    "merullo_memorized_olmo": ("allenai/OLMo-2-0425-1B", {}),  # Merullo et al mem set; prebuilt cache
+    "merullo_memorized_olmo_a": ("allenai/OLMo-2-0425-1B", {}),  # disjoint halves (split-half)
+    "merullo_memorized_olmo_b": ("allenai/OLMo-2-0425-1B", {}),
 }
 
 AVAILABLE_DATASETS = sorted(_REGISTRY)
@@ -87,7 +97,7 @@ def load_and_cache_texts(
     texts = []
     total_bytes = 0
     for seq in tqdm(dataset, desc="Filtering"):
-        text = seq[content_key]
+        text = "\n".join(seq[k] for k in content_key.split("+"))   # "question+answer" joins fields
         if tokenizer(text, return_tensors="pt").input_ids.shape[-1] > min_length:
             if max_bytes is not None:
                 doc_bytes = len(text.encode("utf-8"))

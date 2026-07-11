@@ -21,6 +21,8 @@ FIGURES = "toy/figures"
 PHASE_STYLES = (("warmup", ":"), ("entropy-seeking", "-"), ("compression-seeking", "--"))
 CLASS_COLORS = ("magenta", "orange", "royalblue", "seagreen", "orchid", "goldenrod", "steelblue", "olive")
 LEDGER_TERMS = ("delta_s", "chi", "quality", "interference")
+NORM_COLORS = {"none": "#D55E00", "prenorm": "#0072B2", "writenorm": "#009E73", "bothnorm": "#CC79A7"}
+ARCH_CELLS = {"arch": "none", "arch_pre": "prenorm", "arch_wn": "writenorm", "arch_bn": "bothnorm"}
 
 
 def _results(variant: str) -> dict[int, dict]:
@@ -121,6 +123,44 @@ def fig_multi(variant: str) -> None:
     _save(fig, f"fig_multi_{variant}")
 
 
+def fig_arch(depth: int = 6, seeds: tuple[int, ...] = (0, 1, 2)) -> None:
+    """Signature figure for the architecture-knob grid: stream RankMe and summed quality
+    ledger term over training (one thin line per run), plus the final rogue check (min-write
+    RankMe vs its ledger-w energy share). Color = norm cell, line style / marker = wiring."""
+    fig, (rx, qx, gx) = plt.subplots(1, 3, figsize=(16, 4.6))
+    for cell, norm in ARCH_CELLS.items():
+        for wiring, ls, marker in (("par", "-", "o"), ("seq", "--", "s")):
+            for seed in seeds:
+                res = _results(f"{cell}_{wiring}_s{seed}")
+                steps = np.array(sorted(res))
+                rm = [res[s]["before_final_norm"]["acts_centered"]["rankme"] for s in steps]
+                q = [sum(res[s][f"blk{k}"]["block_ledger"]["quality"] for k in range(depth))
+                     for s in steps]
+                rx.plot(steps, rm, ls, color=NORM_COLORS[norm], lw=1.2, alpha=0.75)
+                qx.plot(steps, q, ls, color=NORM_COLORS[norm], lw=1.2, alpha=0.75)
+                fin = steps[-1]
+                writes = [f"blk{k}.{n}.out" for k in range(depth) for n in ("attn", "mlp")]
+                wrm = {w: res[fin][w]["acts_centered"]["rankme"] for w in writes}
+                mn = min(wrm, key=lambda w: wrm[w])
+                blk, kind = mn.split(".")[:2]
+                w = res[fin][blk]["block_ledger"]["w"]
+                gx.scatter(w[1 if kind == "attn" else 2] / w[0], wrm[mn], s=50,
+                           color=NORM_COLORS[norm], marker=marker, edgecolors="white", lw=0.8)
+    rx.set(xscale="log", xlabel="training steps (log)", ylabel="RankMe (centered stream)",
+           title="stream RankMe")
+    qx.axhline(0, color="gray", lw=0.8)
+    qx.set(xscale="log", xlabel="training steps (log)", ylabel="sum over blocks",
+           title="quality ledger term (the Pythia carrier)")
+    gx.set(xscale="log", xlabel="min write energy / stream energy (ledger $w$, log)",
+           ylabel="min final write RankMe", title="rogue check (final step)")
+    fig.legend(loc="lower center", ncol=6, handles=[
+        *(Line2D([], [], color=c, lw=2, label=n) for n, c in NORM_COLORS.items()),
+        Line2D([], [], color="gray", ls="-", marker="o", label="parallel"),
+        Line2D([], [], color="gray", ls="--", marker="s", label="sequential")])
+    fig.suptitle("architecture-knob grid: norm cell signatures (3 seeds each)")
+    _save(fig, "fig_arch_grid")
+
+
 def _save(fig: Figure, name: str) -> None:
     os.makedirs(FIGURES, exist_ok=True)
     fig.tight_layout()
@@ -134,6 +174,7 @@ def main() -> None:
     fig_controls()
     for v in ("multi_residual", "multi_residual_nonlinear", "multi_plain"):
         fig_multi(v)
+    fig_arch()
 
 
 if __name__ == "__main__":

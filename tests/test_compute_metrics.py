@@ -406,6 +406,7 @@ def test_gen_vs_ref_with_ctx():
     res = get_metrics(acc.v, ctx={"ref": ref.v})
     gen = res["blk0.attn.out"]["gen_vs_ref"]["acts"]["eigvals"]
     assert torch.allclose(gen, torch.ones_like(gen), atol=0.05)
+    assert 0 <= res["blk0.attn.out"]["gen_vs_ref"]["acts"]["tail_centroid"] <= len(gen)
     assert "gen_vs_ref" not in get_metrics(_composition_acc().v)["blk0.attn.out"]
 
 

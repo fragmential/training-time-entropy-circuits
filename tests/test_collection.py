@@ -39,6 +39,27 @@ def test_grad_accumulation():
     assert torch.allclose(c.captured()["grads"]["grads_gram"], (G.T @ G).double(), atol=1e-4)
 
 
+def test_input_grads_on_kwarg_called_module():
+    """Input-side grads must survive kwarg-style module calls (OLMo-2): module-level
+    full_backward_hook yields an empty grad_input there; the tensor-hook path must not."""
+    class KwargWrap(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.lin = nn.Linear(8, 8)
+
+        def forward(self, *, hidden_states):
+            return self.lin(hidden_states)
+
+    m = KwargWrap()
+    c = HookCollector(m, capture="input", mode="cov", quantities=("acts", "grads"))
+    x = torch.randn(20, 8, requires_grad=True)
+    m(hidden_states=x).square().sum().backward()
+    f = c.captured()["acts"]; c.close()
+    assert f["acts_n"] == 20 and f["grads_n"] == 20
+    assert x.grad is not None
+    assert torch.allclose(f["grads_gram"].float(), x.grad.T @ x.grad, atol=1e-4)
+
+
 def test_single_leaf():
     c = HookCollector(module=None, mode="cov", leaf="blk0.attn.head0.slice")
     c.accumulate(torch.randn(20, 8))

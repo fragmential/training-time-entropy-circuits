@@ -122,6 +122,54 @@ principled (e.g. k at the spectral knee) before it's a claim.
   interference-compression) is robust to the token-selection geometry; only the Pythia rogue
   write's *strength* is geometry-sensitive (weaker on last tokens, esp. at 6.9b).
 
+## The rogue direction identified: it's the newline direction
+
+Raw-sample collection at the final checkpoint (`configs/block_rogue_id.yaml`; rows mapped back
+to mix tokens) settles the token-identity question: projecting blk3.mlp.out's samples onto its
+top centered eigendirection, the spiking tokens are **newlines** — `\n`/`\n\n` variants are 38
+of the top-40 rows in BOTH pythias, the top eigenvalue carries 98.8% / 94.3% of the write's
+variance, and the top 0.1% of tokens carry ~33% / 31% of the direction's variance. Combined
+with mean_frac ≈ 0.003 (variance-like, not bias-like): the write is a sparse newline-activated direction —
+enormous on line/paragraph boundaries, near-zero elsewhere.
+
+So Pythia's compression phase, stated plainly: **from the RankMe peak onward, blk3's MLP
+writes an ever-larger newline-activated direction**; the direction's energy (→22× the stream) crushes
+the ledger's quality term and with it the measured RankMe of any all-token covariance; late
+blocks partially cancel it before the output (signed trace −0.65); and last-token geometry
+sees it attenuated but present — 13.9% of padded last tokens are newline-bearing (trailing
+newlines + truncation boundaries). This connects to the massive-
+activations / delimiter-token literature — the new pieces here are the training-time onset
+(exactly at the RankMe peak), the exact rank-cost accounting, the late-layer cancellation, and
+the OLMo-2 contrast (whose architecture shows no such direction and compresses via aligned
+late writes instead).
+
+## OLMo's late writes, token-attributed: the anti-Pythia
+
+The same raw-sample attribution applied to OLMo-7B's late writes (blk29–31.mlp.out,
+`block_write_id_olmo7b`) finds **no token-concentrated structure**: top eigenvalue share ~10% (vs Pythia's
+94–99%), top 0.1% of tokens carry <1% of the direction's variance (vs ~33%), peak scores ±20
+(vs ±2200). The content is diffuse and weakly thematic — blk31's top direction leans on
+dates/timestamps/forum-metadata tokens ("Posted 2/", "2007-06-", "share|"), blk30's on
+math/LaTeX and punctuation — while the writes' top directions are moderately *shared across
+blocks* (cosines 0.47–0.58 for 29~31, 30~31). Exactly the ledger's prediction made concrete:
+OLMo concentrates by many writes reinforcing common ordinary-token subspaces; Pythia by one
+write screaming on newlines. OLMo-1B replicates it (top eigval 10–11%, concentration ~1%,
+blk14 weakly paragraph-flavored, cross-write top-direction cosine 14~15 = **0.75**) — the
+family contrast holds 2+2 at the token level too.
+
+### Rogue-direction addenda (systematic attribution + preimage)
+
+All-token attribution (mean |projection| per token type, n≥20, 1526 types): newline variants
+rank top with dominant counts (`\n` 99.3 at n=11,583; `\n\t`; `\n\n`) — the newline claim
+survives the systematic check; a small-sample tail of word types (n≈20–26) reaches 70–95.
+Preimage (regress the score on blk3.attn.in samples, read against the embedding matrix): the
+best linear input predictor is flat against all token embeddings (max cos 0.09; cos with the
+raw `\n` embedding −0.013) and barely separates newline rows at the input (+23.0 vs +19.3)
+while the output score separates hugely (+81 vs ~10) — so **the spike is constructed by the
+MLP** (nonlinear gating / processed features), not linearly echoed from the newline embedding.
+Literal layer inversion is ill-posed (down-projection nullspace + nonlinearity); this
+statistical preimage is the sound version of "push the direction back and unembed it".
+
 ## Refinement via windowed alphaReQ: a compression *gradient*, not a hard head/bulk split
 
 Windowed alpha (Stringer-weighted log-log slope over eigenvalue ranks $[k_0, k_1)$; the stored

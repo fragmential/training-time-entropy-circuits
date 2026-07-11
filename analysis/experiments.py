@@ -592,8 +592,10 @@ for model in filter_model_names:
 # Head-removed RankMe + windowed alphaReQ (compression propagates down-spectrum with decaying
 # amplitude; docs/dig_findings.md), for the final stream AND the stream entering the last
 # block — is the head phenomenon written by the last block?
-KS = (0, 1, 2, 8, 32, 128)
-WINDOWS = ((11, 100), (32, 100), (32, 300), (128, 512))
+# Deep band (512, -20): the compression front NEVER reaches it — it flattens monotonically
+# through all of training (no tail fall-off either; band metrics are invariant to head growth).
+KS = (0, 1, 2, 8, 32, 128, 512)
+WINDOWS = ((11, 100), (32, 128), (128, 512), (512, -20))
 _tail = lambda leaf: [(BLOCK_SAMPLES, (leaf, 'acts_centered'), f'k={k}', ('tail_rankme', {'k': k})) for k in KS]
 _alpha_w = lambda leaf: [(BLOCK_SAMPLES, (leaf, 'acts_centered'), f'{k0}-{k1}', ('alpha_window', {'k0': k0, 'k1': k1}))
                          for k0, k1 in WINDOWS]
@@ -628,6 +630,137 @@ def _sub_ledger_grid(model):
 for model in filter_model_names:
     if 'OLMo' in model:
         _sub_ledger_grid(model)
+
+# %% [markdown]
+# ### Write means vs their covariance (Exp 4.7)
+
+# %%
+# mean_frac = ||mu||²/tr (bias-like-ness of a write), top_overlap = |<mû, v1_centered>|,
+# migration = centered-tail ↔ uncentered-top eigvec overlap. Pythia's rogue write is
+# variance-like (mean_frac → 0.003); OLMo's late writes are mean-heavy (mean_frac 0.4–0.6);
+# migration ≈ 0 everywhere (docs/dig_findings.md).
+def _mean_grid(model):
+    grid_start(ncols=2, title=f'Write means vs covariance — {get_model_label(model)}')
+    plot_group('mean_frac', bs_out(model, 'acts_centered'), [model], color_palette='gradient', ylog=True)
+    plot_group('top_overlap', bs_out(model, 'acts_mean_metrics'), [model], color_palette='gradient')
+    plot_group('rayleigh_normed', bs_out(model, 'acts_mean_metrics'), [model], color_palette='gradient')
+    plot_group('migration', bs_out(model, 'mean_migration'), [model], color_palette='gradient')
+    grid_show()
+
+for model in filter_model_names:
+    _mean_grid(model)
+
+# %% [markdown]
+# ### Ledger contribution figure (Exp 4.8)
+
+# %%
+# The three ledger terms summed over blocks, sign-stacked over training: the books balance,
+# so the black ΔS line IS the log-RankMe trajectory relative to the embeddings — no extra
+# weighting (R_over_r would double-count the w_i already inside each term).
+def _ledger_stack(model):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    terms = {y: np.sum([_lib.get_ys(BLOCK_SAMPLES, model, (f'blk{l}', 'block_ledger'), y)[0]
+                        for l in range(n_blocks_bs[model])], axis=0)
+             for y in ('chi', 'quality', 'interference')}
+    xs = _lib.get_xs_tokens(model, _lib.get_ys(BLOCK_SAMPLES, model, ('blk0', 'block_ledger'), 'chi')[1])
+    plt.figure(figsize=(8, 4))
+    pos, neg = np.zeros(len(xs)), np.zeros(len(xs))
+    for name, c in (('chi', 'tab:green'), ('quality', 'tab:red'), ('interference', 'tab:purple')):
+        v, base = terms[name], np.where(terms[name] >= 0, pos, neg)
+        plt.fill_between(xs, base, base + v, label=name, color=c, alpha=0.55)
+        pos, neg = pos + np.clip(v, 0, None), neg + np.clip(v, None, 0)
+    plt.plot(xs, sum(terms.values()), 'k', lw=2.5, label='ΔS total')
+    plt.xscale('log'); plt.xlabel('tokens'); plt.ylabel('rank entropy')
+    plt.legend(); plt.title(f'Ledger contributions — {get_model_label(model)}')
+    plt.show()
+
+for model in filter_model_names:
+    _ledger_stack(model)
+
+# %% [markdown]
+# ### Rogue write anatomy (Exp 4.9, Pythia)
+
+# %%
+# (a) blk3.mlp's write collapses to rank ~1 at the RankMe peak and then grows in energy —
+# vs its neighbor writes. (b) Token-level evidence from the block_rogue_id raw samples
+# (final ckpt): projections onto the write's top centered direction, newline tokens vs rest
+# (38/40 top spikes are \n variants; docs/dig_findings.md).
+def _rogue_traj(model):
+    outs = [(BLOCK_SAMPLES, (f'blk{l}.mlp.out', 'acts_centered'), f'mlp {l}') for l in (1, 3, 5)]
+    grid_start(ncols=2, title=f'Rogue write trajectory — {get_model_label(model)}')
+    plot_group('rankme', outs, [model], color_palette='gradient', ylog=True, title='write RankMe (centered)')
+    plot_group('trace', outs, [model], color_palette='gradient', ylog=True, title='write trace')
+    grid_show()
+
+for model in filter_model_names:
+    if 'pythia' in model:
+        _rogue_traj(model)
+
+# %%
+# Heavier cell: loads raw samples + the packed mix + tokenizer.
+import torch as _t
+from utils.accessor import DataAccessor as _DA
+
+def _rogue_scatter(model, step=143000):
+    import matplotlib.pyplot as plt
+    from transformers import AutoTokenizer
+    acc = _DA(f'data/inferences/block_rogue_id/{model}/step{step}.pt')
+    v = acc['blk3.mlp.out'].acts
+    score = (v.samples.float() - v.mean.float()) @ v.eigvecs_centered[:, 0].float()
+    ids = _t.load('data/mixes/pile_30M_512.pt')[:, :511].reshape(-1)[:len(score)]
+    tok = AutoTokenizer.from_pretrained(f'EleutherAI/{model}')
+    uniq = _t.unique(ids)
+    nl_ids = {int(t) for t in uniq if '\n' in tok.decode([int(t)])}
+    is_nl = _t.tensor([int(t) in nl_ids for t in ids])
+    plt.figure(figsize=(7, 4))
+    for m, lbl, c in ((~is_nl, 'other tokens', 'tab:gray'), (is_nl, 'newline tokens', 'tab:red')):
+        plt.hist(score[m].abs().numpy(), bins=120, log=True, alpha=0.6, color=c, label=lbl)
+    plt.xlabel('|projection onto rogue direction|'); plt.ylabel('token count (log)')
+    plt.title(f'Who carries the rogue direction — {get_model_label(model)}, final ckpt')
+    plt.legend(); plt.show()
+
+for model in filter_model_names:
+    if 'pythia' in model:
+        _rogue_scatter(model)
+
+# %% [markdown]
+# ### Cancellation, head-targeting, and write concentration (Exp 4.10)
+
+# %%
+# (a) signed trace of each early write vs the LAST write over training — Pythia's late blocks
+# learn to cancel the rogue (→ -0.65); OLMo's late writes stay mutually aligned.
+# (b) eigendirection head-mass of the last write (share of |contrib| in the top-32 final
+# directions) — Pythia's goes 0.26→0.92 (toy-like selection bias, H1.3).
+# (c) write concentration: top-eigval share of each mlp write at the final ckpt — the
+# Pythia-vs-OLMo contrast (rogue flag ~95-99% vs diffuse ~10%).
+def _cancellation_headmass(model):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    L = n_blocks_bs[model]
+    mats, steps = _lib.get_ys(BLOCK_SAMPLES, model, ('', 'block_block_coupling'), 'signed_trace')
+    leaves = _lib.get_y(BLOCK_SAMPLES, model, ('', 'block_block_coupling'), 'leaves', steps[0])
+    xs = _lib.get_xs_tokens(model, steps)
+    last = leaves.index(f'blk{L - 1}.mlp.out')
+    fig, axes = plt.subplots(1, 3, figsize=(16, 4))
+    fig.suptitle(f'Cancellation / head-mass / concentration — {get_model_label(model)}')
+    for l in (1, 3, 5, L // 2):
+        i = leaves.index(f'blk{l}.mlp.out')
+        axes[0].plot(xs, [m[i, last] for m in mats], marker='o', lw=2, label=f'mlp {l} ~ mlp {L-1}')
+    axes[0].set(xscale='log', title='signed trace vs last write', xlabel='tokens'); axes[0].legend(fontsize=8)
+    for l in (0, L // 2, L - 1):
+        cs, ss = _lib.get_ys(BLOCK_SAMPLES, model, (f'blk{l}.mlp.out', 'eigendirection_attrib'), 'contrib')
+        hm = [float(np.abs(c[:32]).sum() / np.abs(c).sum()) for c in cs]
+        axes[1].plot(_lib.get_xs_tokens(model, ss), hm, marker='o', lw=2, label=f'mlp {l}')
+    axes[1].set(xscale='log', ylim=(0, 1), title='head-mass (top-32 share)', xlabel='tokens'); axes[1].legend(fontsize=8)
+    share = [_lib.get_y(BLOCK_SAMPLES, model, (f'blk{l}.mlp.out', 'acts_centered'), 'eigenspectrum', None)[0]
+             for l in range(L)]
+    axes[2].bar(range(L), share, color='tab:red' if 'pythia' in model else 'tab:blue')
+    axes[2].set(ylim=(0, 1), title='top-eigval share per mlp write (final)', xlabel='block')
+    plt.show()
+
+for model in filter_model_names:
+    _cancellation_headmass(model)
 
 
 # %% [markdown]
