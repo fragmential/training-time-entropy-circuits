@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from utils.accessor import _eigh, _eigh_full, get_eigenspectrum
+from utils.accessor import _eigh, eigh_descending, get_eigenspectrum
 from scripts.compute_metrics import fit_powerlaw, stringer_get_powerlaw, rankme_metrics
 
 
@@ -19,7 +19,7 @@ def test_eigh_k_truncation(make_cov):
 
 def test_eigh_full_reconstruction(make_cov):
     C = make_cov(d=32)
-    vals, vecs = _eigh_full(C)
+    vals, vecs = eigh_descending(C)
     reconstructed = vecs @ torch.diag(vals.to(vecs.dtype)) @ vecs.T
     assert torch.allclose(reconstructed, C.to(vecs.dtype), atol=1e-4)
 

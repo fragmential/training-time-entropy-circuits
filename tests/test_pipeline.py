@@ -144,8 +144,8 @@ def test_flag_matrix(collected, tmp_path):
 # compute_metrics node -> metric structure (decided up front)
 # ===========================================================================
 
-SPEC_A = {"acts_uncentered", "acts_centered", "acts_mean_metrics"}
-SPEC_G = {"grads_uncentered", "grads_centered", "grads_mean_metrics"}
+SPEC_A = {"acts_uncentered", "acts_centered", "acts_mean_metrics", "acts_mean_vec"}
+SPEC_G = {"grads_uncentered", "grads_centered", "grads_mean_metrics", "grads_mean_vec"}
 BOTH = SPEC_A | SPEC_G | {"gen"}
 
 def test_structure_boundary_grads_on(collected):
@@ -153,8 +153,8 @@ def test_structure_boundary_grads_on(collected):
     assert s["blk0.mlp.up"] == {"kfac"} and s["blk0.mlp.down"] == {"kfac"}
     # pythia mlp.in aliases to attn.in (shared parallel-residual input), so the
     # cross-boundary kfac (mlp.in.acts x mlp.out.grads) fires alongside projections_kfac.
-    assert s["blk0.mlp"] == {"kfac", "projections_kfac"}
-    assert s["blk0.attn"] == {"kfac"}              # attn.in.acts x attn.out.grads
+    assert s["blk0.mlp"] == {"kfac", "projections_kfac", "mean_metrics_blk_vs_res"}
+    assert s["blk0.attn"] == {"kfac", "mean_metrics_blk_vs_res"}  # cross kfac + acts mean in-vs-out
     assert s["blk0.mlp.up.in"] == SPEC_A
     assert s["blk0.mlp.up.out"] == BOTH            # derived acts + captured grads
     assert s["blk0.attn.head0.slice"] == BOTH
@@ -170,8 +170,8 @@ def test_structure_boundary_grads_off(collected):
     stripped = _copy(factors, strip_boundary_grads=True)
     s = _structure(compute_metrics_for_checkpoint(
         DataAccessor(stripped, model=model, model_config=config)))
-    assert "blk0.attn" not in s                    # attn.out lost its grads -> no cross kfac
-    assert s["blk0.mlp"] == {"projections_kfac"}
+    assert s["blk0.attn"] == {"mean_metrics_blk_vs_res"}  # lost grads -> no cross kfac; acts mean-metric stays
+    assert s["blk0.mlp"] == {"projections_kfac", "mean_metrics_blk_vs_res"}
     assert s["blk0.attn.in"] == SPEC_A             # boundary now acts-only
     assert s["blk0.mlp.up"] == {"kfac"}            # mlp K-FAC unaffected
 
@@ -253,5 +253,5 @@ def test_metric_values_snapshot(collected, request):
     grab("after_final_norm", "acts_uncentered", "rankme", "log_det")
     grab("after_final_norm", "gen", "trace")
     cur["blk0.mlp.up.in|acts_uncentered|spectrum10"] = \
-        s["blk0.mlp.up.in"]["acts_uncentered"]["eigenspectrum"][:10].double().cpu()
+        torch.as_tensor(s["blk0.mlp.up.in"]["acts_uncentered"]["eigenspectrum"][:10]).double().cpu()
     _snapshot("pipeline_values", cur, request)

@@ -66,7 +66,7 @@ from utils.model_registry import (
 )
 from utils.hooks import HookCollector, MultiHeadOVDispatcher, setup_identity_head, restore_head
 from utils.hook_specs import resolve as resolve_hook_specs
-from utils.accessor import DataAccessor, parse_format, parse_format_spec
+from utils.accessor import DataAccessor, parse_format_spec
 from utils.data_utils import (
     get_loader,
     load_and_cache_texts,
@@ -331,7 +331,7 @@ def _collect_for_checkpoint(
 
     Resolves cfg.hooks into concrete SingleHookSpec / OVHeadSpec lists, registers
     HookCollectors per block-group pass, runs forward (+ optional backward),
-    returns the merged factors dict.
+    returns the merged captured dict.
     """
     storage_base, storage_flags, storage_drop_flags = parse_format_spec(cfg.storage_format)
     storage_mode = "acts" if storage_base == "acts" else "cov"
@@ -367,7 +367,7 @@ def _collect_for_checkpoint(
         perblk_by_block.setdefault(int(s.leaf.split(".")[0][3:]), []).append(s)
     ov_by_block = {o.block_idx: o for o in ov_specs}
 
-    all_factors: dict = {}
+    captured: dict = {}
 
     # Block-group iteration only matters when there is per-block work
     if has_per_block_work:
@@ -498,14 +498,14 @@ def _collect_for_checkpoint(
                     acts_masked = fast_norm_collector._apply_mask(outputs.logits.detach())
                     fast_norm_collector.accumulate(acts_masked)
 
-        # --- Collect factors and clean up (collectors yield {leaf: {...}}) ---
+        # --- Collect captured data and clean up (collectors yield {leaf: {...}}) ---
         for collector in collectors.values():
-            for leaf, fac in collector.factors().items():
-                all_factors.setdefault(leaf, fac)
+            for leaf, data in collector.captured().items():
+                captured.setdefault(leaf, data)
             collector.close()
         for disp in ov_dispatchers:
-            for leaf, fac in disp.factors().items():
-                all_factors.setdefault(leaf, fac)
+            for leaf, data in disp.captured().items():
+                captured.setdefault(leaf, data)
             disp.close()
 
         # Restore the original output head after the first (only) global pass
@@ -516,7 +516,7 @@ def _collect_for_checkpoint(
         del collectors, ov_dispatchers
         torch.cuda.empty_cache()
 
-    return all_factors
+    return captured
 
 
 # ---------------------------------------------------------------------------
@@ -529,10 +529,10 @@ def _entry_quantities(entry: dict):
     return [k[:-2] for k in entry if k.endswith("_n")]
 
 
-def _reconstruct_raw_factors(existing_data: dict) -> dict:
+def _reconstruct_captured(existing_data: dict) -> dict:
     """Rebuild collector-style raw accumulators ({q}_cov=Σxxᵀ or {q}_samples, {q}_n,
     {q}_mean) from a saved file so a continued run can merge into them."""
-    base_format, _ = parse_format(existing_data.get("__format__", "cov"))
+    base_format, _, _ = parse_format_spec(existing_data.get("__format__", "cov"))
     raw = {}
     for leaf, entry in existing_data.items():
         if leaf.startswith("__"):
@@ -562,12 +562,12 @@ def _reconstruct_raw_factors(existing_data: dict) -> dict:
     return raw
 
 
-def _merge_with_existing(existing_raw: dict, new_factors: dict) -> dict:
-    """Add existing raw accumulators into new_factors (in-place)."""
+def _merge_with_existing(existing_raw: dict, new_captured: dict) -> dict:
+    """Add existing raw accumulators into new_captured (in-place)."""
     for leaf, old in existing_raw.items():
-        if leaf not in new_factors:
+        if leaf not in new_captured:
             continue
-        new = new_factors[leaf]
+        new = new_captured[leaf]
         for q in _entry_quantities(old):
             old_n, new_n = old[f"{q}_n"], new.get(f"{q}_n", 0)
             cov_k, samp_k = f"{q}_cov", f"{q}_samples"
@@ -582,7 +582,7 @@ def _merge_with_existing(existing_raw: dict, new_factors: dict) -> dict:
                 else:
                     new[mean_k] = old[mean_k]
             new[f"{q}_n"] = old_n + new_n
-    return new_factors
+    return new_captured
 
 
 # ---------------------------------------------------------------------------
@@ -780,7 +780,7 @@ def main(cfg: CollectConfig):
                 torch.manual_seed(cfg.seed + step_num)
 
             t_load += time.time() - _t0; _t0 = time.time()
-            factors = _collect_for_checkpoint(
+            captured = _collect_for_checkpoint(
                 model, model_config, cfg, texts, tokenizer, packed_ids,
                 blocks, device, boundary_token_ids,
             )
@@ -790,8 +790,8 @@ def main(cfg: CollectConfig):
                 exist_path = os.path.join(cfg.continue_from, short_name, f"step{step_num}.pt")
                 if os.path.exists(exist_path):
                     existing_data = torch.load(exist_path, map_location="cpu", weights_only=False)
-                    existing_raw = _reconstruct_raw_factors(existing_data)
-                    factors = _merge_with_existing(existing_raw, factors)
+                    existing_raw = _reconstruct_captured(existing_data)
+                    captured = _merge_with_existing(existing_raw, captured)
                 else:
                     tqdm.write(f"  WARNING: no existing file to merge at {exist_path}")
 
@@ -809,14 +809,14 @@ def main(cfg: CollectConfig):
             save_n_chunks = None
             if cfg.packing == "packed" and packed_ids is not None:
                 save_n_chunks = n_chunks_done + len(packed_ids)
-            acc = DataAccessor(factors, model=model, model_config=model_config,
+            acc = DataAccessor(captured, model=model, model_config=model_config,
                                model_name=step_model, revision=revision)
             acc.save(out_path, format=cfg.storage_format,
                      cross_basis_refs=cfg.cross_basis_refs,
                      storage_dtype=cfg.storage_dtype, token_filter=token_filter,
                      n_chunks=save_n_chunks)
             t_save += time.time() - _t0
-            tqdm.write(f"Step {step_num}: {len(factors)} hook points -> {out_path}")
+            tqdm.write(f"Step {step_num}: {len(captured)} hook points -> {out_path}")
 
             if cfg.compute_metrics:
                 _t0 = time.time()

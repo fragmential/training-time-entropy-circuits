@@ -125,11 +125,68 @@ def _read_revisions_file(filepath: str) -> dict:
     return checkpoint_map
 
 
+@dataclass
+class _Family:
+    """Every architecture fact that varies by model family, in one place. `blocks` /
+    `final_norm` / `oproj` double as live-module dotted paths AND state-dict prefixes."""
+    schedule: object        # (config, max_checkpoints, spacing) -> [(step, rev, repo), ...]
+    blocks: str             # dotted path to the block list (e.g. "gpt_neox.layers")
+    final_norm: str         # dotted path / sd-prefix of the final norm
+    norm_kind: str          # "layernorm" | "rmsnorm"
+    mlp_projs: dict         # {leaf-name: submodule-name under block.mlp}
+    mlp_bias: bool          # MLP projections carry a bias
+    oproj: str              # attention output-proj path under a block
+    boundaries: tuple       # ((leaf-suffix, submodule-path-under-block, capture), ...)
+
+
+_FAMILY = {
+    "pythia": _Family(
+        schedule=_pythia_checkpoints,
+        blocks="gpt_neox.layers",
+        final_norm="gpt_neox.final_layer_norm",
+        norm_kind="layernorm",
+        mlp_projs={"up": "dense_h_to_4h", "down": "dense_4h_to_h"},
+        mlp_bias=True,
+        oproj="attention.dense",
+        boundaries=(
+            ("attn.in",  "input_layernorm", "input"),
+            ("attn.out", "attention",       "output"),
+            ("mlp.out",  "mlp",             "output"),
+        ),
+    ),
+    "olmo": _Family(
+        schedule=_olmo_checkpoints,
+        blocks="model.layers",
+        final_norm="model.norm",
+        norm_kind="rmsnorm",
+        mlp_projs={"gate": "gate_proj", "up": "up_proj", "down": "down_proj"},
+        mlp_bias=False,
+        oproj="self_attn.o_proj",
+        boundaries=(
+            ("attn.in",      "self_attn",                  "input"),
+            ("attn.raw_out", "self_attn",                  "output"),
+            ("attn.out",     "post_attention_layernorm",   "output"),
+            ("mlp.in",       "mlp",                        "input"),
+            ("mlp.raw_out",  "mlp",                        "output"),
+            ("mlp.out",      "post_feedforward_layernorm", "output"),
+        ),
+    ),
+}
+
+
+def _fam(config) -> "_Family":
+    return _FAMILY[config.family]
+
+
+def _getattr_path(obj, dotted):
+    for part in dotted.split("."):
+        obj = getattr(obj, part)
+    return obj
+
+
 def get_checkpoint_schedule(config, max_checkpoints=50, checkpoint_spacing="linear"):
     """Return list of (step_num, revision_str, hf_model_name) tuples."""
-    if config.family == "pythia":
-        return _pythia_checkpoints(config, max_checkpoints, checkpoint_spacing)
-    return _olmo_checkpoints(config, max_checkpoints, checkpoint_spacing)
+    return _fam(config).schedule(config, max_checkpoints, checkpoint_spacing)
 
 
 # --- Model loading ---
@@ -165,25 +222,15 @@ def load_tokenizer(config, revision=None):
 
 def get_mlp_projections(model, config, block_idx):
     """Return [(name, nn.Linear), ...] for MLP projections in the given block."""
-    if config.family == "pythia":
-        block = model.gpt_neox.layers[block_idx]
-        return [
-            (f"blk{block_idx}.mlp.up",   block.mlp.dense_h_to_4h),
-            (f"blk{block_idx}.mlp.down", block.mlp.dense_4h_to_h),
-        ]
-    block = model.model.layers[block_idx]
-    return [
-        (f"blk{block_idx}.mlp.gate", block.mlp.gate_proj),
-        (f"blk{block_idx}.mlp.up",   block.mlp.up_proj),
-        (f"blk{block_idx}.mlp.down", block.mlp.down_proj),
-    ]
+    fam = _fam(config)
+    block = _getattr_path(model, fam.blocks)[block_idx]
+    return [(f"blk{block_idx}.mlp.{leaf}", getattr(block.mlp, sub))
+            for leaf, sub in fam.mlp_projs.items()]
 
 
 def get_num_layers(model, config):
     """Return number of transformer blocks."""
-    if config.family == "pythia":
-        return len(model.gpt_neox.layers)
-    return len(model.model.layers)
+    return len(_getattr_path(model, _fam(config).blocks))
 
 
 def get_final_layernorm(model, config):
@@ -192,9 +239,7 @@ def get_final_layernorm(model, config):
     Pythia: model.gpt_neox.final_layer_norm (nn.LayerNorm)
     OLMo:   model.model.norm (RMSNorm)
     """
-    if config.family == "pythia":
-        return model.gpt_neox.final_layer_norm
-    return model.model.norm
+    return _getattr_path(model, _fam(config).final_norm)
 
 
 def get_block_boundary_hooks(model, config, block_idx):
@@ -220,23 +265,10 @@ def get_block_boundary_hooks(model, config, block_idx):
         x_next    = x_mid + mlp_out
       → 6 distinct tensors (raw_out captures the pre-post-norm side of each sub-block).
     """
-    prefix = f"blk{block_idx}"
-    if config.family == "pythia":
-        block = model.gpt_neox.layers[block_idx]
-        return [
-            (f"{prefix}.attn.in",  block.input_layernorm, "input"),
-            (f"{prefix}.attn.out", block.attention,       "output"),
-            (f"{prefix}.mlp.out",  block.mlp,             "output"),
-        ]
-    block = model.model.layers[block_idx]
-    return [
-        (f"{prefix}.attn.in",      block.self_attn,                  "input"),
-        (f"{prefix}.attn.raw_out", block.self_attn,                  "output"),
-        (f"{prefix}.attn.out",     block.post_attention_layernorm,   "output"),
-        (f"{prefix}.mlp.in",       block.mlp,                        "input"),
-        (f"{prefix}.mlp.raw_out",  block.mlp,                        "output"),
-        (f"{prefix}.mlp.out",      block.post_feedforward_layernorm, "output"),
-    ]
+    fam = _fam(config)
+    block = _getattr_path(model, fam.blocks)[block_idx]
+    return [(f"blk{block_idx}.{suf}", _getattr_path(block, sub), cap)
+            for suf, sub, cap in fam.boundaries]
 
 
 def get_attention_output_proj(model, config, block_idx):
@@ -253,32 +285,27 @@ def get_attention_output_proj(model, config, block_idx):
     cfg = model.config
     n_heads = cfg.num_attention_heads
     head_dim = getattr(cfg, "head_dim", None) or cfg.hidden_size // n_heads
-    if config.family == "pythia":
-        return "dense", model.gpt_neox.layers[block_idx].attention.dense, n_heads, head_dim
-    return "o_proj", model.model.layers[block_idx].self_attn.o_proj, n_heads, head_dim
+    fam = _fam(config)
+    block = _getattr_path(model, fam.blocks)[block_idx]
+    return fam.oproj.split(".")[-1], _getattr_path(block, fam.oproj), n_heads, head_dim
 
 
 # Derivation graph: a derived (leaf, quantity) <- a source (leaf, quantity) via a
 # Transform the accessor applies. The only place that knows derivation edges + weight
 # state-dict locations.
 
-_PYTHIA_PROJ_SD = {"up": "dense_h_to_4h", "down": "dense_4h_to_h"}   # has bias
-_OLMO_PROJ_SD = {"gate": "gate_proj", "up": "up_proj", "down": "down_proj"}  # no bias
-
 _MLP_OUT = re.compile(r"(.*)\.mlp\.(up|down|gate)\.out$")
 _HEAD_CONTRIB = re.compile(r"(.*)\.attn\.head(\d+)\.contrib$")
 
 
 def _proj_sd_prefix(config, idx, proj):
-    if config.family == "pythia":
-        return f"gpt_neox.layers.{idx}.mlp.{_PYTHIA_PROJ_SD[proj]}"
-    return f"model.layers.{idx}.mlp.{_OLMO_PROJ_SD[proj]}"
+    fam = _fam(config)
+    return f"{fam.blocks}.{idx}.mlp.{fam.mlp_projs[proj]}"
 
 
 def _oproj_sd_prefix(config, idx):
-    if config.family == "pythia":
-        return f"gpt_neox.layers.{idx}.attention.dense"
-    return f"model.layers.{idx}.self_attn.o_proj"
+    fam = _fam(config)
+    return f"{fam.blocks}.{idx}.{fam.oproj}"
 
 
 def _blk_idx(prefix):
@@ -316,7 +343,7 @@ _DERIVATIONS = [
      lambda m: f"{m.group(1)}.mlp.{m.group(2)}.in",
      "acts",
      lambda cfg, m: Linear(_proj_sd_prefix(cfg, _blk_idx(m.group(1)), m.group(2)),
-                           bias=(cfg.family == "pythia"))),
+                           bias=_fam(cfg).mlp_bias)),
     (_HEAD_CONTRIB,
      lambda m: f"{m.group(1)}.attn.head{m.group(2)}.slice",
      "acts",
@@ -373,7 +400,7 @@ def derived_leaves(present):
 
 def _norm_sd_prefix(config):
     """State dict key prefix for the final layer norm."""
-    return "gpt_neox.final_layer_norm" if config.family == "pythia" else "model.norm"
+    return _fam(config).final_norm
 
 
 def _load_selective_tensors(snap_dir, keys):
@@ -557,7 +584,7 @@ def load_selective_weights(config, hf_repo, revision, sd_prefixes, need_norm=Fal
         w = tensors.get(f"{norm_prefix}.weight")
         if w is not None:
             b = tensors.get(f"{norm_prefix}.bias")
-            if config.family == "pythia":
+            if _fam(config).norm_kind == "layernorm":
                 import torch.nn as nn
                 norm = nn.LayerNorm(w.shape[0])
                 norm.weight.data.copy_(w)

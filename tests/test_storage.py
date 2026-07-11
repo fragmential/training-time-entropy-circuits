@@ -1,6 +1,6 @@
 import os
 import torch
-from utils.accessor import DataAccessor, decomp_profiler, eigh_descending
+from utils.accessor import DataAccessor, decomp_profiler
 
 # Fixture entries live at leaf "after_final_norm" with quantities acts / grads.
 HOOK = "after_final_norm"
@@ -96,17 +96,6 @@ def test_cov_svd_reconstruction(tmp_path, make_factors_dict):
     assert torch.allclose(reconstructed, original_cov, atol=1e-4)
 
 
-def test_same_layer_cross_basis(tmp_path, make_factors_dict):
-    # Residual hook: forward-acts signal is the captured value.acts (no model needed).
-    factors = make_factors_dict(d=16, with_grad=True, with_means=False)
-    path = str(tmp_path / "svd.pt")
-    DataAccessor(factors).save(path, format="cov_svd")
-    acc = DataAccessor(path)
-    acc.project_same_layer(onto="both", output_path=path)
-    cross_keys = [k for k in acc.data[HOOK] if "cross_eigvals" in k]
-    assert len(cross_keys) > 0
-
-
 def test_token_filter_metadata(tmp_path, make_factors_dict):
     factors = make_factors_dict(d=16, with_grad=False, with_means=False)
     path = str(tmp_path / "test.pt")
@@ -114,6 +103,21 @@ def test_token_filter_metadata(tmp_path, make_factors_dict):
     DataAccessor(factors).save(path, format="cov", token_filter=token_filter)
     data = torch.load(path, map_location="cpu", weights_only=False)
     assert data["__token_filter__"] == token_filter
+
+
+def test_save_preserve_updates_token_filter_without_materializing(tmp_path, make_factors_dict):
+    # save(format=None) preserves stored data verbatim and only updates metadata —
+    # the path the `set-filter` CLI now takes (replacing the old set_token_filter).
+    factors = make_factors_dict(d=16, with_grad=False, with_means=False)
+    path = str(tmp_path / "cov_svd.pt")
+    DataAccessor(factors).save(path, format="cov_svd")
+    before = torch.load(path, map_location="cpu", weights_only=False)
+
+    DataAccessor(path).save(path, token_filter={"token_selection": "last"})
+    after = torch.load(path, map_location="cpu", weights_only=False)
+    assert after["__token_filter__"] == {"token_selection": "last"}
+    assert after["__format__"] == "cov_svd"  # preserved, not re-materialized to a default
+    assert torch.equal(after[HOOK][f"{ACTS}_eigvals"], before[HOOK][f"{ACTS}_eigvals"])
 
 
 def test_info_returns_string(tmp_path, make_factors_dict):
@@ -191,45 +195,12 @@ def test_cross_checkpoint_self_projection_invariant(tmp_path, make_factors_dict)
     factors = make_factors_dict(d=16, with_grad=False, with_means=False)
     path = str(tmp_path / "step0.pt")
     DataAccessor(factors).save(path, format="cov_svd")
-    DataAccessor(path).project_onto_basis(path, output_path=path)
+    DataAccessor(path).save(path, cross_basis_refs=[path])
 
     stem = os.path.splitext(os.path.basename(path))[0]
     entry = torch.load(path, map_location="cpu", weights_only=False)[HOOK]
     assert torch.allclose(entry[f"{ACTS}_cross_eigvals_{stem}"].double(),
                           entry[f"{ACTS}_eigvals"].double(), atol=1e-4)
-
-
-def test_same_layer_mlp_selects_out_acts(tmp_path):
-    # The MLP .out leaf carries both acts and grads in the SAME (d_out) space, so
-    # project_same_layer cross-projects them; the .in leaf (d_in acts only) is left
-    # alone (no grads there to pair with).
-    d = 16
-
-    def spd():
-        M = torch.randn(d, d, dtype=torch.float64)
-        return M @ M.T + 0.1 * torch.eye(d, dtype=torch.float64)
-
-    ovals, ovecs = eigh_descending(spd())
-    gvals, gvecs = eigh_descending(spd())
-    data = {
-        "blk0.mlp.up.out": {
-            "acts_eigvals": ovals, "acts_eigvecs": ovecs.float(), "acts_n": 200,
-            "grads_eigvals": gvals, "grads_eigvecs": gvecs.float(), "grads_n": 200,
-        },
-        "blk0.mlp.up.in": {
-            "acts_eigvals": ovals.clone(), "acts_eigvecs": ovecs.float(), "acts_n": 200,
-        },
-        "__format__": "cov_svd",
-    }
-    path = str(tmp_path / "svd.pt")
-    DataAccessor(data).project_same_layer(onto="both", output_path=path)
-    reloaded = torch.load(path, map_location="cpu", weights_only=False)
-    out_entry = reloaded["blk0.mlp.up.out"]
-    assert "grads_cross_eigvals_acts" in out_entry
-    assert "acts_cross_eigvals_grads" in out_entry
-    # The .in leaf has no grads, so no cross projection is added there.
-    in_entry = reloaded["blk0.mlp.up.in"]
-    assert not any("cross_eigvals" in k for k in in_entry)
 
 
 def test_convert_preserves_mean_by_default_and_minus_m_drops_it(tmp_path, make_factors_dict):

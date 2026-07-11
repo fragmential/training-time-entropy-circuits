@@ -77,11 +77,11 @@ def _fixed_seed():
 
 def test_snapshot_eigendecomp(request):
     _fixed_seed()
-    from utils.accessor import _eigh, _eigh_full
+    from utils.accessor import _eigh, eigh_descending
     C = torch.randn(32, 10, dtype=torch.float64)
     C = C @ C.T + 0.01 * torch.eye(32, dtype=torch.float64)
     vals = _eigh(C, None)
-    vals_full, vecs_full = _eigh_full(C)
+    vals_full, vecs_full = eigh_descending(C)
     _compare_or_update("eigendecomp", {
         "eigvals": vals, "eigvals_full": vals_full, "eigvecs": vecs_full,
     }, request)
@@ -172,7 +172,7 @@ def test_snapshot_accessor_from_cov(request):
         "__format__": "cov",
     }
     acc = DataAccessor(data)
-    eigvals = acc.after_final_norm.acts.eigvals
+    eigvals = acc["after_final_norm"].acts.eigvals
     _compare_or_update("accessor_from_cov", {"eigvals": eigvals}, request)
 
 
@@ -195,7 +195,7 @@ def test_snapshot_accessor_centered(request):
         "__format__": "cov_svd",
     }
     acc = DataAccessor(data)
-    centered = acc.after_final_norm.acts.eigvals_centered
+    centered = acc["after_final_norm"].acts.eigvals_centered
     _compare_or_update("accessor_centered", {"centered": centered}, request)
 
 
@@ -259,7 +259,7 @@ def test_snapshot_hook_cov(request):
     X = torch.randn(100, 16, dtype=torch.float32)
     c = HookCollector(module=None, mode="cov", collect_means=True)
     c.accumulate(X)
-    factors = c.factors()["acts"]
+    factors = c.captured()["acts"]
     _compare_or_update("hook_cov", {
         "acts": factors["acts_cov"], "n": factors["acts_n"], "acts_mean": factors["acts_mean"],
     }, request)

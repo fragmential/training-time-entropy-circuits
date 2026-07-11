@@ -100,15 +100,15 @@ def test_kfac_trace_product():
 
 
 def test_top_k_outer_products_largest():
-    a = np.array([10.0, 5.0, 2.0])  # _top_k_outer_products takes numpy
-    b = np.array([4.0, 3.0])
+    a = torch.tensor([10.0, 5.0, 2.0])  # _top_k_outer_products takes + returns torch
+    b = torch.tensor([4.0, 3.0])
     top = _top_k_outer_products(a, b, 3)
     assert abs(top[0] - 40.0) < 1e-6  # 10 * 4
 
 
 def test_top_k_outer_products_count():
-    a = np.array([10.0, 5.0, 2.0])
-    b = np.array([4.0, 3.0])
+    a = torch.tensor([10.0, 5.0, 2.0])
+    b = torch.tensor([4.0, 3.0])
     top = _top_k_outer_products(a, b, 4)
     assert len(top) == 4
 
@@ -271,8 +271,8 @@ def test_blk_mean_metrics_matches_direct():
     data = _blkres_data()
     res = compute_metrics_for_checkpoint(DataAccessor(data))
     acc = DataAccessor(data)
-    evals, evecs = acc.factor("blk0.mlp.in", "acts").eigh_centered
-    mean = acc.factor("blk0.mlp.out", "acts").mean
+    evals, evecs = acc.view("blk0.mlp.in", "acts").eigh_centered
+    mean = acc.view("blk0.mlp.out", "acts").mean
     ref = mean_metrics(evecs, evals, mean)
     got = res["blk0.mlp"]["mean_metrics_blk_vs_res"]
     assert abs(got["rayleigh"] - ref["rayleigh"]) < 1e-9

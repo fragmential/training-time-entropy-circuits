@@ -114,7 +114,7 @@ def test_covariance_shapes(model_and_config, texts_and_packed):
     )
     loss.backward()
 
-    factors = collector.factors()
+    factors = collector.captured()
     collector.close()
 
     # One leaf carries both quantities (acts + grads captured at the same input side).
@@ -144,7 +144,7 @@ def test_storage_roundtrip_real_data(model_and_config, texts_and_packed):
     with torch.no_grad():
         model(x)
     # factors() already keys by leaf -> {quantity dict}; that is the storage dict.
-    factors = collector.factors()
+    factors = collector.captured()
     collector.close()
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -157,13 +157,13 @@ def test_storage_roundtrip_real_data(model_and_config, texts_and_packed):
 
         # Read via accessor
         acc = DataAccessor(svd_path)
-        eigvals = acc.after_final_norm.acts.eigvals
+        eigvals = acc["after_final_norm"].acts.eigvals
         assert eigvals is not None
         assert len(eigvals) > 0
         assert (eigvals[:-1] >= eigvals[1:]).all()
 
         # Verify mean is stored
-        mean = acc.after_final_norm.acts.mean
+        mean = acc["after_final_norm"].acts.mean
         assert mean is not None
 
 
@@ -221,8 +221,8 @@ def test_B_equals_WAWt(model_and_config, texts_and_packed):
         with torch.no_grad():
             model(x)
 
-        a_factors = ic.factors()["acts"]
-        b_factors = oc.factors()["acts"]
+        a_factors = ic.captured()["acts"]
+        b_factors = oc.captured()["acts"]
         ic.close()
         oc.close()
 

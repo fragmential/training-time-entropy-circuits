@@ -196,7 +196,7 @@ class HookCollector:
     # Results
     # ------------------------------------------------------------------
 
-    def factors(self) -> dict:
+    def captured(self) -> dict:
         """Collected data as {leaf: {q-keyed tensors}} under this collector's single
         leaf. Keys are uniform `{q}_{fmt}` — `acts_cov` (Σxxᵀ) or `acts_samples` (N,d),
         `acts_n`, `acts_mean`; same for grads. Emits whatever was accumulated."""
@@ -354,10 +354,10 @@ class MultiHeadOVDispatcher:
             g_h = g @ W_h  # (B, T, d_head)
             collector.accumulate_grad(collector._apply_mask(g_h))
 
-    def factors(self) -> dict:
+    def captured(self) -> dict:
         out: dict = {}
         for c in self.collectors.values():
-            out.update(c.factors())   # each per-head collector yields its own .slice leaf
+            out.update(c.captured())   # each per-head collector yields its own .slice leaf
         return out
 
     def close(self):

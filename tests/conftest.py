@@ -50,7 +50,7 @@ GRADS = "grads"
 
 @pytest.fixture
 def make_factors_dict():
-    """Factors dict as HookCollector.factors() would produce (uniform {q}_{fmt} keys,
+    """Factors dict as HookCollector.captured() would produce (uniform {q}_{fmt} keys,
     unnormalized Σxxᵀ at {q}_cov)."""
     def _make(d=64, N=200, with_means=True, with_grad=True):
         acts = torch.randn(N, d, dtype=torch.float64)
