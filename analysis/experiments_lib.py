@@ -808,6 +808,34 @@ def block_mean_cos(model, sources, step=None):           # block×block cosine-o
     return V @ V.T
 
 
+@griddable
+def plot_wo_topk(source, model, yvar, k=3):
+    """Final-stream yvar vs the same without the k most rank-influential writes (ranked by
+    training-average |leave-one-out ΔRankMe|): the additive estimate (rankme only —
+    first-order, single-write deltas ignore interactions) + the exact joint_ablation series
+    when a run carries it (docs/next_run_additions.md #3)."""
+    res, steps = load_results(source, model)
+    last = res[steps[-1]]
+    d = {n: get_ys(source, model, (n, 'ablation_contribution'), 'delta_rankme')[0]
+         for n in last if re.fullmatch(r'blk\d+\.(attn|mlp)\.out', n) and 'ablation_contribution' in last[n]}
+    top = sorted(d, key=lambda n: -np.mean(np.abs(d[n])))[:k]
+    lbl = ', '.join(n.removeprefix('blk').removesuffix('.out') for n in top)
+    r, rsteps = get_ys(source, model, ('before_final_norm', 'acts_centered'), yvar)
+    xs = np.asarray(XVAR_FNS['tokens'](model, rsteps))
+    plt.plot(xs[1:], np.asarray(r)[1:], lw=3, color='0.3', label=yvar)
+    if yvar == 'rankme':                                 # the only yvar with a stored delta
+        plt.plot(xs[1:], (np.asarray(r) - sum(np.asarray(d[n]) for n in top))[1:], lw=3,
+                 color='tab:orange', ls='--', label=f'additive − top-{k} ({lbl})')
+    if 'joint_ablation' in last.get('', {}):
+        j, jsteps = get_ys(source, model, ('', 'joint_ablation'), yvar)
+        plt.plot(np.asarray(XVAR_FNS['tokens'](model, jsteps))[1:], np.asarray(j)[1:], lw=3,
+                 color='tab:red', label=f'joint − top-{k} ({lbl})')
+    plt.xscale('log'); plt.xlim(10e7, 10**12.7)
+    plt.xlabel(XVAR_LABELS['tokens'], fontsize=14); plt.ylabel(YVAR_LABELS.get(yvar, yvar), fontsize=14)
+    plt.legend(); plt.title(f'{yvar}: normal vs without top-{k} writes')
+    plt.show()
+
+
 
 # %%
 # Hook constants: short name -> (node_path, metric). Built with loops (no 2.5k-line literal).

@@ -249,7 +249,8 @@ def _draw_spectrum(ax, p, i):
     if p['xlog']: ax.set_xscale('log')
     if p['ylog']: ax.set_yscale('log')
     ax.set_xlabel(p['xlabel'], fontsize=14); ax.set_ylabel(p['ylabel'], fontsize=14)
-    ax.legend(loc='lower left', ncol=2, fontsize=8)        # pinned -> no per-frame jumping
+    if len(p['frames'][i]) <= 12:                          # >12: static colorbar drawn once at setup
+        ax.legend(loc='lower left', ncol=2, fontsize=8)    # pinned -> no per-frame jumping
     if p['title'] is not None: ax.set_title(p['title'])
     if p['ylim'] is not None: ax.set_ylim(*p['ylim'])
 
@@ -294,17 +295,24 @@ def render(spec, save=None):
     fig, axes, bar_ax = _layout(kinds, spec['ncols'], spec['prog_bar'], spec['figsize'])
     if spec['suptitle'] is not None:
         fig.suptitle(spec['suptitle'])
-    right = 0.88 if any(p['kind'] == 'heatmap' for p in spec['panels']) else 0.97  # room for cbar labels
+    right = 0.88 if any(p['kind'] == 'heatmap' or (p['kind'] == 'spectrum' and len(p['frames'][0]) > 12)
+                        for p in spec['panels']) else 0.97   # room for colorbar labels
     fig.subplots_adjust(left=0.08, right=right, top=0.88, bottom=0.12, hspace=0.35, wspace=0.30)
     n = spec['n']
 
-    from matplotlib.cm import ScalarMappable          # static colorbars for pinned heatmaps
-    from matplotlib.colors import Normalize           # (fixed norm -> survives per-frame clear)
+    from matplotlib.cm import ScalarMappable          # static colorbars for pinned heatmaps and
+    from matplotlib.colors import Normalize, ListedColormap   # depth-gradient legends (survive per-frame clear)
     for ax, p in zip(axes, spec['panels']):
         if p['kind'] == 'heatmap' and not p['per_frame']:
             cmap = plt.get_cmap(p['cmap']).copy(); cmap.set_bad('white')
             sm = ScalarMappable(cmap=cmap, norm=Normalize(p['vmin'], p['vmax'])); sm.set_array([])
             fig.colorbar(sm, ax=ax, fraction=0.046, pad=0.04)
+        elif p['kind'] == 'spectrum' and len(p['frames'][0]) > 12:  # legend wall -> slim colorbar
+            colors, labels = [s[1] for s in p['frames'][0]], [s[2] for s in p['frames'][0]]
+            sm = ScalarMappable(cmap=ListedColormap(colors)); sm.set_array([])
+            cb = fig.colorbar(sm, ax=ax, fraction=0.046, pad=0.02,
+                              ticks=[0.5 / len(labels), 0.5, 1 - 0.5 / len(labels)])
+            cb.ax.set_yticklabels([labels[0], labels[len(labels) // 2], labels[-1]], fontsize=8)
 
     def update(i):
         for ax, p in zip(axes, spec['panels']):

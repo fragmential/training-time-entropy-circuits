@@ -24,7 +24,7 @@ from analysis import experiments_lib as _lib
 importlib.reload(_lib)
 from analysis.experiments_lib import (
     grid_start, grid_show, plot_group, plot_spectrum, plot_layer_contribution,
-    plot_heatmap, block_mean_cos, build_hooks, get_model_label, submatrix,
+    plot_heatmap, block_mean_cos, build_hooks, get_model_label, submatrix, plot_wo_topk,
 )
 
 # %%
@@ -322,8 +322,8 @@ def _meancov_grid(model, title, bnd):
     plot_group('pr_weighted', u, [model], ylog=True)
     plot_group('centroid_idx', u, [model])
     plot_group('centroid_idx_weighted', u, [model])
-    plot_spectrum('profile', u, [model], xlog=False, ylog=True, title='Final-ckpt profile $p_j$')
-    plot_spectrum('profile_weighted', u, [model], xlog=False, ylog=True, title='Final-ckpt weighted profile')
+    plot_spectrum('profile', u, [model], xlog=False, ylog=True, smooth=22, peak=3, title='Final-ckpt profile $p_j$')
+    plot_spectrum('profile_weighted', u, [model], xlog=False, ylog=True, smooth=22, peak=3, title='Final-ckpt weighted profile')
     grid_show()
 
 for model in filter_model_names:
@@ -364,8 +364,8 @@ def _blkres_grid(model, title, bnd):
     plot_group('pr_weighted', u, [model], ylog=True)
     plot_group('centroid_idx', u, [model])
     plot_group('centroid_idx_weighted', u, [model])
-    plot_spectrum('profile', u, [model], xlog=False, ylog=True, title='Final-ckpt profile $p_j$')
-    plot_spectrum('profile_weighted', u, [model], xlog=False, ylog=True, title='Final-ckpt weighted profile')
+    plot_spectrum('profile', u, [model], xlog=False, ylog=True, smooth=22, peak=3, title='Final-ckpt profile $p_j$')
+    plot_spectrum('profile_weighted', u, [model], xlog=False, ylog=True, smooth=22, peak=3, title='Final-ckpt weighted profile')
     grid_show()
 
 for model in filter_model_names:
@@ -386,6 +386,19 @@ layer_outs = lambda model: [(BLOCK_REPR, HK[f'{p}{l}_AU'], f'{sub} {l}')
 grid_start(ncols=2, title='Layer contribution')
 for model in ['pythia-1b-deduped', 'pythia-6.9b-deduped', 'OLMo-2-0425-1B', 'OLMo-2-1124-7B']:
     plot_layer_contribution(model, layer_outs(model), title=get_model_label(model))
+grid_show()
+
+# %%
+# R_over_r layer contribution: each write's share of the FINAL stream's energy
+# (tr Cov(c_k, r) / tr Σ_r — coupling to the rest of the stream included; the gap to 1.0 is
+# the embedding stream's share). Signed by definition, positive in practice: r contains c_k,
+# so a write must be cancelled by more than its own energy to go negative.
+_rr_srcs = lambda model: [(BLOCK_SAMPLES, (f'blk{l}.{s}.out', 'block_residual_coupling'), f'{s} {l}')
+                          for l in range(len(measured_br[model])) for s in ('attn', 'mlp')]
+grid_start(ncols=2, title='Layer contribution — share of final-stream energy (R over r)')
+for model in ['pythia-1b-deduped', 'pythia-6.9b-deduped', 'OLMo-2-0425-1B', 'OLMo-2-1124-7B']:
+    plot_layer_contribution(model, _rr_srcs(model), yvar='R_over_r', normalize=False,
+                            title=get_model_label(model))
 grid_show()
 
 # %%
@@ -576,77 +589,26 @@ for model in filter_model_names:
 # ### Head-removed final RankMe (Exp 4.5)
 
 # %%
-# RankMe of the final stream with the top-k eigendirections removed (tail_rankme virtual hook
-# on the stored eigenspectrum): separates head concentration from bulk dimensionality
-# (docs/dig_findings.md) — the measured compression phase lives in the top ~10-30 directions.
 # Head-removed RankMe + windowed alphaReQ (compression propagates down-spectrum with decaying
 # amplitude; docs/dig_findings.md), for the final stream AND the stream entering the last
-# block — is the head phenomenon written by the last block? Plus λ1/λ2 head dominance.
+# block — is the head phenomenon written by the last block?
 KS = (0, 1, 2, 8, 32, 128)
 WINDOWS = ((11, 100), (32, 100), (32, 300), (128, 512))
 _tail = lambda leaf: [(BLOCK_SAMPLES, (leaf, 'acts_centered'), f'k={k}', ('tail_rankme', {'k': k})) for k in KS]
 _alpha_w = lambda leaf: [(BLOCK_SAMPLES, (leaf, 'acts_centered'), f'{k0}-{k1}', ('alpha_window', {'k0': k0, 'k1': k1}))
                          for k0, k1 in WINDOWS]
-_pen = lambda model: f'blk{n_blocks_bs[model] - 1}.attn.in'   # stream entering the last block
 
-import numpy as np
-
-# The 'without top-3' stream = joint_ablation metric (next_run_additions.md #3: stream samples
-# minus the 3 most rank-influential writes, exact incl. cross terms; node '', keys
-# eigenspectrum/leaves/rankme/alpha). Until a run carries it, those panels annotate themselves;
-# the rankme comparison additionally shows the ADDITIVE estimate from the stored leave-one-out
-# ΔRankMe (first-order: single-write deltas ignore interactions between the three — in Pythia
-# they interact strongly enough to push the additive curve negative, itself a finding).
-JA = ('', 'joint_ablation')
-
-def _has_ja(model):
-    res, steps = _lib.load_results(BLOCK_SAMPLES, model)
-    return bool(res) and 'joint_ablation' in res[steps[-1]].get('', {})
-
-@_lib.griddable
-def _placeholder(msg):
-    _lib.plt.text(0.5, 0.5, msg, ha='center', va='center', fontsize=11, color='0.4', wrap=True)
-    _lib.plt.gca().set_axis_off()
-
-def _top3(model):
-    nodes = [f'blk{l}.{s}.out' for l in range(n_blocks_bs[model]) for s in ('attn', 'mlp')]
-    d = {n: _lib.get_ys(BLOCK_SAMPLES, model, (n, 'ablation_contribution'), 'delta_rankme')[0] for n in nodes}
-    return sorted(d, key=lambda n: -np.mean(np.abs(d[n])))[:3], d
-
-@_lib.griddable
-def _cmp_wo_top3(model, yvar):   # panel 5/6: normal vs without-top-3, one scalar metric
-    plt = _lib.plt
-    r, steps = _lib.get_ys(BLOCK_SAMPLES, model, ('before_final_norm', 'acts_centered'), yvar)
-    xs = _lib.XVAR_FNS['tokens'](model, steps)
-    plt.plot(xs[1:], np.asarray(r)[1:], lw=3, color='0.3', label=yvar)
-    top3, d = _top3(model)
-    lbl = ', '.join(n.removeprefix('blk').removesuffix('.out') for n in top3)
-    if yvar == 'rankme':         # additive estimate exists for rankme only
-        plt.plot(xs[1:], (np.asarray(r) - sum(np.asarray(d[n]) for n in top3))[1:], lw=3,
-                 color='tab:orange', ls='--', label=f'additive − top-3 ({lbl})')
-    if _has_ja(model):           # exact joint ablation (future runs)
-        j, jsteps = _lib.get_ys(BLOCK_SAMPLES, model, JA, yvar)
-        plt.plot(_lib.XVAR_FNS['tokens'](model, jsteps)[1:], np.asarray(j)[1:], lw=3,
-                 color='tab:red', label=f'joint − top-3 ({lbl})')
-    plt.xscale('log'); plt.xlim(10e7, 10**12.7)
-    plt.xlabel('Pretraining tokens', fontsize=14)
-    plt.ylabel(_lib.YVAR_LABELS.get(yvar, yvar), fontsize=14)
-    plt.legend(); plt.title(f'{yvar}: normal vs without top-3 writes')
-
-_ja_tail = [(BLOCK_SAMPLES, JA, f'k={k}', ('tail_rankme', {'k': k})) for k in KS]
-_ja_alpha = [(BLOCK_SAMPLES, JA, f'{k0}-{k1}', ('alpha_window', {'k0': k0, 'k1': k1})) for k0, k1 in WINDOWS]
-_NO_JA = 'needs the joint_ablation metric\n(next run — docs/next_run_additions.md #3)'
+# 'Without top-3' = additive leave-one-out estimate now; the exact joint_ablation
+# series joins automatically once a run carries it (docs/next_run_additions.md #3).
 
 for model in filter_model_names:
     grid_start(ncols=2, title=f'Head-removed RankMe / bulk alpha — {get_model_label(model)}')
     plot_group('tail_rankme', _tail('before_final_norm'), [model], color_palette='gradient', title='final stream')
-    (plot_group('tail_rankme', _ja_tail, [model], color_palette='gradient', title='without top-3 writes')
-     if _has_ja(model) else _placeholder(_NO_JA))
+    plot_group('tail_rankme', _tail(_pen(model)), [model], color_palette='gradient', title='stream before last block')
     plot_group('alpha_window', _alpha_w('before_final_norm'), [model], color_palette='gradient', title='final stream')
-    (plot_group('alpha_window', _ja_alpha, [model], color_palette='gradient', title='without top-3 writes')
-     if _has_ja(model) else _placeholder(_NO_JA))
-    _cmp_wo_top3(model, 'rankme')
-    _cmp_wo_top3(model, 'alpha')   # normal curve now; joint without-top-3 line joins next run
+    plot_group('alpha_window', _alpha_w(_pen(model)), [model], color_palette='gradient', title='stream before last block')
+    plot_wo_topk(BLOCK_SAMPLES, model, 'rankme')
+    plot_wo_topk(BLOCK_SAMPLES, model, 'alpha')
     grid_show()
 
 # %% [markdown]
