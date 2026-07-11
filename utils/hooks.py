@@ -227,6 +227,7 @@ class HookCollector(Capturer):
                     e["acts_mean"] = (self._acts_sum / self._n_acts).cpu()
         elif self._acts_list:
             e["acts_samples"] = torch.cat(self._acts_list, dim=0)
+            self._acts_list = []   # hand off: keeping the per-batch chunks alive doubles peak RSS
             e["acts_n"] = self._n_acts
 
         if self._grads_cov is not None:

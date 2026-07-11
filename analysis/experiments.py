@@ -549,6 +549,39 @@ def _abl_drift_grid(model):
 for model in filter_model_names:
     _abl_drift_grid(model)
 
+# %% [markdown]
+# ### Head-removed final RankMe (Exp 4.5)
+
+# %%
+# RankMe of the final stream with the top-k eigendirections removed (tail_rankme virtual hook
+# on the stored eigenspectrum): separates head concentration from bulk dimensionality
+# (docs/dig_findings.md) — the measured compression phase lives in the top ~10-30 directions.
+bfn_tail = [(BLOCK_SAMPLES, ('before_final_norm', 'acts_centered'), f'k={k}', ('tail_rankme', {'k': k}))
+            for k in (0, 1, 2, 8, 32)]
+
+for model in filter_model_names:
+    grid_start(ncols=1, title=f'Head-removed final RankMe — {get_model_label(model)}')
+    plot_group('tail_rankme', bfn_tail, [model], color_palette='gradient')
+    grid_show()
+
+# %% [markdown]
+# ### Sub-block ledger (Exp 4.6, OLMo only)
+
+# %%
+# Per-residual-write ledger: the block ledger's two sequential sub-steps (attn into stream,
+# then mlp), assembled notebook-side from incremental_overlap's stored entropies via the
+# sub_* virtual hooks. OLMo-only — Pythia's parallel sub-blocks have no sequential sub-steps.
+def _sub_ledger_grid(model):
+    subs = bs_out(model, 'incremental_overlap')
+    grid_start(ncols=2, title=f'Sub-block ledger — {get_model_label(model)}')
+    for y in ('sub_delta_s', 'chi', 'sub_quality', 'sub_interference'):
+        plot_group(y, subs, [model], color_palette='gradient', title=y)
+    grid_show()
+
+for model in filter_model_names:
+    if 'OLMo' in model:
+        _sub_ledger_grid(model)
+
 
 # %% [markdown]
 # ### K-FAC up/gate

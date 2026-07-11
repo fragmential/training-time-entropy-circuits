@@ -1,8 +1,9 @@
 output_dir: data/inferences/block_representations_samples_padded
 # Samples-mode cross metrics on INDEPENDENT rows: padded, last token per document, shuffled
-# text sampling. Row budgets (num_samples = docs = rows) match the packed samples config's
-# token budgets, so CPU-RAM sizing is identical (~104 GB bf16 for the 7Bs).
-# NOTE: forward cost is ~doc_len x higher per row than packed-all — budgets are provisional.
+# text sampling. Unlike packed (RAM-bound, correlated tokens), padded rows each cost a full
+# 512-token forward — so N is sized to statistical need, not RAM. Bulk-spectrum TRENDS survive
+# the fixed Marchenko-Pastur broadening at fixed N; only absolute bulk levels / tail exponents
+# would need more rows, and no claim rests on those cross-run.
 
 model_name:
   - "allenai/OLMo-2-0425-1B"
@@ -12,7 +13,7 @@ model_name:
 
 #              OL1B    OL7B   Py1b    Py6.9b
 batch_size:  [  48,     32,   256,      72]
-num_samples: [262_144, 98_304, 262_144, 131_072]
+num_samples: 16_384
 
 dataset_name: native
 text_shuffle_seed: 42

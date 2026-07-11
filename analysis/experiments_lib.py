@@ -101,8 +101,14 @@ def _drift_ema(V, beta=0.7):                            # series-mode: cosine vs
     for t in range(1, len(V)): out.append(_cos(V[t], h)); h = beta*h + (1-beta)*V[t]
     return out
 
+def _rankme(evs: np.ndarray) -> float:
+    p = evs[evs > 0]
+    p = p / p.sum()
+    return float(np.exp(-(p * np.log(p)).sum()))
+
 virtual_hooks = {
     "peak_eigval": (["eigenspectrum", "trace"], (lambda evs, tr: evs[0].item()*tr)),
+    "tail_rankme": (["eigenspectrum"], (lambda evs, k=32: _rankme(np.asarray(evs)[k:]))),
     "eigvals": (["eigenspectrum", "trace"], (lambda evs, tr: evs*tr)),
     "histogram":    (["eigvals"], (lambda evs, bins=512: make_histogram(evs, bins))),
     "loghistogram": (["eigvals"], (lambda evs, bins=512: make_histogram(evs, bins, log_bins=True))),
@@ -115,6 +121,14 @@ virtual_hooks = {
     "magratio_res": ([{'yvar': 'acts_mean_vec'}, {'node': _joined_residual, 'yvar': 'acts_mean_vec'}], lambda a, b: float(np.linalg.norm(a) / np.linalg.norm(b))),
     "cos_drift":     ([{'yvar': 'acts_mean_vec'}], _drift, 'series'),
     "cos_drift_ema": ([{'yvar': 'acts_mean_vec'}], _drift_ema, 'series'),
+    # Per-sub-step ledger, assembled from incremental_overlap at blk*.{attn,mlp}.out nodes
+    # (sequential families only — Pythia's parallel sub-steps are fictitious). s_next comes
+    # from the sibling mlp's s_in (attn step) or the block ledger's s_next (mlp step).
+    "sub_s_next":       ([{'node': lambda n, m: (f"{n.split('.')[0]}.mlp.out", 'incremental_overlap', 's_in')
+                           if '.attn.' in n else (n.split('.')[0], 'block_ledger', 's_next')}], lambda x: x),
+    "sub_delta_s":      (["sub_s_next", "s_in"],  lambda nxt, si: nxt - si),
+    "sub_quality":      (["w", "s_out", "s_in"],  lambda w, so, si: (1 - w) * (so - si)),
+    "sub_interference": (["sub_s_next", "s_mix"], lambda nxt, smix: nxt - smix),
 }
 
 def _try_get(d, path):
@@ -127,6 +141,7 @@ def _operand(req, hook, model):
     if isinstance(req, str): return hook, req
     node, k = req.get('node', hook[0]), req.get('key')
     if callable(node): node = node(hook[0], model)   # node selector may depend on the model (family aliases)
+    if isinstance(node, tuple): return node[:-1], node[-1]   # selector may return a full (node, key, yvar) redirect
     return ((node,) if k is None else (node, k(hook[1]) if callable(k) else k)), req['yvar']
 
 def get_ys(source_file, model_name, hook, yvar, yvar_kwargs={}):

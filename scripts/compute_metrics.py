@@ -784,6 +784,14 @@ def _geneig_drift(node: Node, prev: Node) -> dict | None:
     return _gen_pair(*v) if (v := _drift_pair(node, prev)) else None
 
 
+def _gen_vs_ref(node: Node, ref: Node) -> dict | None:
+    """Generalized eigenvalues Σ_self v = λ Σ_ref v per quantity, against the same leaf of an
+    external reference run (--ref: e.g. task population vs general population)."""
+    out = {q: r for q in ("acts", "grads")
+           if (v := _views(node.get(q), ref.get(f"{node.path}.{q}"))) and (r := _gen_pair(*v))}
+    return out or None
+
+
 METRICS = [
     _Metric("gen",              {"a": "acts", "g": "grads"},                 _gen_metric),
     _Metric("kfac",             {"a": "in.acts", "g": "out.grads"},          _kfac_metric),
@@ -793,6 +801,7 @@ METRICS = [
     # Block-composition metrics ({"node": ""} = the node itself); drift ones need ctx["prev"].
     _Metric("cka_drift",               {"node": ""}, _cka_drift,               external="prev"),
     _Metric("geneig_drift",            {"node": ""}, _geneig_drift,            external="prev"),
+    _Metric("gen_vs_ref",              {"node": ""}, _gen_vs_ref,              external="ref"),
     _Metric("block_residual_coupling", {"node": ""}, _block_residual_coupling, node_re=r"blk\d+\.(attn|mlp)\.out$"),
     _Metric("ablation_contribution",   {"node": ""}, _ablation_contribution,   node_re=r"blk\d+\.(attn|mlp)\.out$"),
     _Metric("eigendirection_attrib",   {"node": ""}, _eigendirection_attribution, node_re=r"blk\d+\.(attn|mlp)\.out$"),
@@ -968,6 +977,7 @@ def main(
     derive: bool = True,
     data_root: str = "data/inferences",
     output_root: str = "data/results",
+    ref: str | None = None,
 ):
     """Compute spectral metrics from collected data.
 
@@ -980,6 +990,8 @@ def main(
         num_workers: Number of parallel workers (default: cpu count).
         recompute: If True, recompute all steps even if results exist.
         derive: If True (default), derive B and post-norm metrics when possible.
+        ref: External reference .pt file (or step-file directory, matched by step) for
+             gen_vs_ref — generalized eigenvalues of every leaf against the same leaf there.
     """
 
     data_root, config_directory = _resolve_data_root(data_root, config_directory)
@@ -1030,9 +1042,13 @@ def main(
         step, path = item
         return step, load_inference(path, derive)
 
+    ref_files = discover_step_files(ref) if ref and os.path.isdir(ref) else {}
+
     def work(payload):
         step, (data, config, weights) = payload
-        metrics = compute_metrics_for_checkpoint(DataAccessor(data, config=config, weights=weights))
+        rpath = ref_files.get(step, None if ref_files else ref)
+        ctx = {"ref": DataAccessor(rpath).v} if rpath else None
+        metrics = compute_metrics_for_checkpoint(DataAccessor(data, config=config, weights=weights), ctx=ctx)
         with save_lock:
             save_step_metrics(results_path, step, metrics)   # saves every step
         print(f"  Step {step}: {len(metrics)} hook points "

@@ -400,6 +400,15 @@ def test_drift_metrics_with_ctx():
     assert torch.allclose(gen, torch.ones_like(gen), atol=0.05)
 
 
+def test_gen_vs_ref_with_ctx():
+    from scripts.compute_metrics import get_metrics
+    acc, ref = _composition_acc(), _composition_acc()   # same seed -> identical populations
+    res = get_metrics(acc.v, ctx={"ref": ref.v})
+    gen = res["blk0.attn.out"]["gen_vs_ref"]["acts"]["eigvals"]
+    assert torch.allclose(gen, torch.ones_like(gen), atol=0.05)
+    assert "gen_vs_ref" not in get_metrics(_composition_acc().v)["blk0.attn.out"]
+
+
 def test_drift_metrics_skip_without_ctx():
     from scripts.compute_metrics import get_metrics
     res = get_metrics(_composition_acc().v)
