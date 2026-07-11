@@ -53,7 +53,20 @@ forbidden_modules = ["scripts"]
 
 [tool.pyright]
 include = ["utils", "scripts"]
-exclude = ["**/*backup*.py", "**/*_old.py", "**/__pycache__"]
+exclude = [
+    "**/*backup*.py", "**/*_old.py", "**/__pycache__", "**/memorization*",
+    "analysis", "analysis/**", "**/analysis/**",
+    "scripts/activation_ratio.py", "scripts/profile_sweep.py",
+    "scripts/migrate_results.py", "scripts/merge_results.py",
+]
+# `exclude` drops files from the default set, but editors (Pylance) still analyze a file you
+# OPEN even if excluded; `ignore` suppresses diagnostics for these even when open.
+ignore = [
+    "**/*backup*.py", "**/*_old.py", "**/memorization*",
+    "analysis", "analysis/**", "**/analysis/**",
+    "scripts/activation_ratio.py", "scripts/profile_sweep.py",
+    "scripts/migrate_results.py", "scripts/merge_results.py",
+]
 pythonVersion = "3.14"
 typeCheckingMode = "basic"
 # reportPrivateUsage is a CONSUMER-boundary rule: within utils, Node/View/DataAccessor are one

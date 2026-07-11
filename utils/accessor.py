@@ -78,9 +78,10 @@ def _cast(c: CompName, t: AtomicComponent) -> AtomicComponent:
     return t.to(PRECISIONS.get(c, torch.float32)) if isinstance(t, torch.Tensor) else t
 
 
-class _AbortWeights:
+class _AbortWeights(WeightProvider):
     """A WeightProvider that refuses to load — the `abort_on_model_load` switch."""
-    def __getattr__(self, _): raise RuntimeError("refusing to load model weights (abort_on_model_load)")
+    def weight(self, sd_prefix: str): raise RuntimeError("refusing to load model weights (abort_on_model_load)")
+    def norm(self): raise RuntimeError("refusing to load model weights (abort_on_model_load)")
 
 
 # component -> [(source components, fn)], tried in priority order. `_eigh` is private
@@ -169,15 +170,23 @@ class DataAccessor:
         return self
 
     # --- read entry: the only public read path (canonical = navigate Pythia aliases) ---
-    def __getitem__(self, path: Leaf) -> "Node":
-        node = self.v
+    def __getitem__(self, path: Leaf) -> "Node | View":
+        node: "Node | View" = self.v
         for seg in filter(None, canonical(path, self.data).split(".")):
+            assert isinstance(node, Node), f"{path!r}: only the final segment may be a quantity"
             node = node[seg]
         return node
 
-    # --- resolver: memoizes, guards cycles, runs the producer chain ---
+    # --- resolver: public _resolve yields an atomic component; _resolve_aux is the recursive
+    #     engine (memoizes, guards cycles) whose intermediates may be tuples (_eigh/_svd) ---
     def _resolve(self, leaf: Leaf, q: Quantity, component: CompName,
-                 reference: "View | None" = None) -> Component | None:
+                 reference: "View | None" = None) -> AtomicComponent | None:
+        r = self._resolve_aux(leaf, q, component, reference)
+        assert not isinstance(r, tuple), f"{component!r} resolved to a non-atomic component"
+        return r
+
+    def _resolve_aux(self, leaf: Leaf, q: Quantity, component: CompName,
+                     reference: "View | None" = None) -> Component | None:
         key: Key = (leaf, q, component, reference.identity if reference is not None else None)
         if key in self._cache:
             return self._cache[key]
@@ -187,7 +196,7 @@ class DataAccessor:
         result = None
         try:
             for inputs, fn in self._producers(leaf, q, component, reference):
-                args = [self._resolve(*i) for i in inputs]
+                args = [self._resolve_aux(*i) for i in inputs]
                 if all(a is not None for a in args) and (out := fn(*args)) is not None:
                     result = out
                     break
@@ -373,6 +382,8 @@ class View:
 
     def persist(self, *components: CompName) -> "View":
         """Write the listed (computed) components of this projection into its on-disk store."""
+        if self.reference is None or self._acc is None:
+            raise ValueError("persist() needs a projected View bound to an accessor (use in_basis)")
         store = self._acc.data.setdefault(self._leaf, {}).setdefault(
             f"__{self._q}_projections__", {}).setdefault(self.reference.identity, {})
         store |= {c: v for c in components if (v := getattr(self, c)) is not None}

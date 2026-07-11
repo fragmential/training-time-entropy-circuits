@@ -47,6 +47,7 @@ import torch
 import torch.nn as nn
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, fields
+from typing import cast
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
@@ -242,6 +243,25 @@ class CollectConfig:
             if isinstance(self.checkpoints, dict):
                 self.checkpoints = _resolve_wildcard_dict(self.checkpoints, model)
             self.model_name = model
+
+
+class ScalarConfig(CollectConfig):
+    """A `CollectConfig` after `__post_init__`/`array_id` resolution: every vectorizable field
+    now holds a single scalar, so we re-type them. Obtain via `scalarized(cfg)`."""
+    model_name: str
+    dataset_name: str
+    accumulation_dtype: str
+    activation_dtype: str
+    packed_data_path: "str | None"
+    batch_size: int
+    max_layers_per_pass: int
+    max_checkpoints: "int | None"   # main() clears it to None when an explicit checkpoints list wins
+
+
+def scalarized(cfg: CollectConfig) -> ScalarConfig:
+    """Re-type an already-resolved config so call sites see scalar (not union) field types.
+    Resolution happened in __post_init__; this is just a checked cast of the same object."""
+    return cast(ScalarConfig, cfg)
 
 
 # ---------------------------------------------------------------------------
@@ -446,14 +466,14 @@ def _collect_for_checkpoint(
         else:
             n_batches = (len(texts) + cfg.batch_size - 1) // cfg.batch_size
 
-        bar_kwargs = dict(desc=desc, total=n_batches)
+        bar_kwargs: dict[str, object] = dict(desc=desc, total=n_batches)
         if _IS_TTY:
             bar_kwargs.update(leave=False)
         else:
             # Non-TTY: write one clean line per update, no cursor codes
             bar_kwargs.update(leave=True, bar_format="{desc}: {n}/{total} [{elapsed}<{remaining}, {rate_fmt}]")
 
-        for input_ids, attention_mask in tqdm(batches, **bar_kwargs):
+        for input_ids, attention_mask in tqdm(batches, **bar_kwargs):  # type: ignore[arg-type]  # dynamic **kwargs vs tqdm's overloaded signature
             # Compute one mask per unique token_selection, cache by selection value
             _mask_cache = {}
 
@@ -600,7 +620,7 @@ def _merge_with_existing(existing_raw: dict, new_captured: dict) -> dict:
 
 def main(cfg: CollectConfig):
     if not cfg.hf_progress_bars:
-        from huggingface_hub.utils import disable_progress_bars
+        from huggingface_hub.utils import disable_progress_bars  # type: ignore[attr-defined]  # runtime-exported, missing from stubs
         from transformers.utils import logging as hf_logging
         disable_progress_bars()
         hf_logging.disable_progress_bar()
@@ -615,6 +635,7 @@ def main(cfg: CollectConfig):
             "model_name is still a list — pass --array_id to select a model, "
             "or pass a single --model_name."
         )
+    cfg = scalarized(cfg)   # resolution is done; re-type so vectorizable fields read as scalars
 
     model_config = get_model_config(model_name)
     short_name = model_name.split("/")[-1] if "/" in model_name else model_name
@@ -721,6 +742,7 @@ def main(cfg: CollectConfig):
             raise ValueError(f"storage_format must match continued data (existing={old_fmt!r}, new={cfg.storage_format!r})")
 
         if cfg.packing == "padded":
+            assert texts is not None  # padded ⇒ the else-branch above loaded texts (never the packed_ids path)
             # sample count == n_sequences for last-token padded collection
             n_done = next(
                 v[f"{q}_n"]
@@ -766,7 +788,7 @@ def main(cfg: CollectConfig):
 
     t_load, t_collect, t_save, t_metrics = 0.0, 0.0, 0.0, 0.0
 
-    for idx, (step_num, revision, step_model) in enumerate(tqdm(to_process, **ckpt_bar_kwargs)):
+    for idx, (step_num, revision, step_model) in enumerate(tqdm(to_process, **ckpt_bar_kwargs)):  # type: ignore[arg-type]  # dynamic **kwargs vs tqdm's overloaded signature
         # Prefetch next
         if idx + 1 < len(to_process):
             _, next_rev, next_model = to_process[idx + 1]
@@ -778,7 +800,7 @@ def main(cfg: CollectConfig):
         try:
             _t0 = time.time()
             model = load_model(model_config, step_model, revision)
-            model.to(device)
+            model.to(device)  # type: ignore[arg-type]  # model is an HF model-class union; .to(str) is valid
 
             # Grad-run model setup (enable_input_require_grads etc.) now happens inside
             # _collect_for_checkpoint when any hook needs gradients.

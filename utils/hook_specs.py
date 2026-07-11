@@ -10,7 +10,7 @@ two ordinary leaves (`…up.in:acts` + `…up.out:grads`), or `preset:kfac` for 
 import fnmatch
 import re
 from dataclasses import dataclass
-from typing import Optional, List, Set
+from typing import List, Set
 
 import torch.nn as nn
 
@@ -35,10 +35,10 @@ _PRESETS = {
 class SingleHookSpec:
     """A concrete leaf capture-point and the quantities to collect there."""
     leaf: str
-    module: Optional[nn.Module]   # the module whose `capture` side is the leaf
+    module: nn.Module | None   # the module whose `capture` side is the leaf
     capture: str                  # "input" | "output"
     quantities: Set[str]          # subset of {"acts", "grads"}
-    token_selection: Optional[str]
+    token_selection: str | None
     is_global: bool               # residual / final-norm (registered once across passes)
 
 
@@ -51,7 +51,7 @@ class OVHeadSpec:
     head_dim: int
     selected_heads: List[int]
     quantities: Set[str]
-    token_selection: Optional[str]
+    token_selection: str | None
 
 
 def _leaf_modules(model, model_config, target_layers, num_heads_per_block):

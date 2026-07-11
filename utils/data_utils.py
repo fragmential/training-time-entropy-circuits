@@ -4,7 +4,6 @@ import json
 import os
 import torch
 from functools import partial
-from typing import Optional
 from datasets import load_dataset
 
 
@@ -52,7 +51,7 @@ def load_and_cache_texts(
     tokenizer,
     dataset_name: str,
     content_key: str = "text",
-    max_bytes: Optional[int] = None,
+    max_bytes: int | None = None,
 ) -> list:
     """Load dataset texts, filtering by minimum token length. Caches to disk.
 
@@ -148,12 +147,12 @@ def pad_and_tokenize(texts: list, tokenizer, max_length: int) -> dict:
 
 def compute_token_mask(
     input_ids: torch.Tensor,
-    attention_mask: Optional[torch.Tensor] = None,
+    attention_mask: torch.Tensor | None = None,
     token_selection: str = "all",
     skip_positions: int = 0,
-    boundary_token_ids: Optional[list] = None,
-    answer_start_positions: Optional[torch.Tensor] = None,
-) -> torch.BoolTensor:
+    boundary_token_ids: list | None = None,
+    answer_start_positions: torch.Tensor | None = None,
+) -> torch.Tensor:
     """Compute a boolean mask selecting which token positions to include.
 
     Args:
@@ -231,8 +230,8 @@ def compute_token_mask(
 
 def compute_labels(
     input_ids: torch.Tensor,
-    attention_mask: Optional[torch.Tensor] = None,
-    answer_start_positions: Optional[torch.Tensor] = None,
+    attention_mask: torch.Tensor | None = None,
+    answer_start_positions: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Compute next-token prediction labels from input_ids.
 
