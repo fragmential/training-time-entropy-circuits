@@ -605,6 +605,8 @@ def _block_residual_coupling(node: Node) -> dict | None:
         return None
     P, R, lc, lr = g
     tr_P, tr_R, (tr_c, fro_c), (tr_r, fro_r) = float(P.trace()), float(R.trace()), _tr_fro(lc), _tr_fro(lr)
+    if tr_c == 0 or tr_r == 0:
+        return None    # zero block output (e.g. zero-init c_proj at step 0) — coupling undefined
     cos = {"cos_cr": float(_mean_cos(*s))} if (s := _comps(v[0].samples, v[2].samples)) else {}
     return {"tr_P": tr_P, "tr_R": tr_R, "tr_Q": tr_R - tr_P - tr_c,
             "R_over_ck": tr_R / tr_c, "R_over_r": tr_R / tr_r,
@@ -763,6 +765,8 @@ def _block_block_coupling(node: Node) -> dict | None:
     if len(views) < 2 or any(x is None for c3 in comps for x in c3):
         return None
     tr, fro = zip(*(_tr_fro(_t(l)) for *_, l in comps))
+    if any(t == 0 for t in tr):
+        return None    # a zero block output (e.g. zero-init c_proj at step 0) — coupling undefined
     stats = prefer_gpu(lambda Xj, mj, Xk, mk: (
         C := Xj.float().T @ Xk.float() / Xj.shape[0] - torch.outer(mj, mk),
         C.trace(), C.square().sum(),
