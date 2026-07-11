@@ -329,6 +329,11 @@ class Node:
     def children(self) -> list["Node"]:
         return list(self._children.values())
 
+    @property
+    def path(self) -> str:
+        """This node's dotted path (the metric engine keys results by it)."""
+        return self._path
+
     def __repr__(self) -> str:
         return f"Node({self._path!r})"
 

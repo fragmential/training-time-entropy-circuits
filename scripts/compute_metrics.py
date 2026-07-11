@@ -549,15 +549,15 @@ def get_metrics(node: Node, results: dict | None = None) -> dict:
     for q in ("acts", "grads"):
         fv: View = node.get(q)
         if fv is not None:
-            out.update(_quantity_metrics(q, fv, node._path))
+            out.update(_quantity_metrics(q, fv, node.path))
     for m in METRICS:
         args = {k: node.get(rel) for k, rel in m.operands.items()}
-        if all(v is not None for v in args.values()) and m.match(node._path):
+        if all(v is not None for v in args.values()) and m.match(node.path):
             r = m.fn(**args)
             if r is not None:
                 out[m.name] = r
     if out:
-        results[node._path] = out
+        results[node.path] = out
     return results
 
 
