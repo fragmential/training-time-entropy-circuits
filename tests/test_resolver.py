@@ -246,3 +246,84 @@ def test_navigation_to_boundaries():
     assert torch.equal(acc.v.blk3.mlp.out.acts.cov, acc["blk3.mlp.out"].acts.cov)
     with pytest.raises(AttributeError):
         acc.v.blk3.attn["in"].grads
+
+
+# --- Cross views (A.cross(B)) + projected means ---
+
+def _samples_acc(N=64, d=6):
+    g = torch.Generator().manual_seed(7)
+    A, B = torch.randn(N, d, generator=g), torch.randn(N, d, generator=g)
+    acc = DataAccessor({"blk0.attn.out": {"acts_samples": A, "acts_n": N},
+                        "blk0.mlp.out": {"acts_samples": B, "acts_n": N},
+                        "before_final_norm": {"acts_samples": A + B, "acts_n": N},
+                        "__format__": "acts"})
+    return acc, A, B
+
+
+def test_cross_cov_matches_manual():
+    acc, A, B = _samples_acc()
+    C = acc["blk0.attn.out"].acts.cross(acc["blk0.mlp.out"].acts).cov
+    assert torch.allclose(C, A.T @ B / 64, atol=1e-5)
+
+
+def test_cross_cov_centered_matches_manual():
+    acc, A, B = _samples_acc()
+    Cc = acc["blk0.attn.out"].acts.cross(acc["blk0.mlp.out"].acts).cov_centered
+    assert torch.allclose(Cc, A.T @ B / 64 - torch.outer(A.mean(0), B.mean(0)), atol=1e-5)
+
+
+def test_cross_additivity_identity():
+    # cov(a+b) = cov(a) + cov(b) + C + Cᵀ — the algebra the ablation metric relies on.
+    acc, _, _ = _samples_acc()
+    a, b, r = (acc[l].acts for l in ("blk0.attn.out", "blk0.mlp.out", "before_final_norm"))
+    C = a.cross(b).cov_centered
+    assert torch.allclose(r.cov_centered, a.cov_centered + b.cov_centered + C + C.T, atol=1e-4)
+
+
+def test_cross_rectangular_and_ordered():
+    N = 32
+    A, B = torch.randn(N, 6), torch.randn(N, 4)
+    acc = DataAccessor({"a": {"acts_samples": A, "acts_n": N},
+                        "b": {"acts_samples": B, "acts_n": N}, "__format__": "acts"})
+    C = acc["a"].acts.cross(acc["b"].acts).cov
+    assert C.shape == (6, 4) and torch.allclose(C.T, acc["b"].acts.cross(acc["a"].acts).cov, atol=1e-6)
+
+
+def test_cross_n_mismatch_is_none():
+    acc, _, _ = _samples_acc()
+    other = DataAccessor({"x": {"acts_samples": torch.randn(32, 6), "acts_n": 32}, "__format__": "acts"})
+    assert acc["blk0.attn.out"].acts.cross(other["x"].acts).cov is None
+
+
+def test_cross_has_no_symmetric_components():
+    acc, _, _ = _samples_acc()
+    cross = acc["blk0.attn.out"].acts.cross(acc["blk0.mlp.out"].acts)
+    assert cross.eigvals is None and cross.eigvecs is None and cross.samples is None
+
+
+def test_cross_not_persisted(tmp_path):
+    acc, _, _ = _samples_acc()
+    _ = acc["blk0.attn.out"].acts.cross(acc["blk0.mlp.out"].acts).cov_centered
+    out = str(tmp_path / "c.pt")
+    acc.stamp(ID).save(out, format="eigenvalues")
+    saved = torch.load(out, map_location="cpu", weights_only=False)
+    assert all("cross" not in k and "samples" not in k for e in saved.values()
+               if isinstance(e, dict) for k in e)
+
+
+def test_projected_cov_centered_rotate_center_commute():
+    # needs PROJECTIONS["mean"]: rotate-then-center == center-then-rotate.
+    acc, A, _ = _samples_acc()
+    ref = acc["blk0.mlp.out"].acts
+    v = acc["blk0.attn.out"].acts.in_basis(ref)
+    Vr = ref.eigvecs
+    manual = Vr.T @ (A.T @ A / 64 - torch.outer(A.mean(0), A.mean(0))) @ Vr
+    assert torch.allclose(v.cov_centered, manual, atol=1e-4)
+
+
+def test_node_get_nodes_and_root():
+    acc, _, _ = _samples_acc()
+    node = acc["blk0.attn.out"]
+    assert node.get("") is node
+    assert node.root.path == "" and node.root.get("blk0.mlp.out").path == "blk0.mlp.out"
+    assert node.get("nope") is None and node.get("acts") is not None

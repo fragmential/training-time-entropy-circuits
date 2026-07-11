@@ -167,6 +167,8 @@ def test_flag_matrix(collected, tmp_path):
 SPEC_A = {"acts_uncentered", "acts_centered", "acts_mean_metrics", "acts_mean_vec"}
 SPEC_G = {"grads_uncentered", "grads_centered", "grads_mean_metrics", "grads_mean_vec"}
 BOTH = SPEC_A | SPEC_G | {"gen"}
+# block .out leaves also get the eigendecomp-only composition metrics (no samples needed)
+OUT_EXTRA = {"gen_block_vs_residual", "mean_migration", "incremental_overlap"}
 
 def test_structure_boundary_grads_on(collected):
     s = _structure(compute_metrics_for_checkpoint(_acc(collected)))
@@ -182,7 +184,8 @@ def test_structure_boundary_grads_on(collected):
     # every :both boundary/residual point captures grads -> full acts+grads+gen
     for leaf in ("blk0.attn.in", "blk0.attn.out", "blk0.mlp.out",
                  "before_final_norm", "after_final_norm"):
-        assert s[leaf] == BOTH, leaf
+        extra = OUT_EXTRA if leaf in ("blk0.attn.out", "blk0.mlp.out") else set()
+        assert s[leaf] == BOTH | extra, leaf
 
 
 def test_structure_boundary_grads_off(collected):

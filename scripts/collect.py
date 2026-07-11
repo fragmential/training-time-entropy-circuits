@@ -81,7 +81,8 @@ from utils.data_utils import (
 
 # Fields that may vary per model in a sweep (accept scalar, list, or dict).
 VECTORIZABLE_FIELDS = {"batch_size", "max_checkpoints", "max_layers_per_pass", "dataset_name",
-                       "accumulation_dtype", "activation_dtype", "packed_data_path"}
+                       "accumulation_dtype", "activation_dtype", "packed_data_path", "max_tokens",
+                       "num_samples"}
 
 
 def _resolve_wildcard_dict(d: dict, model_name: str, default=None):
@@ -116,7 +117,8 @@ class CollectConfig:
     # --- Data ---
     dataset_name: "str | dict[str, str] | list[str]" = "fineweb"
     dataset_content_key: str = "text"
-    num_samples: int = 5000
+    num_samples: "int | dict[str, int] | list[int]" = 5000
+    text_shuffle_seed: "int | None" = None  # shuffle the text stream (padded runs otherwise sample the dataset HEAD)
     seq_len: int = 512
     max_length: int = 512
     min_length: int = 32
@@ -128,7 +130,7 @@ class CollectConfig:
     skip_positions: int = 0
     boundary_token_ids: "list | None" = None
     max_bytes: "int | None" = None  # if set, replaces num_samples as data budget (e.g. 80_000_000)
-    max_tokens: "int | None" = None  # if set, limit packed data to this many tokens (rounds up to full chunks)
+    max_tokens: "int | None | dict[str, int] | list[int]" = None  # if set, limit packed data to this many tokens (rounds up to full chunks)
     packed_data_path: "str | dict[str, str] | list[str] | None" = None  # path to pre-built .pt of shape (n_chunks, seq_len)
 
     # --- What to collect ---
@@ -158,6 +160,9 @@ class CollectConfig:
 
     # --- Storage ---
     storage_format: str = "cov"
+    # Accumulator mode ("acts"|"cov"); None → from storage_format. "acts" + a small
+    # storage_format enables in-memory cross metrics (such runs can't be continue_from'd).
+    collect_format: "str | None" = None
     storage_dtype: "str | None" = None  # None → smart defaults (eigvals:fp64, eigvecs/acts/cov:fp32)
     cross_basis_refs: "list | None" = None
     output_dir: "str | None" = None
@@ -255,6 +260,8 @@ class ScalarConfig(CollectConfig):
     packed_data_path: "str | None"
     batch_size: int
     max_layers_per_pass: int
+    max_tokens: "int | None"
+    num_samples: int
     max_checkpoints: "int | None"   # main() clears it to None when an explicit checkpoints list wins
 
 
@@ -369,7 +376,8 @@ def _collect_for_checkpoint(
     returns the merged captured dict.
     """
     storage_base, _ = _parse_storage_format(cfg.storage_format)
-    storage_mode = "acts" if storage_base == "acts" else "cov"
+    storage_mode = cfg.collect_format or ("acts" if storage_base == "acts" else "cov")
+    assert storage_mode in ("acts", "cov"), f"collect_format must be acts|cov, got {storage_mode!r}"
     collect_means = True   # every storage format includes means
 
     # Resolve patterns once against the model's leaf universe
@@ -709,7 +717,7 @@ def main(cfg: CollectConfig):
         texts = load_and_cache_texts(
             loader_fn, cfg.num_samples, cfg.min_length, tokenizer,
             cfg.dataset_name, cfg.dataset_content_key,
-            max_bytes=cfg.max_bytes,
+            max_bytes=cfg.max_bytes, shuffle_seed=cfg.text_shuffle_seed,
         )
         if cfg.packing == "packed":
             packed_ids = pack_sequences(texts, tokenizer, cfg.seq_len)

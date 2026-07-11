@@ -1,0 +1,35 @@
+output_dir: data/inferences/block_representations_all
+# 7B leg of block_representations_all: boundary leaves only — no head slices / raw_out.
+# At all layers those materialize 1024 per-head d_model² contribs (~350 GB RSS peak → OOM
+# even at 450G); dropping them fits the default 180 GB share (1-GPU billing).
+
+model_name:
+  - "allenai/OLMo-2-1124-7B"
+  - "EleutherAI/pythia-6.9b-deduped"
+
+batch_size: [32, 72]
+
+packed_data_path:
+  allenai/*: data/mixes/olmo_mix_30M_512.pt
+  EleutherAI/*: data/mixes/pile_30M_512.pt
+
+max_tokens: 1_200_000
+seq_len: 512
+min_length: 32
+max_checkpoints: 30
+checkpoint_spacing: sqrt
+packing: packed
+token_selection: all
+
+hooks:
+  - blk*.attn.in           # residual into attn sub-block
+  - blk*.attn.out          # attention's contribution to residual
+  - blk*.mlp.in            # OLMo-2 only: residual into MLP sub-block
+  - blk*.mlp.out           # MLP's contribution to residual
+  - before_final_norm
+  - after_final_norm
+
+max_layers_per_pass: 0
+storage_format: eigenvalues
+compute_metrics: True
+keep_cached: False

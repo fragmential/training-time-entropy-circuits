@@ -52,6 +52,7 @@ def load_and_cache_texts(
     dataset_name: str,
     content_key: str = "text",
     max_bytes: int | None = None,
+    shuffle_seed: int | None = None,
 ) -> list:
     """Load dataset texts, filtering by minimum token length. Caches to disk.
 
@@ -60,6 +61,8 @@ def load_and_cache_texts(
         max_bytes: If set, stop collecting once total UTF-8 byte count of accepted texts
                    exceeds this value. Overrides num_samples as the stopping criterion.
                    Example: 80_000_000 ≈ 20M tokens, matching the reference K-FAC repo.
+        shuffle_seed: If set, shuffle the stream (buffered) before taking texts — without it
+                   the texts are the HEAD of the dataset, not a representative sample.
     """
     os.makedirs("data/filtered_texts", exist_ok=True)
     if max_bytes is not None:
@@ -68,6 +71,8 @@ def load_and_cache_texts(
         cache_key = f"{dataset_name}_{mb_str}MB"
     else:
         cache_key = f"{dataset_name}_{num_samples}"
+    if shuffle_seed is not None:
+        cache_key += f"_s{shuffle_seed}"
     cache_path = os.path.join("data", "filtered_texts", f"{cache_key}.json")
     if os.path.exists(cache_path):
         with open(cache_path) as f:
@@ -77,6 +82,8 @@ def load_and_cache_texts(
 
     from tqdm import tqdm
     dataset = dataset_loader_fn()
+    if shuffle_seed is not None:
+        dataset = dataset.shuffle(seed=shuffle_seed, buffer_size=10_000)
     texts = []
     total_bytes = 0
     for seq in tqdm(dataset, desc="Filtering"):

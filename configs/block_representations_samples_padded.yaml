@@ -1,0 +1,40 @@
+output_dir: data/inferences/block_representations_samples_padded
+# Samples-mode cross metrics on INDEPENDENT rows: padded, last token per document, shuffled
+# text sampling. Row budgets (num_samples = docs = rows) match the packed samples config's
+# token budgets, so CPU-RAM sizing is identical (~104 GB bf16 for the 7Bs).
+# NOTE: forward cost is ~doc_len x higher per row than packed-all — budgets are provisional.
+
+model_name:
+  - "allenai/OLMo-2-0425-1B"
+  - "allenai/OLMo-2-1124-7B"
+  - "EleutherAI/pythia-1b-deduped"
+  - "EleutherAI/pythia-6.9b-deduped"
+
+#              OL1B    OL7B   Py1b    Py6.9b
+batch_size:  [  48,     32,   256,      72]
+num_samples: [262_144, 98_304, 262_144, 131_072]
+
+dataset_name: native
+text_shuffle_seed: 42
+seq_len: 512
+max_length: 512
+min_length: 32
+max_checkpoints: 30
+checkpoint_spacing: sqrt
+packing: padded
+token_selection: last
+activation_dtype: bf16
+
+hooks:
+  - blk*.attn.in           # residual into attn sub-block
+  - blk*.attn.out          # attention's contribution to residual
+  - blk*.mlp.in            # OLMo-2 only: residual into MLP sub-block
+  - blk*.mlp.out           # MLP's contribution to residual
+  - before_final_norm
+  - after_final_norm
+
+max_layers_per_pass: 0
+collect_format: acts
+storage_format: eigenvalues
+compute_metrics: True
+keep_cached: False

@@ -1,8 +1,9 @@
 """Read, resolve, convert, and save collected data. See docs/accessor_interface.md.
 
 Axis: leaf (dotted hook path) . quantity (acts|grads) . component (cov/eigvals/eigvecs/...),
-optionally in a reference's basis (a projection). `_resolve(leaf, q, component, reference)`
-produces any component: stored -> convert -> derive; projection: store -> rotate -> convert.
+optionally in a reference's basis (a projection) or paired with a partner view (a cross).
+`_resolve(leaf, q, component, reference, partner)` produces any component: stored -> convert ->
+derive; projection: store -> rotate -> convert; cross: pair-valid components only (CROSSES).
 """
 
 import argparse
@@ -11,7 +12,7 @@ import re
 import torch
 from glob import glob
 from collections.abc import Iterator
-from functools import partial
+from functools import partial, reduce
 from typing import Callable
 
 from utils.gpu import prefer_gpu, require_gpu, decomp_profiler, run_pipeline
@@ -33,9 +34,10 @@ Format = str
 
 SourceIdentity = tuple[str | None, str | None, str | None]   # (model, revision, run); a plain tuple
 ViewId = tuple[SourceIdentity, Leaf, Quantity]               # so projection keys pickle portably
-Address = tuple[Leaf, Quantity, CompName, "View | None"]  # producer input / resolve call (+ reference)
-Key = tuple[Leaf, Quantity, CompName, ViewId | None]      # resolve cache key: Address, reference reduced to its id
+Address = tuple[Leaf, Quantity, CompName, "View | None", "View | None"]  # producer input / resolve call (+ reference, + cross partner)
+Key = tuple[Leaf, Quantity, CompName, ViewId | None, ViewId | None]      # resolve cache key: Address, views reduced to their ids
 Conversion = tuple[tuple[CompName, ...], Callable[..., Component]]   # (source components, build fn)
+Cross = tuple[CompName, tuple[CompName, ...], Callable[..., Component | None]]  # (partner component, self sources, build fn; None = fail)
 Producer = tuple[tuple[Address, ...], Callable[..., Component]]  # (input addresses, build fn)
 
 COMPONENTS = (
@@ -119,10 +121,21 @@ FORMATS: dict[Format, tuple[CompName, ...]] = {
 }
 MATERIALIZE_PRESETS = {"b": MLP_OUT, "o": HEAD_CONTRIB}   # leaf regexes whose derivable slots ± targets
 
-# Projection of a quantity into a reference basis: only `cov` (the rotation, basis injected) is
-# special; eigvals/eigvecs/... derive from it through CONVERSIONS, threaded with the reference.
+# Projection of a quantity into a reference basis: only the rotations (basis injected) are
+# special; eigvals/eigvecs/... derive from them through CONVERSIONS, threaded with the reference
+# (rotation commutes with centering, so projected cov_centered comes from projected cov + mean).
 PROJECTIONS: dict[CompName, list[Conversion]] = {
-    "cov": [(("cov",), lambda basis, cov: basis.T @ cov.to(basis.dtype) @ basis)],
+    "cov":  [(("cov",),  lambda basis, cov: basis.T @ cov.to(basis.dtype) @ basis)],
+    "mean": [(("mean",), lambda basis, m: basis.T @ m.to(basis.dtype))],
+}
+
+# Cross of two views, A.cross(B): E[a bᵀ], rows = A, columns = B (partner, injected like a
+# projection's basis). Non-symmetric ⇒ no eigh chain: only these components exist; crossed `n`
+# doubles as the row-alignment guard.
+CROSSES: dict[CompName, list[Cross]] = {
+    "n":            [("n",       ("n",),           lambda pn, n: n if n == pn else None)],
+    "cov":          [("samples", ("samples", "n"), lambda Y, X, n: X.float().T @ Y.float() / n)],
+    "cov_centered": [("mean",    ("cov", "mean"),  lambda pm, c, m: c - torch.outer(m, pm))],
 }
 
 
@@ -180,14 +193,15 @@ class DataAccessor:
     # --- resolver: public _resolve yields an atomic component; _resolve_aux is the recursive
     #     engine (memoizes, guards cycles) whose intermediates may be tuples (_eigh/_svd) ---
     def _resolve(self, leaf: Leaf, q: Quantity, component: CompName,
-                 reference: "View | None" = None) -> AtomicComponent | None:
-        r = self._resolve_aux(leaf, q, component, reference)
+                 reference: "View | None" = None, partner: "View | None" = None) -> AtomicComponent | None:
+        r = self._resolve_aux(leaf, q, component, reference, partner)
         assert not isinstance(r, tuple), f"{component!r} resolved to a non-atomic component"
         return r
 
     def _resolve_aux(self, leaf: Leaf, q: Quantity, component: CompName,
-                     reference: "View | None" = None) -> Component | None:
-        key: Key = (leaf, q, component, reference.identity if reference is not None else None)
+                     reference: "View | None" = None, partner: "View | None" = None) -> Component | None:
+        key: Key = (leaf, q, component, reference.identity if reference is not None else None,
+                    partner.identity if partner is not None else None)
         if key in self._cache:
             return self._cache[key]
         if key in self._resolving:
@@ -195,7 +209,7 @@ class DataAccessor:
         self._resolving.add(key)
         result = None
         try:
-            for inputs, fn in self._producers(leaf, q, component, reference):
+            for inputs, fn in self._producers(leaf, q, component, reference, partner):
                 args = [self._resolve_aux(*i) for i in inputs]
                 if all(a is not None for a in args) and (out := fn(*args)) is not None:
                     result = out
@@ -210,11 +224,15 @@ class DataAccessor:
         """Is `leaf.q` resolvable? Probes `n` — present for every quantity, never a decomposition."""
         return self._resolve(leaf, q, "n") is not None
 
-    def _producers(self, leaf: Leaf, q: Quantity, component: CompName,
-                   reference: "View | None") -> Iterator[Producer]:
-        """(inputs, fn) by priority. reference=None: stored → convert → derive (cross-leaf).
-        reference set: persisted store → rotation (PROJECTIONS) → convert, threaded."""
+    def _producers(self, leaf: Leaf, q: Quantity, component: CompName, reference: "View | None",
+                   partner: "View | None" = None) -> Iterator[Producer]:
+        """(inputs, fn) by priority. Plain: stored → convert → derive (cross-leaf).
+        reference set: persisted store → rotation (PROJECTIONS) → convert, threaded.
+        partner set: pair-valid cross components only (CROSSES)."""
         leaf = canonical(leaf, self.data)                 # alias -> stored name (the one place)
+        if partner is not None:
+            yield from self._cross_producers(leaf, q, component, partner)
+            return
         if reference is not None:
             yield from self._projection_producers(leaf, q, component, reference)
             return
@@ -222,12 +240,12 @@ class DataAccessor:
         if stored is not None:
             yield (), lambda: stored
         for src, fn in CONVERSIONS.get(component, ()):
-            yield tuple((leaf, q, s, None) for s in src), prefer_gpu(fn)
+            yield tuple((leaf, q, s, None, None) for s in src), prefer_gpu(fn)
         if (self._config and (d := derivation(self._config, leaf, q)) and self._weights
                 and (ingr := d[2].ingredients(self._weights)) is not None):
             src_leaf, src_q, T = d
             for sources, fn in T.recipes().get(component, []):
-                yield tuple((src_leaf, src_q, s, None) for s in sources), partial(prefer_gpu(fn), *ingr)
+                yield tuple((src_leaf, src_q, s, None, None) for s in sources), partial(prefer_gpu(fn), *ingr)
 
     def _projection_producers(self, leaf: Leaf, q: Quantity, component: CompName,
                               reference: View) -> Iterator[Producer]:
@@ -237,9 +255,19 @@ class DataAccessor:
             yield (), lambda: persisted[component]
         if (basis := reference.eigvecs) is not None:
             for src, fn in PROJECTIONS.get(component, ()):
-                yield tuple((leaf, q, s, None) for s in src), partial(prefer_gpu(fn), basis)
+                yield tuple((leaf, q, s, None, None) for s in src), partial(prefer_gpu(fn), basis)
         for src, fn in CONVERSIONS.get(component, ()):
-            yield tuple((leaf, q, s, reference) for s in src), prefer_gpu(fn)
+            yield tuple((leaf, q, s, reference, None) for s in src), prefer_gpu(fn)
+
+    def _cross_producers(self, leaf: Leaf, q: Quantity, component: CompName,
+                         partner: View) -> Iterator[Producer]:
+        """Cross of `leaf.q` (rows) with `partner` (columns). A source component keeps the
+        partner iff it is a different cross component — so crossed cov pulls crossed n (the
+        alignment guard) but plain self samples/means; the partner side is injected."""
+        for pcomp, src, fn in CROSSES.get(component, ()):
+            if (pv := getattr(partner, pcomp)) is not None:
+                yield (tuple((leaf, q, s, None, partner if s in CROSSES and s != component else None)
+                             for s in src), partial(prefer_gpu(fn), pv))
 
     # --- prewarm: fill the cache (notably the eigendecompositions) before metric compute ---
     def prewarm(self, *components: CompName) -> None:
@@ -326,17 +354,25 @@ class Node:
     def __getitem__(self, seg: str) -> "Node | View":
         return self.__getattr__(str(seg))    # index mirrors attribute: child Node, or View for a quantity
 
-    def get(self, rel: str) -> "View | None":
-        """Soft dotted lookup ending in a quantity ('in.acts') -> View / None — the metric
-        engine's door. Resolves the relative path against the accessor (Pythia aliases
-        included via _reachable), so the referenced leaf needn't be a tree node."""
-        *segs, q = rel.split(".")
+    def get(self, rel: str) -> "Node | View | None":
+        """Soft dotted lookup — the metric engine's door. Quantity-terminated ('in.acts') ->
+        View, resolved against the accessor (Pythia aliases included via _reachable) so the
+        leaf needn't be a tree node; otherwise -> the Node at the relative path ('' = self);
+        None when unreachable/absent."""
+        *segs, last = rel.split(".")
+        if last not in QUANTITIES:
+            return reduce(lambda n, s: n and n._children.get(s), filter(None, (*segs, last)), self)
         leaf = ".".join(filter(None, (self._path, *segs)))
-        return (View(self._acc, self._acc._identity, leaf, q)
-                if q in QUANTITIES and self._acc._reachable(leaf, q) else None)
+        return (View(self._acc, self._acc._identity, leaf, last)
+                if self._acc._reachable(leaf, last) else None)
 
     def children(self) -> list["Node"]:
         return list(self._children.values())
+
+    @property
+    def root(self) -> "Node":
+        """The tree root (path '') — lets node-fired metrics reach any other leaf."""
+        return self._acc.v
 
     @property
     def path(self) -> str:
@@ -350,15 +386,17 @@ class Node:
 class View:
     """One (leaf, quantity). `identity` = (source_identity, leaf, q) names it without the
     accessor (e.g. a cached projection reference). `view.<component>` -> tensor/tuple/None.
-    `reference` set => this quantity projected into that reference's basis."""
+    `reference` set => this quantity projected into that reference's basis.
+    `partner` set => the cross of this quantity (rows) with the partner (columns)."""
 
     def __init__(self, acc: "DataAccessor | None", source: SourceIdentity, leaf: Leaf, q: Quantity,
-                 reference: "View | None" = None) -> None:
+                 reference: "View | None" = None, partner: "View | None" = None) -> None:
         self._acc = acc
         self._source = source
         self._leaf = leaf
         self._q = q
         self.reference = reference                          # set => a projection
+        self.partner = partner                              # set => a cross
 
     @property
     def identity(self) -> ViewId:
@@ -375,10 +413,17 @@ class View:
     def __getattr__(self, component: CompName) -> AtomicComponent | None:
         if component.startswith("_"):
             raise AttributeError(component)
-        return self._acc._resolve(self._leaf, self._q, component, self.reference) if self._acc is not None else None
+        return (self._acc._resolve(self._leaf, self._q, component, self.reference, self.partner)
+                if self._acc is not None else None)
 
     def in_basis(self, reference: "View") -> "View":
         return View(self._acc, self._source, self._leaf, self._q, reference)
+
+    def cross(self, partner: "View") -> "View":
+        """Cross with `partner`: cov = E[x yᵀ], rows = self. Needs row-aligned samples (same
+        run + token selection); components per CROSSES; never persisted."""
+        assert self.reference is None and partner.reference is None, "cross of projected views unsupported"
+        return View(self._acc, self._source, self._leaf, self._q, partner=partner)
 
     def persist(self, *components: CompName) -> "View":
         """Write the listed (computed) components of this projection into its on-disk store."""
@@ -396,7 +441,8 @@ class View:
 
     def __repr__(self) -> str:
         onto = f" onto {self.reference._leaf}@{self.reference._source[2]}" if self.reference else ""
-        return f"View({self._leaf!r}, {self._q!r}{onto})"
+        by = f" x {self.partner._leaf}.{self.partner._q}" if self.partner else ""
+        return f"View({self._leaf!r}, {self._q!r}{onto}{by})"
 
 
 # --- CLI helpers (module-level; no per-program state) ---
@@ -491,7 +537,8 @@ class Project(AccessorCLIProgram):
         def project(f: str) -> str:
             ref = _open(onto_file, not no_ref_derive)
             acc = _open(f, not no_derive, abort)
-            acc.map(lambda v: (r := ref.v.get(f"{v.leaf}.{v.q}")) and v.in_basis(r).persist("eigvals"))
+            acc.map(lambda v: isinstance(r := ref.v.get(f"{v.leaf}.{v.q}"), View)
+                    and v.in_basis(r).persist("eigvals"))
             acc.save(_out_path(f, input, output_dir, output))
             return f
 

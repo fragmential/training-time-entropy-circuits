@@ -1,0 +1,41 @@
+output_dir: data/inferences/block_representations_all
+# block_representations at EVERY layer: same hooks / data / cov collection, 1/5 the tokens,
+# saved as eigenvalues (small). Results should closely match block_representations on the
+# shared layers (slightly noisier — validation + all-layer redo of the previous experiments).
+
+model_name:
+  - "allenai/OLMo-2-0425-1B"
+  - "allenai/OLMo-2-1124-7B"
+  - "EleutherAI/pythia-1b-deduped"
+  - "EleutherAI/pythia-6.9b-deduped"
+
+#            OL1B OL7B Py1b Py6.9b
+batch_size: [  48,  32,  256,  72]
+
+packed_data_path:
+  allenai/*: data/mixes/olmo_mix_30M_512.pt
+  EleutherAI/*: data/mixes/pile_30M_512.pt
+
+max_tokens: 1_200_000
+seq_len: 512
+min_length: 32
+max_checkpoints: 30
+checkpoint_spacing: sqrt
+packing: packed
+token_selection: all
+
+hooks:
+  - blk*.attn.in           # residual into attn sub-block
+  - blk*.attn.head*.slice  # attention's per-head pre-W_o slices
+  - blk*.attn.out          # attention's contribution to residual
+  - blk*.attn.raw_out      # OLMo-2 only: pre-post-norm attn output
+  - blk*.mlp.in            # OLMo-2 only: residual into MLP sub-block
+  - blk*.mlp.out           # MLP's contribution to residual
+  - blk*.mlp.raw_out       # OLMo-2 only: pre-post-norm MLP output
+  - before_final_norm
+  - after_final_norm
+
+max_layers_per_pass: 0
+storage_format: eigenvalues
+compute_metrics: True
+keep_cached: False

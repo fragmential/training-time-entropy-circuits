@@ -309,3 +309,82 @@ def test_main_parallel_path_does_not_deadlock(tmp_path):
         assert set(res) == {0, 1}
     finally:
         set_gpu_lock(None)
+
+
+# --- node-operand metrics ({"node": ""}) + block-composition stubs ---
+
+def _samples_walk_data(d=32, N=64):
+    X = torch.randn(N, d)
+    return {"blk0.attn.out": {"acts_samples": X, "acts_n": N},
+            "before_final_norm": {"acts_samples": X * 2, "acts_n": N}, "__format__": "acts"}
+
+
+def test_node_operand_metric_receives_node():
+    from scripts.compute_metrics import METRICS, _Metric, get_metrics
+    acc = DataAccessor(_samples_walk_data())
+    probe = _Metric("probe", {"node": ""}, lambda node: {"path": node.path}, node_re=r"blk0\.attn\.out$")
+    METRICS.append(probe)
+    try:
+        res = get_metrics(acc.v)
+    finally:
+        METRICS.remove(probe)
+    assert res["blk0.attn.out"]["probe"]["path"] == "blk0.attn.out"
+
+
+def test_stub_metrics_skip_cleanly():
+    res = compute_metrics_for_checkpoint(DataAccessor(_samples_walk_data()))
+    assert "block_residual_coupling" not in res.get("blk0.attn.out", {})
+    assert "overlap_chi" not in res.get("", {})
+
+
+def _composition_acc(d=32, N=256):
+    g = torch.Generator().manual_seed(11)
+    I, A, B = (torch.randn(N, d, generator=g) for _ in range(3))
+    return DataAccessor({"blk0.attn.in": {"acts_samples": I, "acts_n": N},
+                         "blk0.attn.out": {"acts_samples": A, "acts_n": N},
+                         "blk0.mlp.out": {"acts_samples": B, "acts_n": N},
+                         "before_final_norm": {"acts_samples": I + A + B, "acts_n": N},
+                         "__format__": "acts"})
+
+
+def test_block_composition_metrics_fire():
+    from scripts.compute_metrics import get_metrics
+    res = get_metrics(_composition_acc().v)
+    out = res["blk0.attn.out"]
+    for key in ("block_residual_coupling", "ablation_contribution", "eigendirection_attrib",
+                "gen_block_vs_residual", "mean_migration"):
+        assert key in out, key
+    assert 0.0 <= out["block_residual_coupling"]["cka_cr"] <= 1.0
+    bb, chi = res[""]["block_block_coupling"], res[""]["overlap_chi"]
+    assert bb["leaves"] == ["blk0.attn.out", "blk0.mlp.out"] and bb["cka"].shape == (2, 2)
+    assert torch.allclose(bb["cka"].diagonal(), torch.ones(2), atol=1e-4)
+    assert -1e-6 <= chi["chi"] <= chi["h_w"] + 1e-6
+
+
+def test_ablation_closes_algebraically():
+    # ablating attn.out from r = in + attn + mlp must recover rankme of cov(in + mlp)
+    from scripts.compute_metrics import get_metrics, rankme_metrics
+    from utils.accessor import eigvalsh_descending
+    acc = _composition_acc()
+    res = get_metrics(acc.v)
+    rest = acc["blk0.attn.in"].acts.samples + acc["blk0.mlp.out"].acts.samples
+    mu = rest.float().mean(0)
+    lam = eigvalsh_descending(rest.float().T @ rest.float() / rest.shape[0] - torch.outer(mu, mu))
+    expected = rankme_metrics(lam)["rankme"]
+    assert abs(res["blk0.attn.out"]["ablation_contribution"]["rankme_ablated"] - expected) < 1e-2
+
+
+def test_incremental_overlap_orthogonal_supports():
+    # r_in confined to the first d/2 coords, c to the last d/2 -> chi == H(w) exactly
+    from scripts.compute_metrics import get_metrics
+    d, N = 32, 256
+    g = torch.Generator().manual_seed(13)
+    I, A = torch.zeros(N, d), torch.zeros(N, d)
+    I[:, :d // 2] = torch.randn(N, d // 2, generator=g)
+    A[:, d // 2:] = torch.randn(N, d // 2, generator=g)
+    acc = DataAccessor({"blk0.attn.in": {"acts_samples": I, "acts_n": N},
+                        "blk0.attn.out": {"acts_samples": A, "acts_n": N},
+                        "before_final_norm": {"acts_samples": I + A, "acts_n": N},
+                        "__format__": "acts"})
+    chi = get_metrics(acc.v)["blk0.attn.out"]["incremental_overlap"]
+    assert chi["chi_frac"] > 0.98 and abs(chi["chi"] - chi["h_w"]) < 0.02
