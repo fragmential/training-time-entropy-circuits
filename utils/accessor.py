@@ -118,9 +118,9 @@ def get_eigenspectrum(acts=None, cov=None, mu=None, topk=None):
     return _from_acts(acts, topk) if acts is not None else _from_cov(cov, mu, topk)
 
 
-# ===========================================================================
-# Format algebra (REFORMAT) — pure (leaf,quantity)-internal conversions
-# ===========================================================================
+# ===============================================================================
+# Format algebra (FORMAT_CONVERSIONS) — pure (leaf,quantity)-internal conversions
+# ===============================================================================
 
 def _eigh_from_cov(C):
     vals, vecs = eigh_descending(C.to(_DEV))
@@ -147,7 +147,7 @@ def _svd_from_eigh(eigh, n):
     eigvals, eigvecs = eigh
     return (eigvals.clamp(min=0) * n).sqrt().float(), eigvecs
 
-REFORMAT = {
+FORMAT_CONVERSIONS = {
     "cov":              [(("eigvals", "eigvecs"),
                           lambda ev, V: reconstruct_cov(ev.float(), V.float())),
                          (("samples",), _cov_from_samples)],
@@ -436,7 +436,7 @@ class DataAccessor:
         resolve() executes and can_resolve() walks structurally."""
         if self._has_stored(leaf, q, fmt):
             yield (), lambda: self._stored(leaf, q, fmt)
-        for src_fmts, fn in REFORMAT.get(fmt, ()):
+        for src_fmts, fn in FORMAT_CONVERSIONS.get(fmt, ()):
             yield tuple((leaf, q, sf) for sf in src_fmts), fn
         cfg = self._cfg()
         d = derivation(cfg, leaf, q) if cfg else None

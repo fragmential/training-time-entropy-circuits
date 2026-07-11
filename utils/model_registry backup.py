@@ -3,7 +3,6 @@ import os
 import re
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Callable, Protocol
 import numpy as np
 
 # Repo root, so revisions_file paths resolve regardless of the caller's cwd.
@@ -314,69 +313,28 @@ def _blk_idx(prefix):
     return m.group(1) if m else None
 
 
-class WeightProvider(Protocol):
-    """Minimal surface a Transform derives through: weights by sd-prefix, the final norm."""
-    def weight(self, sd_prefix: str) -> "tuple[torch.Tensor, torch.Tensor | None] | None": ...
-    def norm(self) -> "Callable[[torch.Tensor], torch.Tensor] | None": ...
-
-
-def _cov_proj(W, C):
-    return W @ C @ W.T
-
-def _cov_proj_bias(W, b, C, mu):
-    Wm = W @ mu
-    return W @ C @ W.T + Wm[:, None] * b[None, :] + b[:, None] * Wm[None, :] + b[:, None] * b[None, :]
-
-
 class Linear:
-    """Weight matrix (optionally a head column-slice, optionally +bias). `recipes()` gives,
-    per output component, its source components + the function that builds it."""
+    """Weight matrix (optionally a head column-slice, optionally +bias). `.formats()`
+    maps each output format to its required source formats."""
     kind = "linear"
 
     def __init__(self, sd_prefix, head=None, bias=False):
         self.sd_prefix, self.head, self.bias = sd_prefix, head, bias
 
-    def ingredients(self, wp: WeightProvider):
-        return wp.weight(self.sd_prefix)                          # (W, b) | None
-
-    def recipes(self):
-        h = self.head
-        sl = (lambda W, d: W[:, h * d:(h + 1) * d]) if h is not None else (lambda W, d: W)
-        if self.bias:
-            return {
-                "samples": [(("samples",),    lambda W, b, X:  X.float() @ sl(W, X.shape[-1]).T + b)],
-                "mean":    [(("mean",),       lambda W, b, mu: sl(W, mu.shape[0]) @ mu + b)],
-                "cov":     [(("cov", "mean"), lambda W, b, C, mu: _cov_proj_bias(sl(W, C.shape[0]), b, C, mu))],
-                "n":       [(("n",),          lambda W, b, n:  n)],
-            }
-        return {
-            "samples": [(("samples",), lambda W, b, X:  X.float() @ sl(W, X.shape[-1]).T)],
-            "mean":    [(("mean",),    lambda W, b, mu: sl(W, mu.shape[0]) @ mu)],
-            "cov":     [(("cov",),     lambda W, b, C:  _cov_proj(sl(W, C.shape[0]), C))],
-            "n":       [(("n",),       lambda W, b, n:  n)],
-        }
-
-    def formats(self):  # legacy adapter for the old accessor; remove at the accessor swap
-        return {c: r[0][0] for c, r in self.recipes().items()}
+    def formats(self):
+        cov_inputs = ("cov", "mean") if self.bias else ("cov",)  # bias needs source mean
+        return {"samples": ("samples",), "mean": ("mean",), "cov": cov_inputs, "n": ("n",)}
 
 
 class Norm:
-    """Nonlinear norm module: produces only `samples` (cov/eigvals reached via conversion)."""
+    """Nonlinear norm module: produces only `samples` (cov/eigh reached via reformat)."""
     kind = "norm"
 
     def __init__(self, sd_prefix):
         self.sd_prefix = sd_prefix
 
-    def ingredients(self, wp: WeightProvider):
-        f = wp.norm()
-        return (f,) if f is not None else None
-
-    def recipes(self):
-        return {"samples": [(("samples",), lambda f, X: f(X.float()))],
-                "n":       [(("n",),       lambda f, n: n)]}
-
-    def formats(self):  # legacy adapter; remove at swap
-        return {c: r[0][0] for c, r in self.recipes().items()}
+    def formats(self):
+        return {"samples": ("samples",), "n": ("n",)}
 
 
 # Each rule: (leaf_regex, build_source_leaf(match)->str, src_quantity, build_Transform(config,match))
