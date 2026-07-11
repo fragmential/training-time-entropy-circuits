@@ -1,5 +1,10 @@
 #!/usr/bin/env python
-"""Activation ratio analysis: per-band projection comparison across datasets.
+"""STALE / UNMIGRATED (unused) — predates the accessor rebuild and still calls removed
+`.leaves()` / `.view()`; kept only for the *idea* (per-band projection analysis on stored
+eigenvectors + activations). Do not run as-is; rework onto the tree (`acc.v` / `acc[leaf].q`)
+if revived.
+
+Activation ratio analysis: per-band projection comparison across datasets.
 
 For each target layer, partitions the A eigenvectors into percentile bands
 (e.g. top 10%, 10-25%, 25-50%, bottom 50%) and measures the mean absolute

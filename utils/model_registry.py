@@ -4,11 +4,12 @@ import os
 import re
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Callable, Protocol
+from typing import Callable, Protocol
 import numpy as np
+import torch
 
-if TYPE_CHECKING:
-    import torch
+WeightBias = tuple[torch.Tensor, torch.Tensor | None] | None   # (weight, bias) or None
+NormFn = Callable[[torch.Tensor], torch.Tensor] | None          # the final-norm callable
 
 # Repo root, so revisions_file paths resolve regardless of the caller's cwd.
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -323,8 +324,8 @@ Recipes = dict[str, list[tuple[tuple[str, ...], Callable]]]   # component -> [(s
 
 class WeightProvider(Protocol):
     """Minimal surface a Transform derives through: weights by sd-prefix, the final norm."""
-    def weight(self, sd_prefix: str) -> tuple[torch.Tensor, torch.Tensor | None] | None: ...
-    def norm(self) -> Callable[[torch.Tensor], torch.Tensor] | None: ...
+    def weight(self, sd_prefix: str) -> WeightBias: ...
+    def norm(self) -> NormFn: ...
 
 
 def _cov_proj(W: torch.Tensor, C: torch.Tensor) -> torch.Tensor:
@@ -343,7 +344,7 @@ class Linear:
     def __init__(self, sd_prefix: str, head: int | None = None, bias: bool = False) -> None:
         self.sd_prefix, self.head, self.bias = sd_prefix, head, bias
 
-    def ingredients(self, wp: WeightProvider) -> tuple[torch.Tensor, torch.Tensor | None] | None:
+    def ingredients(self, wp: WeightProvider) -> WeightBias:
         return wp.weight(self.sd_prefix)
 
     def recipes(self) -> Recipes:
@@ -363,9 +364,6 @@ class Linear:
             "n":       [(("n",),       lambda W, b, n:  n)],
         }
 
-    def formats(self) -> dict[str, tuple[str, ...]]:  # legacy adapter for the old accessor; remove at swap
-        return {c: r[0][0] for c, r in self.recipes().items()}
-
 
 class Norm:
     """Nonlinear norm module: produces only `samples` (cov/eigvals reached via conversion)."""
@@ -381,9 +379,6 @@ class Norm:
     def recipes(self) -> Recipes:
         return {"samples": [(("samples",), lambda f, X: f(X.float()))],
                 "n":       [(("n",),       lambda f, n: n)]}
-
-    def formats(self) -> dict[str, tuple[str, ...]]:  # legacy adapter; remove at swap
-        return {c: r[0][0] for c, r in self.recipes().items()}
 
 
 Transform = Linear | Norm
@@ -415,39 +410,24 @@ def derivation(config: ModelConfig, leaf: str, quantity: str) -> tuple[str, str,
     return None
 
 
-def derivation_sd_prefixes(config, leaves):
-    """Linear-weight sd-prefixes to derive any of `leaves` (acts). Norm excluded
-    (it loads via the `__norm__` path, not a weight+bias prefix)."""
-    out = set()
-    for leaf in leaves:
-        d = derivation(config, leaf, "acts")
-        if d and getattr(d[2], "kind", None) == "linear" and d[2].sd_prefix:
-            out.add(d[2].sd_prefix)
-    return out
-
-
-# Forward of _DERIVATIONS: a present source leaf -> the derived leaf it feeds (so
-# save / tree-building can enumerate derivable leaves from what's stored).
+# Forward of _DERIVATIONS, per (leaf, quantity): a stored (src_leaf, src_q) slot -> the
+# (leaf, q) slot it feeds. (Duplicates _DERIVATIONS' edges; "option 3" in the plan collapses them.)
 _PRODUCES = [
-    (re.compile(r"(.*)\.attn\.head(\d+)\.slice$"),
-     lambda m: f"{m.group(1)}.attn.head{m.group(2)}.contrib"),
-    (re.compile(r"(.*)\.mlp\.(up|down|gate)\.in$"),
-     lambda m: f"{m.group(1)}.mlp.{m.group(2)}.out"),
-    (re.compile(r"^before_final_norm$"),
-     lambda m: "after_final_norm"),
+    (re.compile(r"(.*)\.attn\.head(\d+)\.slice$"), "acts", lambda m: (f"{m[1]}.attn.head{m[2]}.contrib", "acts")),
+    (re.compile(r"(.*)\.mlp\.(up|down|gate)\.in$"), "acts", lambda m: (f"{m[1]}.mlp.{m[2]}.out", "acts")),
+    (re.compile(r"^before_final_norm$"),            "acts", lambda m: ("after_final_norm", "acts")),
 ]
 
 
-def derived_leaves(present):
-    """Leaves derivable (acts) from `present` leaves but not themselves present."""
-    present = set(present)
-    out = set()
-    for leaf in present:
-        for pat, build in _PRODUCES:
-            m = pat.match(leaf)
-            if m:
-                out.add(build(m))
-    return out - present
+def derivable_slots(stored: set[tuple[str, str]]) -> set[tuple[str, str]]:
+    """(leaf, q) slots derivable in one step from a stored (src_leaf, src_q), not themselves stored."""
+    return {prod(m) for (leaf, q) in stored
+            for pat, src_q, prod in _PRODUCES if q == src_q and (m := pat.match(leaf))} - stored
+
+
+def is_derivable(leaf: str, q: str) -> bool:
+    """A derivation rule exists for (leaf, q) — structural, config-free."""
+    return any(q == src_q and pat.match(leaf) for pat, _, src_q, _ in _DERIVATIONS)
 
 
 def _norm_sd_prefix(config):
@@ -647,6 +627,56 @@ def load_selective_weights(config, hf_repo, revision, sd_prefixes, need_norm=Fal
             result["__norm__"] = norm
 
     return result
+
+
+# --- WeightProvider implementations (inherit the Protocol => weight()/norm() enforced) ---
+
+class LazyWeights(WeightProvider):
+    """WeightProvider that loads each sd-prefix (and the final norm) from the HF
+    snapshot / on-disk cache on first request, then memoizes."""
+    def __init__(self, config: ModelConfig, hf_repo: str, revision: str) -> None:
+        self._config, self._hf_repo, self._revision = config, hf_repo, revision
+        self._cache: dict[str, object] = {}
+
+    def weight(self, sd_prefix: str) -> WeightBias:
+        if sd_prefix not in self._cache:
+            self._cache[sd_prefix] = load_selective_weights(
+                self._config, self._hf_repo, self._revision, {sd_prefix}).get(sd_prefix)
+        ns = self._cache[sd_prefix]
+        if ns is None:
+            return None
+        return ns.weight.detach().float(), (ns.bias.detach().float() if ns.bias is not None else None)
+
+    def norm(self) -> NormFn:
+        if "__norm__" not in self._cache:
+            self._cache["__norm__"] = load_selective_weights(
+                self._config, self._hf_repo, self._revision, set(), need_norm=True).get("__norm__")
+        return self._cache["__norm__"]
+
+
+class ModelWeights(WeightProvider):
+    """WeightProvider backed by a live model (collection-time derivation)."""
+    def __init__(self, model: "torch.nn.Module", config: ModelConfig) -> None:
+        self._model, self._config = model, config
+
+    def weight(self, sd_prefix: str) -> WeightBias:
+        try:
+            m = self._model.get_submodule(sd_prefix)
+        except AttributeError:
+            return None
+        b = getattr(m, "bias", None)
+        return m.weight.detach().float(), (b.detach().float() if b is not None else None)
+
+    def norm(self) -> NormFn:
+        return get_final_layernorm(self._model, self._config).float()
+
+
+def load_inference(path: str, derive: bool = True) -> "tuple[dict, ModelConfig | None, WeightProvider | None]":
+    """Load an inference .pt + (config, LazyWeights) from its recorded identity; derive=False -> no weights."""
+    data = torch.load(path, map_location="cpu", weights_only=False)
+    hf, rev = data.get("__hf_model__"), data.get("__revision__")
+    config = get_model_config(hf) if hf else None
+    return data, config, LazyWeights(config, hf, rev) if (derive and config) else None
 
 
 # --- Token counting ---

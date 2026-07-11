@@ -21,8 +21,9 @@ from typing import Callable
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from utils.accessor import DataAccessor, decomp_profiler
-
+from utils.accessor import DataAccessor, View, Node, Quantity
+from utils.gpu import decomp_profiler, run_pipeline
+from utils.model_registry import load_inference
 
 # ---------------------------------------------------------------------------
 # Metric functions (moved from utils/powerlaw.py)
@@ -465,16 +466,12 @@ def generalized_eigenvalues(
     C = acts_inv_sqrt.unsqueeze(1) * Q * grads_sqrt.unsqueeze(0)  # (d, d)
     M = C @ C.T                                   # symmetric PSD
 
-    from utils.accessor import eigvalsh_descending
-    return eigvalsh_descending(M).cpu()
+    return torch.linalg.eigvalsh(M).flip(0).clamp(min=0).cpu()   # M is synthetic, decomposed in place
 
 
 # A metric fires at any node where all its operands resolve. `kfac` thus fires at
 # projection nodes AND at sub-block nodes (blk.mlp/blk.attn, from their boundary
 # .in/.out leaves); `projections_kfac` only at blk.mlp (up.in x down.out).
-
-from contextlib import nullcontext
-
 
 class _Metric:
     def __init__(self, name, operands, fn, node_re=None):
@@ -483,16 +480,10 @@ class _Metric:
 
 
 def _gen_metric(a, g):
-    ae, ge = a.eigh, g.eigh
-    if ae is None or ge is None:
-        return None
-    e_a, v_a = ae
-    e_g, v_g = ge
-    if v_a.shape != v_g.shape:
-        return None  # acts and grads must live in the same space
-    ctx = getattr(a._acc, "_gpu_ctx", None) or nullcontext()
-    with ctx:
-        gen = generalized_eigenvalues(e_g, v_g, e_a, v_a)
+    e_a, v_a, e_g, v_g = a.eigvals, a.eigvecs, g.eigvals, g.eigvecs   # one shared eigh via the cache
+    if any(x is None for x in (e_a, v_a, e_g, v_g)) or v_a.shape != v_g.shape:
+        return None  # need both decompositions, in the same space
+    gen = generalized_eigenvalues(e_g, v_g, e_a, v_a)
     sm = spectral_metrics(gen) if len(gen) >= 11 else {}
     return {"eigvals": gen, **sm}
 
@@ -504,8 +495,9 @@ def _kfac_metric(a, g):
     return kfac_metrics(ea.clamp(min=0), eg.clamp(min=0))
 
 def _blk_mean_metrics(a_in, a_out):
-    if a_out.mean is not None and a_in.eigh_centered is not None:
-        return mean_metrics(a_in.eigvecs_centered, a_in.eigvals_centered, a_out.mean)
+    evecs, evals, mean = a_in.eigvecs_centered, a_in.eigvals_centered, a_out.mean
+    if evecs is not None and evals is not None and mean is not None:
+        return mean_metrics(evecs, evals, mean)
 
 
 METRICS = [
@@ -517,42 +509,45 @@ METRICS = [
 ]
 
 
-def _quantity_metrics(q, fv, path):
+def _quantity_metrics(q: Quantity, fv: View, path: str) -> dict:
     """Spectral family for one (leaf, quantity): uncentered/centered/mean/cross."""
     out = {}
     ev = fv.eigvals
     if ev is None:
         return out
     _check_negative_eigenvalues(ev, f"{path}.{q}")
-    out[f"{q}_uncentered"] = spectral_metrics(ev.clamp(min=0), mean=fv.mean)
+    out[f"{q}_uncentered"] = spectral_metrics(ev, mean=fv.mean)
 
     if fv.mean is not None:
         out[f"{q}_mean_vec"] = fv.mean   # raw μ (d,) for cross-leaf cosine analysis
 
-    cev = fv.eigvals_centered
-    if cev is not None:
-        out[f"{q}_centered"] = spectral_metrics(cev.clamp(min=0))
+    cvec, cval = fv.eigvecs_centered, fv.eigvals_centered
+    if cval is not None:
+        out[f"{q}_centered"] = spectral_metrics(cval)
 
-    if fv.mean is not None and fv.eigh_centered is not None:
-        out[f"{q}_mean_metrics"] = mean_metrics(fv.eigvecs_centered, fv.eigvals_centered, fv.mean)
+    if all(x is not None for x in (fv.mean, cvec, cval)):
+        out[f"{q}_mean_metrics"] = mean_metrics(cvec, cval, fv.mean)
 
-    # TODO(1b): this reaches into accessor internals to surface cross-basis projections;
-    # expose them through a proper projection API once general projections are designed.
-    entry = fv._acc._entry(path)
-    prefix = f"{q}_cross_eigvals_"
-    for ek, evv in entry.items():
-        if ek.startswith(prefix) and isinstance(evv, torch.Tensor):
-            out[f"{q}_cross_{ek[len(prefix):]}"] = spectral_metrics(evv.clamp(min=0))
+    # persisted cross-checkpoint projections of this same (leaf, quantity): each is the
+    # rotated (uncentered) covariance, so only its uncentered spectrum is meaningful.
+    isource, ileaf, iq = fv.identity
+    for proj in fv.projections():
+        psource, pleaf, pq = proj.reference.identity
+        if psource == isource or pleaf != ileaf or pq != iq:
+            continue                                  # only cross-checkpoint, same leaf+quantity
+        if proj.eigvals is not None:
+            out[f"{q}_cross_{'-'.join(str(x) for x in psource)}_uncentered"] = spectral_metrics(proj.eigvals)
     return out
 
 
-def get_metrics(node, results):
+def get_metrics(node: Node, results: dict | None = None) -> dict:
     """Recursively walk the hook tree; each node writes its own flat result entry."""
+    results = {} if results is None else results
     for child in node.children():
         get_metrics(child, results)
     out = {}
     for q in ("acts", "grads"):
-        fv = node.get(q)
+        fv: View = node.get(q)
         if fv is not None:
             out.update(_quantity_metrics(q, fv, node._path))
     for m in METRICS:
@@ -563,37 +558,25 @@ def get_metrics(node, results):
                 out[m.name] = r
     if out:
         results[node._path] = out
+    return results
 
 
-def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False, gpu_lock=None):
+def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False):
     import time
     if verbose:
         decomp_profiler.enable()
-    gpu_ctx = gpu_lock or nullcontext()
-    accessor._gpu_ctx = gpu_ctx
     t0 = time.time()
-    gpu_wait = 0.0
-
-    # Pre-warm every eigendecomposition under the GPU lock so the metric walk that
-    # follows is pure-CPU cache hits — letting Pool workers overlap GPU and CPU work.
-    with gpu_ctx as ctx:
-        gpu_wait += getattr(ctx, "waited", 0.0)
-        for leaf, q in accessor.leaf_quantities():
-            accessor.resolve(leaf, q, "eigh")
-            accessor.resolve(leaf, q, "eigh_centered")
+    # Warm the (shared) eigendecompositions first; the metric walk is then cache hits. GPU
+    # serialization across workers lives in utils.gpu's prefer/require_gpu, not here.
+    accessor.prewarm("eigvecs", "eigvecs_centered")
     if verbose:
-        print(f"    prewarm total: {time.time()-t0:.1f}s")
-
-    results = {}
-    get_metrics(accessor.v, results)
-
+        print(f"    prewarm: {time.time()-t0:.1f}s")
+    results = get_metrics(accessor.v)
     if verbose:
-        print(f"    metrics total: {time.time()-t0:.1f}s ({len(results)} nodes)")
+        print(f"    metrics: {time.time()-t0:.1f}s ({len(results)} nodes)")
         print(decomp_profiler.summary())
         decomp_profiler.disable()
-    if gpu_wait > 0:
-        results["__gpu_wait__"] = gpu_wait
-    return _to_numpy(results)   # provider emits pure numpy; analysis/results never see torch
+    return _to_numpy(results)   # numpy boundary: analysis/results never see torch
 
 
 def _merge_step(old: dict, new: dict) -> dict:
@@ -631,13 +614,6 @@ def _to_numpy(o):
     if isinstance(o, (list, tuple)):
         return type(o)(_to_numpy(v) for v in o)
     return o
-
-
-def _compute_metrics_for_file(args, derive=True):
-    """Pool worker: compute metrics for a .pt file (derive=False skips weight-derived leaves)."""
-    step, path = args
-    data = torch.load(path, map_location="cpu", weights_only=False)
-    return step, compute_metrics_for_checkpoint(DataAccessor(data, derive=derive))
 
 
 def _needs_model_loading(data_path):
@@ -723,30 +699,33 @@ def main(
         return
 
     if num_workers is None:
-        num_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count()))
+        # half the allocated CPUs: GPU work is serialized, so the extra threads only
+        # overlap I/O / CPU walks; more than that just adds RAM pressure from loaded checkpoints.
+        num_workers = max(1, int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count())) // 2)
     print(
         f"Computing metrics for {len(to_compute)}/{len(step_files)} steps "
         f"using {num_workers} workers (derive={derive})..."
     )
-    # spawn (not fork) when a GPU is present so each worker gets its own CUDA context
-    # and the eigh runs on the GPU; fork is fine on CPU-only nodes. Execution model is
-    # independent of `derive` (which only gates weight loading inside the worker).
-    from functools import partial
-    from multiprocessing import get_context
-    mp_ctx = get_context("spawn") if os.environ.get("CUDA_VISIBLE_DEVICES") else get_context()
-    worker = partial(_compute_metrics_for_file, derive=derive)
-    final = res_dict
-    with mp_ctx.Pool(processes=num_workers) as pool:
-        for step, metrics in pool.imap_unordered(worker, to_compute):
-            final = save_step_metrics(results_path, step, metrics)   # saves every step
-            hooks = list(metrics.keys())
-            print(
-                f"  Step {step}: {len(hooks)} hook points "
-                f"({', '.join(hooks[:3])}{'...' if len(hooks) > 3 else ''})",
-                flush=True,
-            )
+    # Parallel over checkpoints via the shared pipeline: a producer pre-loads each .pt while
+    # `num_workers` threads compute (one CUDA context; GPU work serialized through the funnel's
+    # RLock). Weights load lazily and hit the on-disk weight cache automatically.
+    import threading
+    save_lock = threading.Lock()
 
-    print(f"Saved {len(final)} results to {results_path}")
+    def load(item):
+        step, path = item
+        return step, load_inference(path, derive)
+
+    def work(payload):
+        step, (data, config, weights) = payload
+        metrics = compute_metrics_for_checkpoint(DataAccessor(data, config=config, weights=weights))
+        with save_lock:
+            save_step_metrics(results_path, step, metrics)   # saves every step
+        print(f"  Step {step}: {len(metrics)} hook points "
+              f"({', '.join(list(metrics)[:3])}{'...' if len(metrics) > 3 else ''})", flush=True)
+
+    run_pipeline(to_compute, work, workers=num_workers, prefetch=load)
+    print(f"Saved {len(_load_existing(results_path))} results to {results_path}")
 
 
 def _load_existing(results_path):

@@ -4,13 +4,14 @@ pythia-14m, then driven through the full save-flag matrix and compute_metrics.
 Asserts two things, both decided up front:
   1. the EXACT stored-key sets and node->metric structure for every input variant
      (all kinds / boundary-grads on+off / subset / each storage flag), and
-  2. the actual metric VALUES against a committed snapshot (numeric regression).
+  2. metric VALUES on a FULL-RANK corpus against a reference minted by `main`
+     (the trusted pre-rebuild code) — see test_alpha_fullrank_reference.
 
 The single collection (forward+backward) feeds every case — boundary-grads-off and
 subsets are derived by filtering the real factors dict, so it stays one GPU pass.
 
-RUN ON A GPU NODE (mark: e2e). First run / --snapshot-update writes the value
-snapshot to tests/snapshots/pipeline_values.pt; commit it.
+RUN ON A GPU NODE (mark: e2e). The value reference (tests/snapshots/pipeline_fullrank.pt)
+is generated on `main`, not via --snapshot-update here.
 """
 import gc
 import os
@@ -19,12 +20,13 @@ import pytest
 import torch
 
 from tests.e2e_models import PYTHIA, final_checkpoint
-from scripts.collect import CollectConfig, _collect_for_checkpoint
-from utils.model_registry import get_model_config, load_model, load_tokenizer
+from scripts.collect import CollectConfig, _collect_for_checkpoint, _parse_storage_format
+from utils.model_registry import get_model_config, load_model, load_tokenizer, ModelWeights
 from utils.accessor import DataAccessor
 from scripts.compute_metrics import compute_metrics_for_checkpoint
 
 pytestmark = pytest.mark.e2e
+_ID = (PYTHIA, "final", "test")   # save asserts a complete identity
 
 TARGET_LAYERS = [0, 1]
 TEXTS = [
@@ -40,6 +42,24 @@ HOOKS = [
     "blk*.attn.head*.slice:both",
     "blk*.attn.in:both", "blk*.attn.out:both", "blk*.mlp.out:both",
     "before_final_norm:both", "after_final_norm:both",
+]
+
+# Diverse, non-repetitive corpus -> full-rank up.in spectrum (npos=128) -> the alpha fit
+# window pins to arange(11,100) -> alpha is reproducible across implementations/hardware.
+# MUST stay identical to scripts/gen_fullrank_ref.py (used to mint the `main` reference).
+FULLRANK_TEXTS = [
+    "The mitochondrion is the powerhouse of the cell, generating adenosine triphosphate through oxidative phosphorylation across the inner membrane, where electron transport chains pump protons to establish an electrochemical gradient that drives synthesis.",
+    "In fourteen fifty-three the fall of Constantinople marked the end of the Byzantine Empire, as Ottoman cannons breached the ancient Theodosian walls after a siege that had lasted nearly two relentless months.",
+    "She wandered through the abandoned orchard at dusk, fingertips brushing the rough bark of forgotten apple trees, while distant thunder rolled across the violet hills and the first cold raindrops began to fall.",
+    "Quicksort partitions an array around a chosen pivot element, recursively sorting the subarrays on either side; its average case runs in n log n time, though an unlucky pivot degrades it toward quadratic behaviour.",
+    "The monsoon winds reverse direction with the seasons, drawing moist air inland from the warm Indian Ocean through summer and then pushing dry continental air back out to sea during the cooler winter months.",
+    "Jazz improvisation rewards both discipline and abandon: a soloist internalises the chord changes and scales so thoroughly that the conscious mind can step aside, letting fresh melody emerge above the steady rhythm section.",
+    "Photosynthesis converts carbon dioxide and water into glucose using light energy captured by chlorophyll, releasing oxygen as a byproduct and forming the base of nearly every terrestrial and aquatic food web on earth.",
+    "The cartographer unrolled a brittle parchment across the table, tracing faded coastlines with a trembling finger, certain that the uncharted strait he had glimpsed would finally connect the two distant trading empires.",
+    "The printing press, refined by Gutenberg around fourteen forty, dramatically lowered the cost of reproducing books, accelerating the spread of literacy, scientific exchange, and dissenting religious ideas across a fractious Europe.",
+    "Tectonic plates drift atop the ductile asthenosphere, colliding to raise mountain ranges, pulling apart to open ocean basins, and grinding past one another along faults where stress accumulates until it releases as earthquakes.",
+    "He debugged the flaky test for hours before realising the race condition lived not in his own code but in a shared cache that two worker processes kept mutating without ever acquiring the advisory lock.",
+    "The chef reduced the stock over low heat until it coated the back of a wooden spoon, then whisked in cold butter piece by piece, emulsifying a glossy sauce brightened at the last moment with lemon.",
 ]
 
 
@@ -69,14 +89,14 @@ def collected():
 
 def _acc(collected):
     factors, model, config = collected
-    return DataAccessor(factors, model=model, model_config=config)
+    return DataAccessor(factors, config=config, weights=ModelWeights(model, config), identity=_ID)
 
 def _leaves(factors):
     return [k for k in factors if not k.startswith("__")]
 
 def _captured(factors):
     return {(leaf, q) for leaf in _leaves(factors)
-            for q in ("acts", "grads") if f"{q}_cov" in factors[leaf]}
+            for q in ("acts", "grads") if f"{q}_gram" in factors[leaf]}
 
 def _copy(factors, keep=None, strip_boundary_grads=False):
     out = {"__format__": "cov", "__hf_model__": factors.get("__hf_model__")}
@@ -92,7 +112,9 @@ def _copy(factors, keep=None, strip_boundary_grads=False):
 def _save(collected, factors, fmt, tmp_path):
     _, model, config = collected
     out = str(tmp_path / (fmt.replace("+", "p").replace("-", "m") + ".pt"))
-    DataAccessor(factors, model=model, model_config=config).save(out, format=fmt)
+    base, overrides = _parse_storage_format(fmt)
+    DataAccessor(factors, config=config, weights=ModelWeights(model, config),
+                 identity=_ID).save(out, format=base, overrides=overrides)
     return torch.load(out, map_location="cpu", weights_only=False)
 
 def _structure(res):
@@ -103,7 +125,7 @@ def _structure(res):
 # Keys decided up front
 # ===========================================================================
 
-_PRIMARY = {"cov": "{q}_cov", "cov_svd": "{q}_eigvals", "eigenvalues": "{q}_eigvals"}
+_PRIMARY = {"cov": "{q}_gram", "cov_svd": "{q}_eigvals", "eigenvalues": "{q}_eigvals"}
 
 @pytest.mark.parametrize("fmt", ["cov", "cov_svd", "eigenvalues"])
 def test_lossless_preserves_every_captured_quantity(collected, fmt, tmp_path):
@@ -135,9 +157,7 @@ def test_flag_matrix(collected, tmp_path):
     assert "acts_eigvals" in ev["blk0.mlp.up.out"] and "blk0.attn.head0.contrib" in ev  # +b/+o implied
     assert "acts_eigvals" not in _save(collected, f, "eigenvalues-b", tmp_path)["blk0.mlp.up.out"]
     assert "blk0.attn.head0.contrib" not in _save(collected, f, "eigenvalues-o", tmp_path)
-    nm = _save(collected, f, "cov_svd-m", tmp_path)
-    assert not any(k.endswith("_mean") for leaf, e in nm.items()
-                   if not leaf.startswith("__") for k in e)
+    # (means are in every format now — no -m strip path; that capability was dropped)
 
 
 # ===========================================================================
@@ -169,7 +189,7 @@ def test_structure_boundary_grads_off(collected):
     factors, model, config = collected
     stripped = _copy(factors, strip_boundary_grads=True)
     s = _structure(compute_metrics_for_checkpoint(
-        DataAccessor(stripped, model=model, model_config=config)))
+        DataAccessor(stripped, config=config, weights=ModelWeights(model, config))))
     assert s["blk0.attn"] == {"mean_metrics_blk_vs_res"}  # lost grads -> no cross kfac; acts mean-metric stays
     assert s["blk0.mlp"] == {"projections_kfac", "mean_metrics_blk_vs_res"}
     assert s["blk0.attn.in"] == SPEC_A             # boundary now acts-only
@@ -180,7 +200,7 @@ def test_structure_subset_mlp_up_only(collected):
     factors, model, config = collected
     sub = _copy(factors, keep=lambda l: l.startswith("blk0.mlp.up."))
     s = _structure(compute_metrics_for_checkpoint(
-        DataAccessor(sub, model=model, model_config=config)))
+        DataAccessor(sub, config=config, weights=ModelWeights(model, config))))
     assert s["blk0.mlp.up"] == {"kfac"}
     assert "projections_kfac" not in s.get("blk0.mlp", set())  # no down -> none
     assert s["blk0.mlp.up.in"] == SPEC_A
@@ -194,7 +214,7 @@ def test_every_grad_leaf_actually_has_grads(collected):
                  "blk0.attn.head0.slice", "blk0.attn.head1.slice",
                  "blk0.attn.in", "blk0.attn.out", "blk0.mlp.out",
                  "before_final_norm", "after_final_norm"):
-        assert "grads_cov" in factors[leaf], f"{leaf}: grad hook captured no gradients"
+        assert "grads_gram" in factors[leaf], f"{leaf}: grad hook captured no gradients"
 
 
 def test_fast_final_norm_errors_when_grads_requested(collected):
@@ -217,41 +237,32 @@ def test_empty_collection_no_metrics():
 
 
 # ===========================================================================
-# Metric VALUES vs committed snapshot (numeric regression)
+# Metric VALUES: full-rank cross-implementation reference (vs `main`, trusted old code)
 # ===========================================================================
+# alpha is ill-posed on the rank-deficient TEXTS above (its fit window arange(11,min(100,npos))
+# straddles the rank floor, npos ~73-92, so it swings 7.98<->9.80 across impl/hardware with no
+# true value). On full-rank input (npos=128) the window pins to arange(11,100) and the fit is
+# clean (r2~0.84) -> alpha is reproducible. tests/snapshots/pipeline_fullrank.pt was minted on
+# `main` (the trusted pre-rebuild code) from FULLRANK_TEXTS; the rebuild must reproduce it.
 
-def _snapshot(name, current, request, atol=1e-4, rtol=2e-3):
-    path = os.path.join(os.path.dirname(__file__), "snapshots", f"{name}.pt")
-    if request.config.getoption("--snapshot-update", default=False) or not os.path.exists(path):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        torch.save(current, path)
-        pytest.skip("snapshot created/updated")
-    ref = torch.load(path, map_location="cpu", weights_only=False)
-    for k, v in current.items():
-        r = ref[k]
-        if isinstance(v, torch.Tensor):
-            assert torch.allclose(v.double().cpu(), torch.as_tensor(r).double(), atol=atol, rtol=rtol), \
-                f"{k}: tensor mismatch"
-        else:
-            assert abs(v - r) <= atol + rtol * abs(r), f"{k}: {v} vs {r}"
-
-
-def test_metric_values_snapshot(collected, request):
-    s = compute_metrics_for_checkpoint(_acc(collected))
-    cur = {}
-    def grab(node, metric, *fields):
-        for f in fields:
-            cur[f"{node}|{metric}|{f}"] = s[node][metric][f]
-    grab("blk0.mlp.up.in", "acts_uncentered", "rankme", "alpha", "log_det", "trace")
-    grab("blk0.mlp.up.out", "grads_uncentered", "rankme", "log_det")
-    grab("blk0.mlp.up.out", "gen", "trace", "rankme")
-    grab("blk0.mlp.up", "kfac", "log_det", "trace")
-    grab("blk0.mlp", "projections_kfac", "log_det", "trace")
-    grab("blk0.attn.head0.slice", "acts_uncentered", "rankme")
-    grab("blk0.attn.head0.contrib", "acts_uncentered", "rankme", "d")
-    grab("blk0.attn.in", "acts_uncentered", "rankme")
-    grab("after_final_norm", "acts_uncentered", "rankme", "log_det")
-    grab("after_final_norm", "gen", "trace")
-    cur["blk0.mlp.up.in|acts_uncentered|spectrum10"] = \
-        torch.as_tensor(s["blk0.mlp.up.in"]["acts_uncentered"]["eigenspectrum"][:10]).double().cpu()
-    _snapshot("pipeline_values", cur, request)
+def test_alpha_fullrank_reference(collected):
+    _, model, config = collected
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    _, rev, _ = final_checkpoint(config)
+    tok = load_tokenizer(config, revision=rev)
+    cfg = CollectConfig(model_name=PYTHIA, hooks=["blk*.mlp.up.in:acts"], packing="padded",
+                        token_selection="all", batch_size=2, max_length=128,
+                        max_layers_per_pass=0, sample_labels=False, seed=42)
+    factors = _collect_for_checkpoint(model, config, cfg, FULLRANK_TEXTS, tok, None,
+                                      TARGET_LAYERS, device, None)
+    m = compute_metrics_for_checkpoint(
+        DataAccessor(factors, config=config, weights=ModelWeights(model, config), identity=_ID),
+    )["blk0.mlp.up.in"]["acts_uncentered"]
+    npos = int((torch.as_tensor(m["eigenspectrum"]) > 0).sum())
+    assert npos >= 110, f"corpus not full-rank (npos={npos}) — alpha would be ill-posed"
+    ref = torch.load(os.path.join(os.path.dirname(__file__), "snapshots", "pipeline_fullrank.pt"),
+                     map_location="cpu", weights_only=False)["blk0.mlp.up.in|acts_uncentered"]
+    tol = {"alpha": (2e-2, 2e-2), "rankme": (0.0, 5e-3), "true_rankme": (0.0, 5e-3), "r2": (2e-2, 0.0)}
+    for k, (atol, rtol) in tol.items():
+        assert abs(float(m[k]) - ref[k]) <= atol + rtol * abs(ref[k]), \
+            f"{k}: rebuild {float(m[k]):.5f} vs main-reference {ref[k]:.5f}"
