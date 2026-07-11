@@ -8,7 +8,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.4
 #   kernelspec:
-#     display_name: representation-geometry
+#     display_name: representation-geometry (3.14.0)
 #     language: python
 #     name: python3
 # ---
@@ -24,7 +24,7 @@ from analysis import experiments_lib as _lib
 importlib.reload(_lib)
 from analysis.experiments_lib import (
     grid_start, grid_show, plot_group, plot_spectrum, plot_layer_contribution,
-    plot_heatmap, block_mean_cos, build_hooks, get_model_label,
+    plot_heatmap, block_mean_cos, build_hooks, get_model_label, submatrix,
 )
 
 # %%
@@ -34,7 +34,9 @@ FINEWEB_PADDED = "rankme_fineweb_padded"
 TRAINSET_PACKED = "rankme_trainset_packed_4MT"
 # KF_ARXIV = "kfac_small_arxiv"
 KF_SMALL = "kfac_small_shuffled"
-BLOCK_REPR = "block_representations"
+# BLOCK_REPR_PARTIAL = "block_representations"   # layer-subset run, superseded by the all-layer redo
+BLOCK_REPR = "block_representations_all"
+BLOCK_SAMPLES = "block_representations_samples"   # raw-sample runs (crosses computed inline)
 
 # %%
 HK = build_hooks()   # hook-name -> (node, metric); machinery lives in experiments_lib
@@ -163,12 +165,12 @@ mlp_gbd15 = lambda model: mlp_ts(['down'], [measured[model][-1]], ['GB'])
 mlp_gbd0 = lambda model: mlp_ts(['down'], [measured[model][0]], ['GB'])
 
 
-# --- block_representations runs: measured layers + sub-block boundary shorthands ---
+# --- block_representations_all runs: every layer + sub-block boundary shorthands ---
 measured_br = {
-    'pythia-1b-deduped':   [0, 1, 3, 5, 8, 10, 13, 15],
-    'pythia-6.9b-deduped': [0, 1, 5, 10, 15, 21, 26, 31],
-    'OLMo-2-0425-1B':      [0, 1, 3, 5, 8, 10, 13, 15],
-    'OLMo-2-1124-7B':      [0, 1, 5, 10, 15, 21, 26, 31],
+    'pythia-1b-deduped':   list(range(16)),
+    'pythia-6.9b-deduped': list(range(32)),
+    'OLMo-2-0425-1B':      list(range(16)),
+    'OLMo-2-1124-7B':      list(range(32)),
 }
 
 def bnd_(src):
@@ -186,7 +188,8 @@ mlp_out  = lambda model, ms=['Au']: bnd_br('MO', measured_br[model], ms)
 
 # Per-OV-head shorthand. which='slice' (pre-W_o, d_head) or 'contrib' (post-W_o, d_model,
 # derived). tail ∈ {Au,Ac,Gu,Gc,GB}; blk/h/tail accept an int/str or a list; blk=None ->
-# all measured_br[model] layers. (Heads live in the block_representations runs.)
+# all measured_br[model] layers. (block_representations_all has heads for the 1Bs only —
+# the 7Bs ran the boundary-only _all_7b variant; use BLOCK_REPR_PARTIAL's source for 7B heads.)
 _HEAD_METRIC = {'AU': 'acts_uncentered', 'AC': 'acts_centered',
                 'GU': 'grads_uncentered', 'GC': 'grads_centered', 'GB': 'gen'}
 
@@ -385,6 +388,18 @@ for model in ['pythia-1b-deduped', 'pythia-6.9b-deduped', 'OLMo-2-0425-1B', 'OLM
     plot_layer_contribution(model, layer_outs(model), title=get_model_label(model))
 grid_show()
 
+# %%
+# Ledger-based layer contribution: each block's signed ΔS_k (= χ + quality + interference —
+# overlap and cross terms INCLUDED, unlike the gross-energy stack above). Positives stack up,
+# negatives down; the net stack height is log RankMe(final) − log RankMe(embeddings).
+_ledger_srcs = lambda model: [(BLOCK_SAMPLES, (f'blk{l}', 'block_ledger'), f'blk {l}')
+                              for l in range(len(measured_br[model]))]
+grid_start(ncols=2, title='Layer contribution — rank-entropy ledger (signed ΔS)')
+for model in ['pythia-1b-deduped', 'pythia-6.9b-deduped', 'OLMo-2-0425-1B', 'OLMo-2-1124-7B']:
+    plot_layer_contribution(model, _ledger_srcs(model), yvar='delta_s', normalize=False,
+                            title=get_model_label(model))
+grid_show()
+
 
 # %% [markdown]
 # ### Per-layer-output vs final RankMe
@@ -462,20 +477,24 @@ for model in filter_model_names:
 # Pairwise cosine between block-output means at the final checkpoint (block×block),
 # ordered by depth (attn, mlp per layer). Diagonal hidden; symmetric dynamic colour
 # range. Off-diagonal structure shows which layers' mean directions co-align.
-grid_start(ncols=2, title='Block-mean cosine (final ckpt)', savefig=False)
-for model in filter_model_names:
-    outs = layer_outs(model)
-    plot_heatmap(block_mean_cos(model, outs), labels=[s[2] for s in outs], title=get_model_label(model),
-                 hide_diag=True, dynamic=True)
-grid_show()
+# One grid per sub-block pairing: all×all, attn×attn, mlp×mlp, attn×mlp.
+PAIRINGS = (('', ''), ('attn', 'attn'), ('mlp', 'mlp'), ('attn', 'mlp'))
+
+for rows, cols in PAIRINGS:
+    grid_start(ncols=2, title=f'Block-mean cosine ({rows or "all"}×{cols or "all"}, final ckpt)', savefig=False)
+    for model in filter_model_names:
+        outs = layer_outs(model)
+        M, rl, cl = submatrix(block_mean_cos(model, outs), [s[2] for s in outs], rows, cols)
+        plot_heatmap(M, labels=rl, labels2=cl, title=get_model_label(model),
+                     hide_diag=rows == cols, dynamic=True)
+    grid_show()
 
 
 # %% [markdown]
 # ### Samples run: block↔block coupling (Exp 4.1)
 
 # %%
-# block_representations_samples: raw-sample runs at EVERY layer, crosses computed inline.
-BLOCK_SAMPLES = "block_representations_samples"
+# block_representations_samples (BLOCK_SAMPLES, defined with the constants up top).
 n_blocks_bs = {'pythia-1b-deduped': 16, 'pythia-6.9b-deduped': 32,
                'OLMo-2-0425-1B': 16, 'OLMo-2-1124-7B': 32}
 bs_out = lambda model, family: [(BLOCK_SAMPLES, (f'blk{l}.{s}.out', family), f'{s} {l}')
@@ -487,17 +506,18 @@ bs_blk = lambda model: [(BLOCK_SAMPLES, (f'blk{l}', 'block_ledger'), f'blk {l}')
 # Pairwise block-output coupling at the final checkpoint: CKA (shared subspace, unsigned),
 # signed trace (net reinforce/cancel, energy-weighted), mean per-token cosine (democratic).
 # Covariance-level counterpart of the block-mean cosine heatmaps above.
-def _coupling_heatmaps(model, step=None):
+def _coupling_heatmaps(model, rows='', cols='', step=None):
     bb = lambda y: _lib.get_y(BLOCK_SAMPLES, model, ('', 'block_block_coupling'), y, step)
     labels = [l.removeprefix('blk').removesuffix('.out') for l in bb('leaves')]
-    grid_start(ncols=3, title=f'Block↔block coupling (final ckpt) — {get_model_label(model)}')
-    plot_heatmap(bb('cka'), labels=labels, title='CKA', vmin=0, vmax=1, hide_diag=True)
-    plot_heatmap(bb('signed_trace'), labels=labels, title='signed trace', hide_diag=True, dynamic=True)
-    plot_heatmap(bb('mean_cos'), labels=labels, title='mean cos', hide_diag=True, dynamic=True)
+    grid_start(ncols=3, title=f'Block↔block coupling ({rows or "all"}×{cols or "all"}, final ckpt) — {get_model_label(model)}')
+    for y, kw in (('cka', dict(vmin=0, vmax=1)), ('signed_trace', dict(dynamic=True)), ('mean_cos', dict(dynamic=True))):
+        M, rl, cl = submatrix(bb(y), labels, rows, cols)
+        plot_heatmap(M, labels=rl, labels2=cl, title=y, hide_diag=rows == cols, **kw)
     grid_show()
 
 for model in filter_model_names:
-    _coupling_heatmaps(model)
+    for rows, cols in PAIRINGS:
+        _coupling_heatmaps(model, rows, cols)
 
 # %% [markdown]
 # ### Rank ledger (Exp 4.2)
@@ -538,12 +558,15 @@ for model in filter_model_names:
 # %%
 # Leave-one-out RankMe effect of each write, per-step overlap fraction χ_k/H(w), and
 # checkpoint-to-checkpoint drift (CKA over shared tokens; absent at the first checkpoint).
+DRIFT_MODELS = {'pythia-1b-deduped', 'OLMo-2-0425-1B'}   # drift_metrics ran on the 1Bs only
+
 def _abl_drift_grid(model):
     grid_start(ncols=2, title=f'Ablation / overlap / drift — {get_model_label(model)}')
     plot_group('delta_rankme', bs_out(model, 'ablation_contribution'), [model], color_palette='gradient')
     plot_group('chi_frac', bs_out(model, 'incremental_overlap'), [model], color_palette='gradient')
-    plot_group('cka_drift', bs_out(model, 'cka_drift'), [model], color_palette='gradient')
-    plot_group('rankme', bs_out(model, 'geneig_drift'), [model], color_palette='gradient', title='gen-eig drift RankMe')
+    if model in DRIFT_MODELS:
+        plot_group('cka_drift', bs_out(model, 'cka_drift'), [model], color_palette='gradient')
+        plot_group('rankme', bs_out(model, 'geneig_drift'), [model], color_palette='gradient', title='gen-eig drift RankMe')
     grid_show()
 
 for model in filter_model_names:
@@ -556,12 +579,74 @@ for model in filter_model_names:
 # RankMe of the final stream with the top-k eigendirections removed (tail_rankme virtual hook
 # on the stored eigenspectrum): separates head concentration from bulk dimensionality
 # (docs/dig_findings.md) — the measured compression phase lives in the top ~10-30 directions.
-bfn_tail = [(BLOCK_SAMPLES, ('before_final_norm', 'acts_centered'), f'k={k}', ('tail_rankme', {'k': k}))
-            for k in (0, 1, 2, 8, 32)]
+# Head-removed RankMe + windowed alphaReQ (compression propagates down-spectrum with decaying
+# amplitude; docs/dig_findings.md), for the final stream AND the stream entering the last
+# block — is the head phenomenon written by the last block? Plus λ1/λ2 head dominance.
+KS = (0, 1, 2, 8, 32, 128)
+WINDOWS = ((11, 100), (32, 100), (32, 300), (128, 512))
+_tail = lambda leaf: [(BLOCK_SAMPLES, (leaf, 'acts_centered'), f'k={k}', ('tail_rankme', {'k': k})) for k in KS]
+_alpha_w = lambda leaf: [(BLOCK_SAMPLES, (leaf, 'acts_centered'), f'{k0}-{k1}', ('alpha_window', {'k0': k0, 'k1': k1}))
+                         for k0, k1 in WINDOWS]
+_pen = lambda model: f'blk{n_blocks_bs[model] - 1}.attn.in'   # stream entering the last block
+
+import numpy as np
+
+# The 'without top-3' stream = joint_ablation metric (next_run_additions.md #3: stream samples
+# minus the 3 most rank-influential writes, exact incl. cross terms; node '', keys
+# eigenspectrum/leaves/rankme/alpha). Until a run carries it, those panels annotate themselves;
+# the rankme comparison additionally shows the ADDITIVE estimate from the stored leave-one-out
+# ΔRankMe (first-order: single-write deltas ignore interactions between the three — in Pythia
+# they interact strongly enough to push the additive curve negative, itself a finding).
+JA = ('', 'joint_ablation')
+
+def _has_ja(model):
+    res, steps = _lib.load_results(BLOCK_SAMPLES, model)
+    return bool(res) and 'joint_ablation' in res[steps[-1]].get('', {})
+
+@_lib.griddable
+def _placeholder(msg):
+    _lib.plt.text(0.5, 0.5, msg, ha='center', va='center', fontsize=11, color='0.4', wrap=True)
+    _lib.plt.gca().set_axis_off()
+
+def _top3(model):
+    nodes = [f'blk{l}.{s}.out' for l in range(n_blocks_bs[model]) for s in ('attn', 'mlp')]
+    d = {n: _lib.get_ys(BLOCK_SAMPLES, model, (n, 'ablation_contribution'), 'delta_rankme')[0] for n in nodes}
+    return sorted(d, key=lambda n: -np.mean(np.abs(d[n])))[:3], d
+
+@_lib.griddable
+def _cmp_wo_top3(model, yvar):   # panel 5/6: normal vs without-top-3, one scalar metric
+    plt = _lib.plt
+    r, steps = _lib.get_ys(BLOCK_SAMPLES, model, ('before_final_norm', 'acts_centered'), yvar)
+    xs = _lib.XVAR_FNS['tokens'](model, steps)
+    plt.plot(xs[1:], np.asarray(r)[1:], lw=3, color='0.3', label=yvar)
+    top3, d = _top3(model)
+    lbl = ', '.join(n.removeprefix('blk').removesuffix('.out') for n in top3)
+    if yvar == 'rankme':         # additive estimate exists for rankme only
+        plt.plot(xs[1:], (np.asarray(r) - sum(np.asarray(d[n]) for n in top3))[1:], lw=3,
+                 color='tab:orange', ls='--', label=f'additive − top-3 ({lbl})')
+    if _has_ja(model):           # exact joint ablation (future runs)
+        j, jsteps = _lib.get_ys(BLOCK_SAMPLES, model, JA, yvar)
+        plt.plot(_lib.XVAR_FNS['tokens'](model, jsteps)[1:], np.asarray(j)[1:], lw=3,
+                 color='tab:red', label=f'joint − top-3 ({lbl})')
+    plt.xscale('log'); plt.xlim(10e7, 10**12.7)
+    plt.xlabel('Pretraining tokens', fontsize=14)
+    plt.ylabel(_lib.YVAR_LABELS.get(yvar, yvar), fontsize=14)
+    plt.legend(); plt.title(f'{yvar}: normal vs without top-3 writes')
+
+_ja_tail = [(BLOCK_SAMPLES, JA, f'k={k}', ('tail_rankme', {'k': k})) for k in KS]
+_ja_alpha = [(BLOCK_SAMPLES, JA, f'{k0}-{k1}', ('alpha_window', {'k0': k0, 'k1': k1})) for k0, k1 in WINDOWS]
+_NO_JA = 'needs the joint_ablation metric\n(next run — docs/next_run_additions.md #3)'
 
 for model in filter_model_names:
-    grid_start(ncols=1, title=f'Head-removed final RankMe — {get_model_label(model)}')
-    plot_group('tail_rankme', bfn_tail, [model], color_palette='gradient')
+    grid_start(ncols=2, title=f'Head-removed RankMe / bulk alpha — {get_model_label(model)}')
+    plot_group('tail_rankme', _tail('before_final_norm'), [model], color_palette='gradient', title='final stream')
+    (plot_group('tail_rankme', _ja_tail, [model], color_palette='gradient', title='without top-3 writes')
+     if _has_ja(model) else _placeholder(_NO_JA))
+    plot_group('alpha_window', _alpha_w('before_final_norm'), [model], color_palette='gradient', title='final stream')
+    (plot_group('alpha_window', _ja_alpha, [model], color_palette='gradient', title='without top-3 writes')
+     if _has_ja(model) else _placeholder(_NO_JA))
+    _cmp_wo_top3(model, 'rankme')
+    _cmp_wo_top3(model, 'alpha')   # normal curve now; joint without-top-3 line joins next run
     grid_show()
 
 # %% [markdown]

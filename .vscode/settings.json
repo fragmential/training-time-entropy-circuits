@@ -1,0 +1,11 @@
+{
+    // Pylance-side mirror of pyproject [tool.pyright] ignore: the workspace is often opened
+    // via the /home symlink while the config root canonicalizes to /gpfs/home2, so the
+    // pyproject-relative ignore patterns fail to match open-file URIs. These match as-opened.
+    "python.analysis.ignore": [
+        "**/analysis/**",
+        "**/*backup*.py",
+        "**/*_old.py",
+        "**/memorization*"
+    ]
+}

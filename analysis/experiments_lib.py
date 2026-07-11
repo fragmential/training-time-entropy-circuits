@@ -106,9 +106,19 @@ def _rankme(evs: np.ndarray) -> float:
     p = p / p.sum()
     return float(np.exp(-(p * np.log(p)).sum()))
 
+def _alpha(evs: np.ndarray, k0: int = 32, k1: int = 300) -> float:
+    """Stringer-style weighted log-log slope over eigenvalue ranks [k0, k1) (0-based)."""
+    lam = np.asarray(evs, float); lam = lam[lam > 0]
+    r = np.arange(k0, min(k1, len(lam))) + 1.0
+    x = np.stack([-np.log(r), np.ones_like(r)], 1)
+    w = (1.0 / r)[:, None]
+    return float(np.linalg.solve(x.T @ (x * w), (w * x).T @ np.log(lam[k0:min(k1, len(lam))]))[0])
+
 virtual_hooks = {
     "peak_eigval": (["eigenspectrum", "trace"], (lambda evs, tr: evs[0].item()*tr)),
     "tail_rankme": (["eigenspectrum"], (lambda evs, k=32: _rankme(np.asarray(evs)[k:]))),
+    "alpha_window": (["eigenspectrum"], _alpha),   # kwargs k0/k1: bulk alphaReQ, head excluded
+    "top1_dominance": (["eigenspectrum"], (lambda evs: float(evs[0] / evs[1]))),   # λ1/λ2
     "eigvals": (["eigenspectrum", "trace"], (lambda evs, tr: evs*tr)),
     "histogram":    (["eigvals"], (lambda evs, bins=512: make_histogram(evs, bins))),
     "loghistogram": (["eigvals"], (lambda evs, bins=512: make_histogram(evs, bins, log_bins=True))),
@@ -266,6 +276,28 @@ YVAR_LABELS = {
     'magratio_res':          r'$\|\mu_{out}\|/\|\mu_{in}\|$',
     'cos_drift':             r'$\cos(\mu_t, \mu_{t-1})$ (drift)',
     'cos_drift_ema':         r'$\cos(\mu_t, \overline{\mu}_{<t})$ (EMA drift)',
+    # Block-composition / ledger family (samples runs)
+    'tail_rankme':           r'RankMe of $\lambda_{>k}$ (head removed)',
+    'alpha_window':          r'$\alpha_{[k_0,k_1)}$ (windowed)',
+    'top1_dominance':        r'$\lambda_1/\lambda_2$ (head top-1 dominance)',
+    'delta_s':               r'$\Delta S$ (block rank-entropy change)',
+    'chi':                   r'$\chi$ (overlap)',
+    'quality':               r'quality $\sum_i w_i(S_i - S_{in})$',
+    'interference':          r'$I$ (interference)',
+    'chi_frac':              r'$\chi/H(w)$',
+    'sub_delta_s':           r'$\Delta S$ (sub-step)',
+    'sub_quality':           r'quality (sub-step)',
+    'sub_interference':      r'$I$ (sub-step)',
+    'delta_rankme':          r'$\Delta$RankMe (leave-one-out)',
+    'rankme_ablated':        r'RankMe$(\Sigma_{r\setminus k})$',
+    'cka_drift':             r'CKA$(c^{(t)}, c^{(t-1)})$',
+    'tr_P':                  r'$\mathrm{tr}\,P_k$ (reinforce/cancel)',
+    'tr_R':                  r'$\mathrm{tr}\,R_k$',
+    'R_over_r':              r'$\mathrm{tr}\,R_k/\mathrm{tr}\,\Sigma_r$',
+    'R_over_ck':             r'$\mathrm{tr}\,R_k/\mathrm{tr}\,\Sigma_{c_k}$',
+    'cka_cr':                r'CKA$(c_k, r)$',
+    'cos_cr':                r'mean $\cos(c_i, r_i)$ (per-token)',
+    'migration':             r'tail$\to$head migration',
 }
 
 base_colors = [
@@ -408,9 +440,12 @@ def plot_model_training(model_name: str, source: tuple[str], xvar: str = 'tokens
     xs = XVAR_FNS[xvar](model_name, step_nums)
     ls = get_ls(source_label+model_name, exceptions=ls_exceptions)
 
+    # step-0 has 0 tokens: unplottable on the log token axis (its clipped segment renders as a
+    # spurious horizontal line entering from the left edge)
+    skip = max(int(omit_step0), int(xvar == 'tokens' and xs[0] <= 0))
     label = make_label(model_name, source_label, label_model, label_source)
-    plt.plot(xs[int(omit_step0):], ys[int(omit_step0):], marker=marker, color=color, ls=ls, lw=lw, alpha=alpha, zorder=zorder, label=label)
-    return xs[int(omit_step0):], ys[int(omit_step0):]
+    plt.plot(xs[skip:], ys[skip:], marker=marker, color=color, ls=ls, lw=lw, alpha=alpha, zorder=zorder, label=label)
+    return xs[skip:], ys[skip:]
 
 def get_series_y(data_source, model_name, yvar, step, labels):
     yvar_kwargs = {}
@@ -422,9 +457,47 @@ def get_series_y(data_source, model_name, yvar, step, labels):
     label = make_label(model_name, source_label, *labels)
     return get_y(source_file, model_name, hook, yvar, step, yvar_kwargs=yvar_kwargs), label
 
+def smooth_spectrum(a: np.ndarray, window: int = 22, peak: int = 3) -> np.ndarray:
+    """window: smoothing width (odd; 0=off). Endpoints always pinned so edge peaks
+    survive. peak<=1 -> Savitzky-Golay (denoise around the mean). peak>1 -> bias toward
+    the window's upper values via a rolling quantile q=peak/(peak+1) (peak=3->0.75,
+    7->0.875, larger->max), then a savgol pass so it stays smooth (no staircase/plateaus).
+    Robust on the wide-dynamic-range spectra: no powers/underflow."""
+    a = np.asarray(a, dtype=float)
+    if not window or window < 3 or a.size < 3:
+        return a
+    from scipy.signal import savgol_filter
+    w = int(window) | 1                          # force odd
+    w = min(w, a.size if a.size % 2 else a.size - 1)
+    if w < 3:
+        return a
+    po = min(3, w - 1)
+    if peak and peak > 1:
+        from numpy.lib.stride_tricks import sliding_window_view
+        q = peak / (peak + 1.0)
+        win = sliding_window_view(np.pad(a, w // 2, mode='edge'), w)   # (n, w)
+        sm = savgol_filter(np.quantile(win, q, axis=1), w, po, mode='interp')
+    else:
+        sm = savgol_filter(a, w, po, mode='interp')
+    sm = np.where(np.isfinite(sm) & (sm > 0), sm, a)             # positivity + finite (log)
+    sm[0], sm[-1] = a[0], a[-1]                  # pin edges -> preserve edge peaks
+    return sm
+
+
+def panel_palettes(n_sources: int, color_palette: str = 'hue_shift',
+                   color_kwargs: dict = {}) -> list:
+    """Per-source colour palettes (one list per data source, indexed by model)."""
+    if color_palette == 'hue_shift':
+        color_kwargs = dict(shift=0.80 / n_sources, light_base=0.85) | color_kwargs
+    return make_color_palettes(base_colors, n_sources, method=color_palette, **color_kwargs)
+
+
 def plot_spectrum_series(series: list[tuple], mode: str = 'line',
                          max_ev: int = None, hist_bins: int = 256,
-                         log_bins=False, input_is_bins=True):
+                         log_bins=False, input_is_bins=True,
+                         smooth: int = 0, peak: int = 3):
+    # smooth=0 default: sorted eigval spectra are monotone/noise-free — a SavGol window only
+    # invents features at the head cliff (fake dip at idx ~10-30). Opt in for profile-like ys.
     is_hist = mode in ('hist', 'histogram')
 
     if is_hist and input_is_bins:
@@ -449,11 +522,26 @@ def plot_spectrum_series(series: list[tuple], mode: str = 'line',
     for i, (arr, color, label) in enumerate(series):
         xs = np.arange(len(arr))
         if mode == 'line':
-            plt.plot(xs, arr, color=color, lw=2, label=label)
+            plt.plot(xs, smooth_spectrum(arr, smooth, peak), color=color, lw=2, label=label)
         elif mode == 'bar':
             width = 0.8 / len(series)
             offset = (i - len(series) / 2 + 0.5) * width
             plt.bar(xs + offset, arr, width=width, color=color, label=label, alpha=0.8)
+
+def legend_or_colorbar(legend_max: int = 12):
+    """Normal legend, or — for depth-gradient groups past legend_max lines — a slim colorbar
+    of the actual line colors, ticked with the first/middle/last labels."""
+    handles, labels = plt.gca().get_legend_handles_labels()
+    if len(labels) <= legend_max:
+        return plt.legend()
+    from matplotlib.colors import ListedColormap
+    from matplotlib.cm import ScalarMappable
+    colors = [h.get_color() if hasattr(h, 'get_color') else h.get_facecolor() for h in handles]
+    cb = plt.colorbar(ScalarMappable(cmap=ListedColormap(colors)), ax=plt.gca(),
+                      fraction=0.046, pad=0.02,
+                      ticks=[0.5 / len(labels), 0.5, 1 - 0.5 / len(labels)])
+    cb.ax.set_yticklabels([labels[0], labels[len(labels) // 2], labels[-1]], fontsize=9)
+
 
 _grid = None
 
@@ -540,13 +628,10 @@ def plot_group(
     hold_color_for_n: int | None = None,
     aggregate: bool = False, background=None, weight=None, normalize=None,
     agg_color='tab:blue', band_color='#6e7f95', contrib_alpha=0.35, contrib_lw=1.0,
+    legend_max: int = 12, lw: float = 3,
     **kwargs
 ):
-    if color_palette == "hue_shift":
-        color_kwargs = dict(shift=0.80/len(data_sources), light_base=0.85) | color_kwargs
-    palettes = make_color_palettes(
-        base_colors, len(data_sources), method=color_palette, **color_kwargs
-    )
+    palettes = panel_palettes(len(data_sources), color_palette, color_kwargs)
 
     if hold_color_for_n is None:
         hold_color_for_n = 2 if ls_exceptions else 1
@@ -568,7 +653,7 @@ def plot_group(
                 color = palettes[didx][model_name_options.index(model_name)]
             r = plot_model_training(model_name, data_source,
                                 xvar=xvar, yvar=yvar, color=color, transform=norm,
-                                lw=contrib_lw if aggregate else 3,            # thinner contributions
+                                lw=contrib_lw if aggregate else lw,           # thinner contributions
                                 alpha=contrib_alpha if aggregate else 1.0,    # colored but low-opacity
                                 zorder=1 if aggregate else None,              # contributions at the bottom
                                 label_source=not aggregate and (len(data_sources)>1 or len(model_names) <= 1),
@@ -576,7 +661,7 @@ def plot_group(
                                 ls_exceptions=ls_exceptions, **kwargs)
             if aggregate and r:                                              # weight = uncentered trace (energy)
                 w = get_ys(data_source[0], model_name, (data_source[1][0], 'acts_uncentered'), weight)[0] if weight else None
-                agg.append((*r, w))
+                agg.append((*r, np.asarray(w)[-len(r[1]):] if w is not None else None))   # align to skipped step-0
         if background:                                                       # zorder 3: above contribs, just below mean
             bgr = plot_model_training(model_name, background, xvar=xvar, yvar=yvar, color='0.45', transform=norm,
                                       label_source=True, label_model=False, zorder=3, **kwargs)
@@ -601,7 +686,7 @@ def plot_group(
     plt.ylabel(YVAR_LABELS.get(yvarname, yvarname) + (' (rel.)' if normalize else ''), fontsize=14)
     plt.xlim(10e7, 10**12.7)
     # print([float(np.log10(lim)) for lim in plt.xlim()])
-    plt.legend()
+    legend_or_colorbar(legend_max)
     plt.show()
 
 
@@ -619,13 +704,10 @@ def plot_spectrum(
     color_kwargs: dict = {},
     disable_didx: list = [],
     disable_midx: list = [],
+    legend_max: int = 12,
     **kwargs
 ):
-    if color_palette == 'hue_shift':
-        color_kwargs = dict(shift=0.80/len(data_sources), light_base=0.85) | color_kwargs
-    palettes = make_color_palettes(
-        base_colors, len(data_sources), method=color_palette, **color_kwargs
-    )
+    palettes = panel_palettes(len(data_sources), color_palette, color_kwargs)
 
     yvarname = yvar if isinstance(yvar, str) else yvar[0]
     labels = len(model_names) > 1, len(data_sources) > 1 or len(model_names) <= 1
@@ -652,7 +734,7 @@ def plot_spectrum(
     if title is not None: plt.title(title)
     plt.xlabel(r'$\nu$' if mode in ('hist', 'histogram') else 'Component index', fontsize=14)
     plt.ylabel(YVAR_LABELS.get(yvarname, yvarname), fontsize=14)
-    plt.legend()
+    legend_or_colorbar(legend_max)
     plt.show()
 
 # 100%-stacked area: each block output's share of the residual energy (uncentered trace)
@@ -660,20 +742,33 @@ def plot_spectrum(
 # reuses plot_group's colour-palette logic. (Shares are among the *measured* outputs,
 # matching the weighted average above.)
 @griddable
-def plot_layer_contribution(model, sources, xvar='tokens', title=None,
-                            color_palette='gradient', color_kwargs={}, key=True):
+def plot_layer_contribution(model, sources, xvar='tokens', yvar='trace', title=None,
+                            color_palette='gradient', color_kwargs={}, key=True,
+                            normalize=True, sep_lw=0.0, sep_color='white'):
+    """Depth-stacked contributions over training. normalize=True: 100%-shares (nonneg yvar,
+    e.g. uncentered trace = gross energy). normalize=False: raw signed values — positives
+    stack up, negatives down (e.g. the ledger's delta_s, which includes overlap/cross terms)."""
     palettes = make_color_palettes(base_colors, len(sources), method=color_palette, **color_kwargs)
     W, xs = [], None
     for src in sources:
-        ys, step_nums = get_ys(src[0], model, src[1], 'trace')   # uncentered trace = energy weight
+        ys, step_nums = get_ys(src[0], model, src[1], yvar)
         if ys is None: continue
         W.append(ys); xs = XVAR_FNS[xvar](model, step_nums)
-    W = np.asarray(W, float); frac = W / W.sum(0)                # normalise to 100% per step
+    W = np.asarray(W, float)
+    frac = W / W.sum(0) if normalize else W
     colors = [palettes[i][0] for i in range(len(W))]            # gradient is model-independent -> [0]
-    plt.stackplot(xs, *frac, colors=colors)
-    plt.xscale('log'); plt.xlim(10e7, 10**12.7); plt.ylim(0, 1)
+    stack = lambda Y: plt.stackplot(xs, *Y, colors=colors, linewidth=sep_lw,
+                                    edgecolor=sep_color if sep_lw else 'none')
+    if normalize or (frac >= 0).all():
+        stack(frac)
+        plt.ylim(0, 1) if normalize else None
+    else:                                                       # signed: positives up, negatives down
+        stack(np.clip(frac, 0, None)); stack(np.clip(frac, None, 0))
+        plt.axhline(0, color='0.3', lw=0.8)
+    plt.xscale('log'); plt.xlim(10e7, 10**12.7)
     if title: plt.title(title)
-    plt.xlabel(XVAR_LABELS[xvar], fontsize=14); plt.ylabel('Share of residual energy', fontsize=14)
+    plt.xlabel(XVAR_LABELS[xvar], fontsize=14)
+    plt.ylabel('Share of residual energy' if normalize else YVAR_LABELS.get(yvar, yvar), fontsize=14)
     if key:                                                     # depth colour key (one bar, bottom->final)
         from matplotlib.colors import ListedColormap
         from matplotlib.cm import ScalarMappable
@@ -683,18 +778,29 @@ def plot_layer_contribution(model, sources, xvar='tokens', title=None,
 
 
 @griddable
-def plot_heatmap(M, labels=None, title=None, cmap='coolwarm', vmin=-1, vmax=1,
+def plot_heatmap(M, labels=None, labels2=None, title=None, cmap='coolwarm', vmin=-1, vmax=1,
                  hide_diag=False, dynamic=False):
+    """labels = rows (y); labels2 = columns (x), defaulting to labels (square matrices)."""
     M = np.array(M, dtype=float)                         # fresh copy -> safe to NaN the diagonal
-    if hide_diag: np.fill_diagonal(M, np.nan)
+    if hide_diag and M.shape[0] == M.shape[1]: np.fill_diagonal(M, np.nan)
     if dynamic:                                          # symmetric range around 0 (gray centre)
         v = np.nanmax(np.abs(M)); vmin, vmax = -v, v
     cmap = plt.get_cmap(cmap).copy(); cmap.set_bad('white')   # NaN cells (hidden diagonal) -> white
     im = plt.imshow(M, cmap=cmap, vmin=vmin, vmax=vmax)
-    if labels is not None:
-        plt.xticks(range(len(labels)), labels, rotation=90, fontsize=6); plt.yticks(range(len(labels)), labels, fontsize=6)
+    cols = labels2 if labels2 is not None else labels
+    if cols is not None: plt.xticks(range(len(cols)), cols, rotation=90, fontsize=6)
+    if labels is not None: plt.yticks(range(len(labels)), labels, fontsize=6)
+    plt.grid(False)                                      # seaborn's grid draws through cell centres
     if title: plt.title(title)
     plt.colorbar(im, fraction=0.046, pad=0.04); plt.show()
+
+
+def submatrix(M, labels, rows='', cols=''):
+    """Label-substring row/col selection of a labelled matrix ('' = all).
+    Returns (M', row_labels, col_labels) — e.g. rows='attn', cols='mlp'."""
+    ri, ci = ([i for i, l in enumerate(labels) if k in l] for k in (rows, cols))
+    return np.asarray(M)[np.ix_(ri, ci)], [labels[i] for i in ri], [labels[i] for i in ci]
+
 
 def block_mean_cos(model, sources, step=None):           # block×block cosine-of-means matrix at a step
     V = np.array([get_y(s[0], model, (s[1][0],), 'acts_mean_vec', step) for s in sources])

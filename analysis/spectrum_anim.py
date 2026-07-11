@@ -25,7 +25,7 @@ from IPython.display import HTML
 from pathlib import Path
 
 _FFMPEG_MODULE = '2025 FFmpeg/7.1.1-GCCcore-14.2.0'
-_BK = {}  # get_series_y, get_ys, make_color_palettes, base_colors, model_name_options, YVAR_LABELS, XVAR_FNS
+_BK = {}  # get_series_y, get_ys, panel_palettes, smooth_spectrum, submatrix, block_mean_cos, model_name_options, YVAR_LABELS, XVAR_FNS
 
 
 def configure(**backend):
@@ -57,38 +57,15 @@ def _draw_progress(bar_ax, frac, label=None):
 
 # ---- kernel side: resolve panels to a backend-free, picklable spec ----------
 
-def _smooth(a, window, peak=0):
-    """window: smoothing width (odd; 0=off). Endpoints always pinned so edge peaks
-    survive. peak<=1 -> Savitzky-Golay (denoise around the mean). peak>1 -> bias toward
-    the window's upper values via a rolling quantile q=peak/(peak+1) (peak=3->0.75,
-    7->0.875, larger->max), then a savgol pass so it stays smooth (no staircase/plateaus).
-    Robust on the wide-dynamic-range spectra: no powers/underflow."""
-    if not window or window < 3 or a.size < 3:
-        return a
-    from scipy.signal import savgol_filter
-    w = int(window) | 1                          # force odd
-    w = min(w, a.size if a.size % 2 else a.size - 1)
-    if w < 3:
-        return a
-    po = min(3, w - 1)
-    if peak and peak > 1:
-        from numpy.lib.stride_tricks import sliding_window_view
-        q = peak / (peak + 1.0)
-        win = sliding_window_view(np.pad(a, w // 2, mode='edge'), w)   # (n, w)
-        sm = savgol_filter(np.quantile(win, q, axis=1), w, po, mode='interp')
-    else:
-        sm = savgol_filter(a, w, po, mode='interp')
-    sm = np.where(np.isfinite(sm) & (sm > 0), sm, a)             # positivity + finite (log)
-    sm[0], sm[-1] = a[0], a[-1]                  # pin edges -> preserve edge peaks
-    return sm
-
-
 def _panel_palettes(data_sources, opts):
-    cpal = opts.get('color_palette', 'hue_shift')
-    ckw = opts.get('color_kwargs', {})
-    if cpal == 'hue_shift':
-        ckw = dict(shift=0.80 / len(data_sources), light_base=0.85) | ckw
-    return _bk('make_color_palettes')(_bk('base_colors'), len(data_sources), method=cpal, **ckw)
+    return _bk('panel_palettes')(len(data_sources), opts.get('color_palette', 'hue_shift'),
+                                 opts.get('color_kwargs', {}))
+
+
+def _ylim(lo, hi, ylog):
+    if not np.isfinite(lo):
+        return None
+    return (lo * 0.8, hi * 1.25) if ylog else (lo - 0.05 * (hi - lo), hi + 0.05 * (hi - lo))
 
 
 def _strip_panel(yvar, data_sources, model_names, opts, palettes):
@@ -104,28 +81,16 @@ def _strip_panel(yvar, data_sources, model_names, opts, palettes):
         series.append((ys, palettes[didx][_bk('model_name_options').index(mn)]))
         pos = [y for y in ys if y > 0] if ylog else ys
         if pos: lo, hi = min(lo, min(pos)), max(hi, max(pos))
-    ylim = None
-    if np.isfinite(lo):
-        ylim = (lo * 0.8, hi * 1.25) if ylog else (lo - 0.05 * (hi - lo), hi + 0.05 * (hi - lo))
-    return dict(kind='strip', ylog=ylog, ylim=ylim, series=series,
+    return dict(kind='strip', ylog=ylog, ylim=_ylim(lo, hi, ylog), series=series,
                 label=opts.get('title') or _bk('YVAR_LABELS').get(name, name))
 
 
 def _heatmap_panel(data_sources, model_names, opts):
-    """Block×block cosine-of-means matrix per checkpoint (mirrors block_mean_cos).
-    dynamic=True -> symmetric range from off-diagonal max; per_frame picks whether
-    that range is recomputed each frame (full contrast) or pinned once (stable colorbar)."""
-    mn = model_names[0]
+    """Block×block cosine-of-means matrix per checkpoint (block_mean_cos per step)."""
+    mn, ds0 = model_names[0], data_sources[0]
     labels = [s[2] if len(s) > 2 else '' for s in data_sources]
-    vecs, steps = [], None
-    for dsrc in data_sources:
-        ys, steps = _bk('get_ys')(dsrc[0], mn, (dsrc[1][0],), 'acts_mean_vec')
-        vecs.append(ys)
-    frames = []
-    for si in range(len(steps)):
-        V = np.array([np.asarray(vecs[k][si], dtype=float) for k in range(len(vecs))])
-        V /= np.linalg.norm(V, axis=1, keepdims=True)
-        frames.append(V @ V.T)
+    steps = _bk('get_ys')(ds0[0], mn, (ds0[1][0],), 'acts_mean_vec')[1]
+    frames = [np.asarray(_bk('block_mean_cos')(mn, data_sources, s), dtype=float) for s in steps]
     return _matrix_spec(frames, labels, opts), steps
 
 
@@ -139,19 +104,28 @@ def _matrix_panel(yvar, data_sources, model_names, opts):
 
 def _matrix_spec(frames, labels, opts):
     """dynamic=True -> symmetric range from the off-diagonal max; per_frame picks whether
-    that range is recomputed each frame (full contrast) or pinned once (stable colorbar)."""
+    that range is recomputed each frame (full contrast) or pinned once (stable colorbar).
+    pair=(rows, cols) label-substring-selects a submatrix (e.g. ('attn', 'mlp')); the
+    diagonal is only hidden (self-pairs) when rows == cols."""
+    rows, cols = opts.get('pair') or ('', '')
+    labels2 = labels
+    if labels and (rows or cols):
+        sub = [_bk('submatrix')(f, labels, rows, cols) for f in frames]
+        frames, labels, labels2 = [s[0] for s in sub], sub[0][1], sub[0][2]
+    hide_diag = opts.get('hide_diag', rows == cols)
     dynamic, per_frame = opts.get('dynamic', True), opts.get('per_frame', False)
     vmin, vmax = opts.get('vmin', -1), opts.get('vmax', 1)
     if dynamic and not per_frame:                       # pin one global symmetric range
-        off = np.concatenate([f[~np.eye(len(f), dtype=bool)] for f in frames])
+        off = np.concatenate([f[~np.eye(len(f), dtype=bool)] if hide_diag else f.ravel()
+                              for f in frames])
         v = np.nanmax(np.abs(off)); vmin, vmax = -v, v
-    return dict(kind='heatmap', frames=frames, labels=labels,
-                hide_diag=opts.get('hide_diag', True), per_frame=dynamic and per_frame,
+    return dict(kind='heatmap', frames=frames, labels=labels, labels2=labels2,
+                hide_diag=hide_diag, per_frame=dynamic and per_frame,
                 cmap=opts.get('cmap', 'coolwarm'), vmin=vmin, vmax=vmax,
                 title=opts.get('title'))
 
 
-def _materialize(panels, ncols, fps, model, xvar, prog_bar, suptitle, figsize, smooth=0, peak=0):
+def _materialize(panels, ncols, fps, model, xvar, prog_bar, suptitle, figsize, smooth=0, peak=3):
     spec_panels, steps = [], None
     for yvar, data_sources, model_names, opts in panels:
         if opts.get('kind') in ('heatmap', 'matrix'):
@@ -188,17 +162,15 @@ def _materialize(panels, ncols, fps, model, xvar, prog_bar, suptitle, figsize, s
                     if arr is None: continue
                     a = np.asarray(arr, dtype=float)
                     if mode == 'line':
-                        a = _smooth(a, smooth, peak)
+                        a = _bk('smooth_spectrum')(a, smooth, peak)
                     series.append((a, palettes[didx][_bk('model_name_options').index(mn)], lbl))
                     p = a[a > 0] if ylog else a
                     if p.size: lo, hi = min(lo, p.min()), max(hi, p.max())
             frames.append(series)
-        ylim = None
-        if np.isfinite(lo):
-            ylim = (lo * 0.8, hi * 1.25) if ylog else (lo - 0.05 * (hi - lo), hi + 0.05 * (hi - lo))
 
         spec_panels.append(dict(
-            kind='spectrum', title=title, mode=mode, xlog=xlog, ylog=ylog, ylim=ylim, frames=frames,
+            kind='spectrum', title=title, mode=mode, xlog=xlog, ylog=ylog,
+            ylim=_ylim(lo, hi, ylog), frames=frames,
             xlabel=r'$\nu$' if mode in ('hist', 'histogram') else 'Component index',
             ylabel=_bk('YVAR_LABELS').get(yvarname, yvarname)))
 
@@ -222,23 +194,29 @@ def _layout(kinds, ncols, prog_bar, figsize):
                 groups.append(('band', list(range(i, j)))); i = j
             else:
                 groups.append(('spec', i)); i += 1
-        wr = [1.0 if g[0] == 'spec' else 0.07 * len(g[1]) for g in groups]
-        figw = 7 * sum(g[0] == 'spec' for g in groups) + 1.4 * sum(g[0] == 'band' for g in groups) + 1.2
+        # Per-boundary gaps via spacer columns (wspace can't vary per boundary): every panel
+        # carries y-labels on its LEFT, so a gap needs width iff its RIGHT neighbour is a
+        # labelled spec panel; a bare spec right edge -> band needs almost none. Strips' own
+        # label room comes from the band's inner wspace.
+        wr = [1.0 if g[0] == 'spec' else 0.085 * len(g[1]) for g in groups]
+        gaps = [0.19 if groups[i + 1][0] == 'spec' else 0.06 for i in range(len(groups) - 1)]
+        cols = wr[:1] + [x for gap, w in zip(gaps, wr[1:]) for x in (gap, w)]
+        figw = 7 * sum(g[0] == 'spec' for g in groups) + 1.7 * sum(g[0] == 'band' for g in groups) + 1.2
         fig = plt.figure(figsize=figsize or (figw, 5.4))
         if bar:
             hr = [1, 28] if prog_bar == 'top' else [28, 1]
-            gso = fig.add_gridspec(2, len(groups), width_ratios=wr, height_ratios=hr)
+            gso = fig.add_gridspec(2, len(cols), width_ratios=cols, height_ratios=hr, wspace=0)
             prow = 1 if prog_bar == 'top' else 0
             bar_ax = fig.add_subplot(gso[0 if prog_bar == 'top' else 1, :])
         else:
-            gso = fig.add_gridspec(1, len(groups), width_ratios=wr)
+            gso = fig.add_gridspec(1, len(cols), width_ratios=cols, wspace=0)
             prow, bar_ax = 0, None
         axes = [None] * n
         for gc, g in enumerate(groups):
             if g[0] == 'spec':
-                axes[g[1]] = fig.add_subplot(gso[prow, gc])
+                axes[g[1]] = fig.add_subplot(gso[prow, 2 * gc])
             else:
-                sub = gso[prow, gc].subgridspec(1, len(g[1]), wspace=0.5)
+                sub = gso[prow, 2 * gc].subgridspec(1, len(g[1]), wspace=0.9)
                 for k, idx in enumerate(g[1]):
                     axes[idx] = fig.add_subplot(sub[0, k])
         return fig, axes, bar_ax
@@ -292,15 +270,18 @@ def _draw_strip(ax, p, i):
 
 def _draw_heatmap(ax, p, i):
     M = np.array(p['frames'][i], dtype=float)
-    if p['hide_diag']: np.fill_diagonal(M, np.nan)
+    if p['hide_diag']: np.fill_diagonal(M, np.nan)     # self-pairs -> white
     vmin, vmax = p['vmin'], p['vmax']
     if p['per_frame']:                                   # recompute symmetric range this frame
-        v = np.nanmax(np.abs(M[~np.eye(len(M), dtype=bool)])); vmin, vmax = -v, v
-    cmap = plt.get_cmap(p['cmap']).copy(); cmap.set_bad('white')   # NaN diagonal -> white
+        v = np.nanmax(np.abs(M)); vmin, vmax = -v, v     # NaN diagonal already excluded
+    cmap = plt.get_cmap(p['cmap']).copy(); cmap.set_bad('white')
     ax.imshow(M, cmap=cmap, vmin=vmin, vmax=vmax)
+    ax.grid(False)              # seaborn's grid (kernel-side) draws through cell centres
     ax.set_anchor('C')          # square aspect shrinks the box -> centre it (else pins right)
+    cols = p.get('labels2') or p['labels']
+    if cols:
+        ax.set_xticks(range(len(cols))); ax.set_xticklabels(cols, rotation=90, fontsize=6)
     if p['labels']:
-        ax.set_xticks(range(len(p['labels']))); ax.set_xticklabels(p['labels'], rotation=90, fontsize=6)
         ax.set_yticks(range(len(p['labels']))); ax.set_yticklabels(p['labels'], fontsize=6)
     if p['title'] is not None: ax.set_title(p['title'])
 
@@ -364,11 +345,12 @@ def _save_mp4_via_sbatch(spec, out):
 
 def animate_spectra(panels, ncols=2, fps=4, figsize=None, model=None,
                     xvar='tokens', prog_bar='bottom', suptitle=None, save=None,
-                    smooth=0, peak=0, **common):
+                    smooth=0, peak=3, **common):
     """One animation, several spectrum subplots synced across checkpoints.
     panels: list of (yvar, data_sources, model_names[, opts_dict]). `common` kwargs
     (xlog, ylog, title, ...) apply to every panel; per-panel opts override.
-    smooth: window (odd; 0=off) — denoises line spectra, keeps peaks/edges.
+    smooth: window (odd; 0=off) — denoises line spectra, keeps peaks/edges (shared
+            smooth_spectrum from experiments_lib, injected via configure()).
     peak:   >1 biases the smoothing toward the window max (upper envelope).
     save:   optional path to ALSO write the animation to — a pure side effect; the inline
             render returned for the notebook is identical whether or not save is given.
