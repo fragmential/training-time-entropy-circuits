@@ -418,3 +418,28 @@ for model in ('pythia-1b-deduped', 'OLMo-2-0425-1B'):
     grid_start(ncols=1, title=f'Checkpoint-to-checkpoint drift — {get_model_label(model)}')
     plot_group('cka_drift', drift_srcs, [model], color_palette='gradient')
     grid_show()
+
+# %% [markdown]
+# ### Compression valleys: the depth-axis view (one object, three shadows)
+# Stream RankMe per block at the final checkpoint. Pythia (and nanochat — no write-norm)
+# crash to rank ~2 right after blk3's write enters and recover via the late-block
+# cancellation; OLMo-2 (write-norm) has no valley at all. The massive activation (feature
+# axis), the compression valley (depth axis, cf. arXiv:2510.06477), and the compression
+# phase (training axis) are the same rogue direction seen three ways.
+
+# %%
+VALLEY = {('block_representations_samples', 'pythia-1b-deduped'): 16,
+          ('block_representations_samples', 'pythia-6.9b-deduped'): 32,
+          ('block_representations_samples', 'OLMo-2-0425-1B'): 16,
+          ('block_representations_samples', 'OLMo-2-1124-7B'): 32,
+          ('nanochat_samples', 'nanochat-d12'): 12}
+plt.figure(figsize=(9, 5))
+for (cfg, model), L in VALLEY.items():
+    res, steps = load_results(cfg, model)
+    leaves = [f'blk{k}.attn.in' for k in range(L)] + ['before_final_norm']
+    ys = [res[steps[-1]].get(lf, {}).get('acts_centered', {}).get('rankme', np.nan) for lf in leaves]
+    plt.semilogy(np.linspace(0, 1, len(ys)), ys, marker='o', lw=2,
+                 ls='-' if 'OLMo' in model else '--', label=get_model_label(model))
+plt.xlabel('relative depth'); plt.ylabel('stream RankMe (centered, log)')
+plt.title('Compression valleys at the final checkpoint — dashed = no write-norm')
+plt.legend(fontsize=8); plt.show()

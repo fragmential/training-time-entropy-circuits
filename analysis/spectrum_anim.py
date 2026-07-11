@@ -140,6 +140,21 @@ def _materialize(panels, ncols, fps, model, xvar, prog_bar, suptitle, figsize, s
         if opts.get('kind') == 'strip':
             spec_panels.append(_strip_panel(yvar, data_sources, model_names, opts, palettes))
             continue
+        if opts.get('kind') == 'profile':
+            # depth profile per checkpoint: one scalar yvar per data_source (= per layer),
+            # assembled into a per-frame line over source order; reuses the spectrum drawer.
+            mn = model_names[0]
+            cols = [_bk('get_ys')(d[0], mn, d[1], d[3] if len(d) > 3 else yvar)[0] for d in data_sources]
+            frames = [[(np.array([c[i] for c in cols], dtype=float),
+                        palettes[0][_bk('model_name_options').index(mn)], None)] for i in range(len(steps))]
+            vals = np.array([[c[i] for c in cols] for i in range(len(steps))], dtype=float)
+            ylog = opts.get('ylog', True)
+            pos = vals[vals > 0] if ylog else vals
+            spec_panels.append(dict(kind='spectrum', title=opts.get('title'), mode='line',
+                                    xlog=False, ylog=ylog, ylim=_ylim(pos.min(), pos.max(), ylog),
+                                    frames=frames, xlabel=opts.get('xlabel', 'block'),
+                                    ylabel=_bk('YVAR_LABELS').get(yvar, yvar)))
+            continue
 
         xlog, ylog = opts.get('xlog', True), opts.get('ylog', True)
         mode, title = opts.get('mode', 'default'), opts.get('title')

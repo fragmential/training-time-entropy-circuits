@@ -170,6 +170,68 @@ MLP** (nonlinear gating / processed features), not linearly echoed from the newl
 Literal layer inversion is ill-posed (down-projection nullspace + nonlinearity); this
 statistical preimage is the sound version of "push the direction back and unembed it".
 
+### Rogue-direction interventions: reconciliation with the massive-activations literature
+
+Three inference-time interventions on the direction (pythia-1b, all post-blk3 streams, 65k
+packed tokens), next-token CE deltas:
+
+| intervention | overall | predicting `\n` | right after `\n` | elsewhere |
+|---|---|---|---|---|
+| zero the component | +1.04 | +0.53 | +0.98 | +1.06 |
+| global mean substitution | +0.74 | +0.31 | +0.64 | +0.76 |
+| **token-conditional** mean substitution (class pattern kept) | +0.43 | **+0.09** | **+1.15** | +0.41 |
+
+Reconciliation with Sun et al (2402.17762: zeroing catastrophic, mean-substitution harmless):
+our global mean-substitution "divergence" was a **protocol artifact** — a global mean over all
+tokens ≈ zeroing for the rare spike tokens, i.e. closer to their catastrophic condition than
+their benign one (their means are computed where the activations occur). Under the aligned
+token-conditional protocol, their bias account holds exactly where it should: keeping the
+class pattern makes newline-position prediction nearly free (+0.09).
+
+**The new part their account misses:** "right after a newline" gets WORSE under
+token-conditional substitution (+1.15, worse than zeroing's +0.98) — the within-class
+variance of the newline spike is *read by the next position*. The direction is not a constant
+input-agnostic flag: its per-occurrence modulation carries information the model consumes
+when predicting what follows a boundary. Also consistent with "A Refined Analysis of Massive
+Activations" (2503.22329: suppression is architecture-dependent, not universally
+catastrophic — matching our family split), and convergent with "Attention Sinks and
+Compression Valleys are Two Sides of the Same Coin" (2510.06477, ICLR'26), which proves
+massive activation ⇒ dominant singular value ⇒ entropy compression on the DEPTH axis — our
+training-time account (onset at the RankMe peak, ledger cost, norm-placement causality,
+newline attribution in packed streams) is the temporal counterpart of their depth-wise
+result and should be cited as convergent.
+
+### Compression valleys: the depth-axis shadow of the rogue write (OLMo-2 has none)
+
+Depth profile of stream RankMe (centered, attn.in per block + before_final_norm, final ckpt,
+packed): **pythia crashes from ~850 to ≈2 at blk4** — immediately after blk3's write enters —
+stays 2–13 across the mid-stack, and recovers late (102 → 194): an extreme compression valley
+(2510.06477's phenomenon) whose entry is the rogue write and whose recovery is the late-block
+cancellation (their "Refine"). Same canyon at 6.9b (crash at blk4 → recover to 260) and
+nanochat-d12 (137 → 4 → 283) — H1.4 on the depth axis. **OLMo-2 has essentially no valley**
+(1B: 1345 → ~812 mid → 975 → 447 at output; 7B similarly smooth) — no rogue, no dominant
+direction, no canyon. Novel datum: 2510.06477 did not test OLMo-2; its valley-freeness is
+predicted by the write-norm story. One object, three shadows: the massive activation
+(feature axis), the compression valley (depth axis), the compression phase (training axis).
+On the carrier token: 2510.06477's valleys are typically BOS-driven (BOS norm spiking ~10⁴×
+in layers 0–5 — our blk3 onset sits in that depth range), but their theorem is
+token-identity-agnostic, and Sun et al already list delimiters ("." and "\n") among massive-
+activation carriers alongside first tokens (model-dependent; cf. secondary-sinks work,
+2512.22213). Our packed streams contain NO BOS (GPT-NeoX prepends none; every position is
+mid-text), so the sink/bias role necessarily lands on the delimiter class — the newline
+direction is the BOS phenomenon's packed-stream form. Optional future check: prepend a
+first-token/BOS and watch the spike partially migrate to position 0.
+
+**Valley emergence timing:** valleys are not present early — they EMERGE at/just after the
+spectrum-entropy peak, synchronized with the rogue write's rank collapse, then deepen
+monotonically for the rest of training. pythia-1b: no valley at step 1000 (mid/early stream
+ratio 1.26), forming by 5000 (0.11; final-RankMe peak 4000), 0.002 by the end. pythia-6.9b:
+forms across 5k–14k around its ~13k peak. nanochat: peak ~256, valley crossing ratio 0.5
+around step ~1300+, monotone after. OLMo-1B: no valley at ANY checkpoint (ratio 0.58–2.1
+throughout; mid-stream RankMe even exceeds the early stream for much of training). Valley
+emergence and the compression phase are the same temporal event. Animated:
+experiments_anim.ipynb "Layerwise stream RankMe" (all 7 models incl. 160m/410m/nanochat).
+
 ## Refinement via windowed alphaReQ: a compression *gradient*, not a hard head/bulk split
 
 Windowed alpha (Stringer-weighted log-log slope over eigenvalue ranks $[k_0, k_1)$; the stored

@@ -315,6 +315,7 @@ base_colors = [
     'brown', 'brown',
     'blue',
     'red',
+    'darkorange',   # nanochat-d12
 ]
 
 model_name_options = [
@@ -330,6 +331,7 @@ model_name_options = [
     'pythia-12b', 'pythia-12b-deduped',
     'OLMo-2-0425-1B',
     'OLMo-2-1124-7B',
+    'nanochat-d12',
 ]
 
 # def get_ls(model_name: str, xvar=None):

@@ -62,6 +62,13 @@ architecture story now stands on: 2+2 observation → data ruled out (swap) → 
 nanochat (no raw samples yet); endpoint magnitudes need the token-matched pythia-410m
 comparison; three families is correlation — the causal weight rests on toy + prediction.
 
+**Depth-axis unification (late addition):** the rogue write's depth shadow is an extreme
+compression valley (stream RankMe ≈2 across pythia's mid-stack, entered exactly at blk4,
+recovered by the late-block cancellation; same in nanochat) while **OLMo-2 has no valley at
+all** — connecting our training-time account to the attention-sinks/compression-valleys
+literature (2510.06477, which did not test OLMo-2) and extending the write-norm prediction to
+a third axis. Details: dig_findings "Compression valleys".
+
 RQ2 (does maths have more shared geometry than memorised data, beyond the general
 population's?) ran to completion: **maths text does carry genuine shared structure beyond the
 general population** (2.3–2.4× the split-half null's excess, both families) though
@@ -79,7 +86,7 @@ quotes are the most structured population measured); and H2.1's coupling predict
 | H1.2 late-layer locus | **holds for OLMo, refuted for Pythia** (blk3 early rogue + late cancellation) |
 | H1.3 toy-like last write | **holds for Pythia** (head-mass 0.26→0.92), weaker for OLMo (0.63, falling) |
 | H1.4 write-norm selects the concentration mode | **CONFIRMED, all 3 deciders**: toy write-norm suppresses the rogue (6/6, both wirings); dataset swap rules the data out; and the nanochat PRE-REGISTERED prediction hit — nanochat-d12 (pre-norm, sequential, no write-norm) shows the full Pythia signature |
-| H1.5 rogue direction functionally inert at output | **REFUTED** — zero-ablation costs +1.04 nats, diffuse (least at newline positions). NOTE: the zeroing result largely replicates Sun et al 2402.17762 (zeroing massive activations explodes perplexity; mean-substitution nearly harmless); and our mean-substitution variant STILL costs +0.74 nats where theirs was nearly harmless — the direction's VARIANCE is functional, not just its offset (protocol caveat: direction-level across post-blk3 layers vs their scalar entries at first appearance) |
+| H1.5 rogue direction functionally inert at output | **REFUTED**, and reconciled with Sun et al via the intervention triptych (zero +1.04 / global-mean +0.74 / token-conditional +0.43): the apparent divergence was a protocol artifact (global mean ≈ zeroing for spike tokens); with the aligned token-conditional protocol their bias account holds at newline positions (+0.09) — but the within-class spike variance is READ BY THE NEXT POSITION (+1.15 after newlines, worse than zeroing), a functional role their constant-bias account misses. Details: dig_findings 'interventions' section |
 | H2.1 grads↔acts coupling: math > memorised | **refuted in all three variants** — incl. the clean subspace test: excess-acts and excess-grads subspaces overlap at ≈ chance for every population (max ~2× null, OLMo math-web) |
 | H2.2 math's excess structure in G's tail | **half-supported**: math has real excess (2.3–2.4× null, both families) but it lives mid-spectrum, not the tail; mem populations split (strings ≈ nothing, quotes = largest excess of all) |
 | H3.1 toy replication | **confirmed** (+ seed-dependence caveat the paper doesn't state) |
