@@ -1,10 +1,14 @@
 """Model-specific logic for checkpoint discovery, model loading, tokenizer setup, and HF cache management."""
+from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Callable, Protocol
+from typing import TYPE_CHECKING, Callable, Protocol
 import numpy as np
+
+if TYPE_CHECKING:
+    import torch
 
 # Repo root, so revisions_file paths resolve regardless of the caller's cwd.
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -314,16 +318,19 @@ def _blk_idx(prefix):
     return m.group(1) if m else None
 
 
+Recipes = dict[str, list[tuple[tuple[str, ...], Callable]]]   # component -> [(source components, fn)]
+
+
 class WeightProvider(Protocol):
     """Minimal surface a Transform derives through: weights by sd-prefix, the final norm."""
-    def weight(self, sd_prefix: str) -> "tuple[torch.Tensor, torch.Tensor | None] | None": ...
-    def norm(self) -> "Callable[[torch.Tensor], torch.Tensor] | None": ...
+    def weight(self, sd_prefix: str) -> tuple[torch.Tensor, torch.Tensor | None] | None: ...
+    def norm(self) -> Callable[[torch.Tensor], torch.Tensor] | None: ...
 
 
-def _cov_proj(W, C):
+def _cov_proj(W: torch.Tensor, C: torch.Tensor) -> torch.Tensor:
     return W @ C @ W.T
 
-def _cov_proj_bias(W, b, C, mu):
+def _cov_proj_bias(W: torch.Tensor, b: torch.Tensor, C: torch.Tensor, mu: torch.Tensor) -> torch.Tensor:
     Wm = W @ mu
     return W @ C @ W.T + Wm[:, None] * b[None, :] + b[:, None] * Wm[None, :] + b[:, None] * b[None, :]
 
@@ -333,13 +340,13 @@ class Linear:
     per output component, its source components + the function that builds it."""
     kind = "linear"
 
-    def __init__(self, sd_prefix, head=None, bias=False):
+    def __init__(self, sd_prefix: str, head: int | None = None, bias: bool = False) -> None:
         self.sd_prefix, self.head, self.bias = sd_prefix, head, bias
 
-    def ingredients(self, wp: WeightProvider):
-        return wp.weight(self.sd_prefix)                          # (W, b) | None
+    def ingredients(self, wp: WeightProvider) -> tuple[torch.Tensor, torch.Tensor | None] | None:
+        return wp.weight(self.sd_prefix)
 
-    def recipes(self):
+    def recipes(self) -> Recipes:
         h = self.head
         sl = (lambda W, d: W[:, h * d:(h + 1) * d]) if h is not None else (lambda W, d: W)
         if self.bias:
@@ -356,7 +363,7 @@ class Linear:
             "n":       [(("n",),       lambda W, b, n:  n)],
         }
 
-    def formats(self):  # legacy adapter for the old accessor; remove at the accessor swap
+    def formats(self) -> dict[str, tuple[str, ...]]:  # legacy adapter for the old accessor; remove at swap
         return {c: r[0][0] for c, r in self.recipes().items()}
 
 
@@ -364,19 +371,22 @@ class Norm:
     """Nonlinear norm module: produces only `samples` (cov/eigvals reached via conversion)."""
     kind = "norm"
 
-    def __init__(self, sd_prefix):
+    def __init__(self, sd_prefix: str) -> None:
         self.sd_prefix = sd_prefix
 
-    def ingredients(self, wp: WeightProvider):
+    def ingredients(self, wp: WeightProvider) -> tuple[Callable] | None:
         f = wp.norm()
         return (f,) if f is not None else None
 
-    def recipes(self):
+    def recipes(self) -> Recipes:
         return {"samples": [(("samples",), lambda f, X: f(X.float()))],
                 "n":       [(("n",),       lambda f, n: n)]}
 
-    def formats(self):  # legacy adapter; remove at swap
+    def formats(self) -> dict[str, tuple[str, ...]]:  # legacy adapter; remove at swap
         return {c: r[0][0] for c, r in self.recipes().items()}
+
+
+Transform = Linear | Norm
 
 
 # Each rule: (leaf_regex, build_source_leaf(match)->str, src_quantity, build_Transform(config,match))
@@ -397,7 +407,7 @@ _DERIVATIONS = [
 ]
 
 
-def derivation(config, leaf, quantity):
+def derivation(config: ModelConfig, leaf: str, quantity: str) -> tuple[str, str, Transform] | None:
     """(src_leaf, src_quantity, Transform) for a derivable (leaf, quantity), else None."""
     for pat, src_of, src_q, make_T in _DERIVATIONS:
         if quantity == src_q and (m := pat.match(leaf)):
