@@ -18,20 +18,33 @@ $f_{k+1} = f_k + g_k(f_k)$ (residual; $g_k$ linear, or one hidden tanh layer for
 
 | variant | classes (counts) | d | depth | loss | steps |
 |---|---|---|---|---|---|
-| single | (2,2,1,1) — paper's skew | 2 | — | CE | 200 |
+| single | (2,2,1,1) — paper's skew, clustered init | 2 | — | CE | 300 |
 | uniform | (2,2,2,2) | 2 | — | CE | 1000 |
 | nobottleneck | (2,2,1,1) | 3 | — | CE | 1000 |
 | mse_skew / mse_uniform | skew / uniform | 2 | — | MSE | 1000 |
 | multi_residual (+nonlinear) | 32 classes, counts 128↘2 (Zipf-ish) | 16 | 6 | CE | 30k |
 | multi_plain | same | 16 | 6 (no residual) | CE | 100k |
 
-## H3.1 — Replication: CONFIRMED
+## H3.1 — Replication: CONFIRMED (with the paper's constructed init)
 
-`single` reproduces the three phases in RankMe(features), read out of the standard results
-files: **warmup** 1.90 → 1.670 (steps 0–18), **entropy-seeking** 1.670 → 1.998 (18–57),
-**compression** 1.998 → 1.978 (57–200) with $\sigma_1$ pulling ahead of $\sigma_2$ — matching
-Fig 4 B–D qualitatively (frequent classes separate first in both $W$ and feature space; rare
-classes separate during compression, reusing dominant directions).
+`single` (clustered init, rare pair at the exact origin, lr 0.25, 300 steps — see below)
+reproduces all four Fig-4 panels: **warmup** RankMe 1.933 → 1.906 (first ~15 steps),
+**entropy-seeking** → 1.99964 (peak at step 204), **compression** → 1.99313 at step 300
+(decline 0.0065) with $\lambda_1$ accelerating past $\lambda_2$ (12.8 vs 10.9 at 300,
+dup-corrected) — and, the part iid init could never give, the paper's rare-class geometry:
+the two singleton classes travel one **exact shared path** and fork late (fork onset = the
+RankMe peak, step 204, matching the paper's dashes-at-the-fork), ending ~85° apart on the
+two reused frequent-class axes (w₂ → −x, w₃ → −y), with the fork driving the RankMe decline.
+
+The key discovery: the paper's Fig 4 initializes from a *constructed* geometry, visible in
+its gray t=0 markers (frequent-class samples clustered per class, rare pair **coincident**
+with zero weights) — not iid. Reproducing it (`toy/train.py::_clustered_init`,
+`clustered=True`) is what makes the shared-path-then-fork exact (GD preserves the rare-pair
+swap symmetry; the `delta`-jitter sets the fork time ≈ log(1/δ)/0.031 steps). The compression
+decline requires the fork to land after the entropy-phase spectrum saturates but inside the
+window — a **fourth necessary condition** beyond the paper's stated skew + bottleneck + CE.
+Full evidence, mechanism, and the decline-onset-lag analysis:
+[toy_fig4_addendum.md](toy_fig4_addendum.md).
 
 **All four controls removed compression**, as the paper claims:
 
@@ -42,11 +55,17 @@ classes separate during compression, reusing dominant directions).
 | mse_skew | monotone rise → 1.990 | none (0.0000) |
 | mse_uniform | rise → 1.979, flat | none (0.002 saturation wobble) |
 
-**Honesty caveat the reproduction surfaced:** the toy's compression is a *transient during
-rare-class separation* and is seed-dependent (~25% of seeds show it clearly); `single` uses
-seed 3 with the horizon cut at step 200 — and the paper's fixed 300-step window benefits from
-the same trick. Worth remembering when citing the toy as "explaining" the phases: in the toy,
-compression is neither inevitable nor an endpoint.
+**Honesty caveat, revised:** an earlier version of this section claimed the toy's compression
+was seed-dependent (~25% of seeds) and insinuated the paper's 300-step window was doing the
+same cherry-picking. That is **retracted**: under the paper's own (constructed) init the
+three phases plus shared-path-fork are robust — 4/5 jitter seeds at δ=1e-3 — and the window
+isn't a trick but part of the mechanism. What *does* stand, sharpened by the addendum's
+experiments: the toy's compression is a **transient** (RankMe recovers to 1.9993 by step
+3000), it is the spectral signature of late rare-class separation, and it needs the
+fork-after-saturation timing that the constructed init provides — iid init cannot produce it
+at any scale. Worth remembering when citing the toy as "explaining" the phases: in the toy,
+compression is neither inevitable nor an endpoint, and it rests on an initialization
+condition the paper never states.
 
 ## H3.2 — Residual toy's ledger signature: PARTIAL, Pythia-flavored
 
@@ -82,9 +101,15 @@ variants: the nonlinear residual toy is the legitimate H3.2 test bed.
    noise floor (3e-3 relative — spectrally negligible, above fp32 eigh error), and $N$ is
    lifted by exact sample duplication (`dup`: identical init ⇒ identical dynamics, RankMe
    -invariant; verified bit-identical to dup=1).
-2. **Unstated hyperparameters**: the paper gives no init/lr; init std 0.3, lr 0.3 chosen to
-   reproduce Fig 4's shape. Uniform control uses 2/class as in the paper.
-3. **Seed selection** for `single` (see the caveat under H3.1).
+2. **Unstated hyperparameters**: the paper gives no init/lr anywhere (tex + supplementary
+   checked exhaustively). For `single`, the init geometry was read off Fig 4's gray t=0
+   markers (`_clustered_init`) and lr 0.25 calibrated to the paper's eigenvalue scale over
+   300 steps ([toy_fig4_addendum.md](toy_fig4_addendum.md)); the remaining variants keep
+   iid init std 0.3, lr 0.3. Uniform control uses 2/class as in the paper.
+3. **Rare-pair offset**: `_clustered_init` places the coincident rare pair at the exact
+   origin, which makes the decline onset coincide with the fork (the paper's zero dash-lag)
+   and deepens the decline; an off-origin start (e.g. the (−0.25, 0) first read of their
+   gray marker) opens a ~24-step lag instead (addendum, "dash lag").
 
 ## Files
 

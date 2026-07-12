@@ -89,7 +89,7 @@ quotes are the most structured population measured); and H2.1's coupling predict
 | H1.5 rogue direction functionally inert at output | **REFUTED**, and reconciled with Sun et al via the intervention triptych (zero +1.04 / global-mean +0.74 / token-conditional +0.43): the apparent divergence was a protocol artifact (global mean ≈ zeroing for spike tokens); with the aligned token-conditional protocol their bias account holds at newline positions (+0.09) — but the within-class spike variance is READ BY THE NEXT POSITION (+1.15 after newlines, worse than zeroing), a functional role their constant-bias account misses. Details: dig_findings 'interventions' section |
 | H2.1 grads↔acts coupling: math > memorised | **refuted in all three variants** — incl. the clean subspace test: excess-acts and excess-grads subspaces overlap at ≈ chance for every population (max ~2× null, OLMo math-web) |
 | H2.2 math's excess structure in G's tail | **half-supported**: math has real excess (2.3–2.4× null, both families) but it lives mid-spectrum, not the tail; mem populations split (strings ≈ nothing, quotes = largest excess of all) |
-| H3.1 toy replication | **confirmed** (+ seed-dependence caveat the paper doesn't state) |
+| H3.1 toy replication | **confirmed**, incl. panels B/C — requires the paper's CONSTRUCTED init (an unstated fourth condition beyond skew+bottleneck+CE; read off their figure's t=0 markers). Robust 4/5 jitter seeds under that init; the earlier seed-dependence caveat was an artifact of our iid init and is retracted. Details: toy_fig4_addendum.md |
 | H3.2 residual toy shares transformer's ledger signature | **partial**: Pythia's signature, yes (6/6 no-norm seeds); OLMo's, no |
 | H3.3 representativeness guard | worked as designed (flagged the linear variant, passed the nonlinear + all grid cells) |
 
@@ -200,14 +200,27 @@ a head event superimposed on continuing expansion, which their sequential-phases
 not contain; (ii) composition: which writes, which ledger term, and that two architectures
 produce the same curve by different mechanisms; (iii) the mechanism identity in Pythia
 (newline direction + late cancellation) and the resulting metric caveat — an all-token RankMe on a
-Pythia-lineage model is substantially measuring delimiter-token direction energy; (iv) the toy's
-seed-dependence caveat (§3).
+Pythia-lineage model is substantially measuring delimiter-token direction energy; (iv) the
+toy's unstated fourth condition — their Fig 4 needs its constructed init, and its compression
+is a covariance-collapse transient whose visibility depends on split timing (§3, addendum).
 
 ## 3. RQ3: the toy bridge (deprioritised arc, now closed)
 
-Full detail: toy_model_report.md. (a) **H3.1 confirmed**: paper's phases + all four negative
-controls reproduce through the unmodified pipeline; caveat — toy compression is a
-seed-dependent transient (~25% of seeds), which the paper's fixed window doesn't disclose.
+Full detail: toy_model_report.md + toy_fig4_addendum.md. (a) **H3.1 confirmed**: paper's
+phases + all four negative controls + the Fig-4 B/C trajectory geometry (rare-class shared
+path → late split) reproduce through the unmodified pipeline — but only under the paper's
+CONSTRUCTED init (clustered frequent classes, coincident rare pair + tiny jitter δ; read off
+their figure's gray t=0 markers), an unstated fourth condition: iid init at any scale either
+breaks the rare-pair symmetry at order 1 (old spec — the "decline" it showed was a
+stunted-class artifact, and our earlier "~25% of seeds" caveat is retracted accordingly) or
+welds the split time to spectrum saturation so the decline never prints. Mechanism (addendum):
+the split always delivers an eigengap kick — the co-traveling pair's off-diagonal covariance
+cancels the frequent classes' tilt, and the fork collapses that cancellation (the kick scales
+with squared fork amplitude — with the rare pair at the exact origin, as in the paper and the
+canonical run, decline onset coincides with the fork) — and
+saturation-before-split is the VISIBILITY condition determining whether the kick prints as a
+compression phase or is swallowed by the rising baseline. Toy compression remains a transient
+(RankMe recovers to ~2.0 by step ~3000).
 (b) **Residual vs plain**: the no-residual stack loses the phases entirely (monotone collapse
 to RankMe 1); the stream is constitutive, not incidental. (c) **Ledger signature**: the
 residual toy reproduces *Pythia's* quality-driven signature (6/6 no-norm seeds, wiring-

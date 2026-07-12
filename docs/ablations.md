@@ -48,8 +48,9 @@ guards, what was done, the outcome, and where the evidence lives. Companion to
 ## Replication axes (robustness by repetition)
 
 - **Scale**: every RQ1 family claim at two scales per family (1b/6.9b, 1B/7B) — the "2+2".
-- **Seeds**: toy signatures reported per-cell over ≥3 seeds (never single-seed); toy
-  compression's own seed-dependence (~25%) explicitly documented.
+- **Seeds**: toy signatures reported per-cell over ≥3 seeds (never single-seed); single-toy
+  compression robust 4/5 jitter seeds under the paper's constructed init (the earlier ~25%
+  seed-dependence was an iid-init artifact — toy_fig4_addendum.md).
 - **Third architecture (pending)**: nanochat-d12 + token-matched pythia-410m for the H1.4
   pre-registered prediction; token-matching handles the budget mismatch.
 - **Negative controls (toy)**: uniform labels / no bottleneck / MSE ×2 all remove compression,

@@ -20,6 +20,7 @@ RESULTS = "data/results"
 FIGURES = "toy/figures"
 PHASE_STYLES = (("warmup", ":"), ("entropy-seeking", "-"), ("compression-seeking", "--"))
 CLASS_COLORS = ("magenta", "orange", "royalblue", "seagreen", "orchid", "goldenrod", "steelblue", "olive")
+CLASS_MARKERS = ("^", "o", "s", "D", "v", "P", "X", "*")   # Li et al: blue=square, green=diamond
 LEDGER_TERMS = ("delta_s", "chi", "quality", "interference")
 NORM_COLORS = {"none": "#D55E00", "prenorm": "#0072B2", "writenorm": "#009E73", "bothnorm": "#CC79A7"}
 ARCH_CELLS = {"arch": "none", "arch_pre": "prenorm", "arch_wn": "writenorm", "arch_bn": "bothnorm"}
@@ -44,11 +45,12 @@ def _phase_bounds(rm: np.ndarray) -> tuple[int, int]:
     return int(np.argmin(rm[:peak + 1])), peak
 
 
-def _plot_phased(ax: Axes, path: np.ndarray, bounds: tuple[int, int], color: str) -> None:
+def _plot_phased(ax: Axes, path: np.ndarray, bounds: tuple[int, int], color: str,
+                 marker: str = "o") -> None:
     """One 2D trajectory split into the three phase segments (paper line styles)."""
     for lo, hi, (_, style) in zip((0, *bounds), (*bounds, len(path) - 1), PHASE_STYLES):
         ax.plot(path[lo:hi + 1, 0], path[lo:hi + 1, 1], style, color=color, lw=1.5)
-    ax.scatter(*path[-1], color=color, s=60, zorder=3)
+    ax.scatter(*path[-1], color=color, s=60, marker=marker, zorder=3)
 
 
 def _labels(variant: str) -> torch.Tensor:
@@ -60,24 +62,38 @@ def fig_single(variant: str = "single") -> None:
     """Fig 4 B (classifier weights), C (features), D (RankMe + top eigenvalues)."""
     res, t = _results(variant), _traj(variant)
     steps, rm = _rankme(res)
-    bounds = _phase_bounds(np.array([rm[np.searchsorted(steps, s)] for s in t["steps"].tolist()]))
+    ts = t["steps"].numpy()
+    rm_t = np.array([rm[np.searchsorted(steps, s)] for s in ts.tolist()])
+    bounds = _phase_bounds(rm_t)
+    counts = VARIANTS[variant].counts
     fig, (bx, cx, dx) = plt.subplots(1, 3, figsize=(15, 4.2))
-    for i in range(len(VARIANTS[variant].counts)):
-        _plot_phased(bx, t["W"][:, :2, i].numpy(), bounds, CLASS_COLORS[i])
+    for i in range(len(counts)):
+        _plot_phased(bx, t["W"][:, :2, i].numpy(), bounds, CLASS_COLORS[i], CLASS_MARKERS[i])
     y = _labels(variant)
     for j in range(0, len(y), VARIANTS[variant].dup):
-        _plot_phased(cx, t["F"][:, j, :2].numpy(), bounds, CLASS_COLORS[int(y[j])])
+        c = int(y[j])
+        _plot_phased(cx, t["F"][:, j, :2].numpy(), bounds, CLASS_COLORS[c], CLASS_MARKERS[c])
     bx.set(title="$W_i$", xlabel="dim 1", ylabel="dim 2")
     cx.set(title=r"$f_\theta(x)$", xlabel="dim 1", ylabel="dim 2")
-    dx.plot(steps, rm, color="navy", lw=2, label="RankMe")
+    bx.legend(fontsize=7, handles=[
+        Line2D([], [], color=CLASS_COLORS[i], marker=CLASS_MARKERS[i], ls="-",
+               label=f"class {i} (n={n})") for i, n in enumerate(counts)])
     dx.set(title="RankMe & eigenvalues", xlabel="training steps", ylabel="RankMe")
     ex = dx.twinx()
-    lam = t["sigma"][:, -1, :2].numpy() ** 2
-    for i, (color, label) in enumerate((("violet", r"$\sigma_1$"), ("yellowgreen", r"$\sigma_2$"))):
-        ex.plot(t["steps"], lam[:, i], color=color, lw=2, label=label)
-    ex.set_ylabel(r"eigenvalues ($\lambda$)")
+    lam = t["sigma"][:, -1, :2].numpy() ** 2 / VARIANTS[variant].dup   # per unique sample set:
+    # sigma is computed on the dup-replicated rows, which scales every eigenvalue by dup;
+    # dividing restores the paper's N=6 scale (the dynamics are dup-exact already)
+    for lo, hi, (_, style) in zip((0, *bounds), (*bounds, len(ts) - 1), PHASE_STYLES):
+        dx.plot(ts[lo:hi + 1], rm_t[lo:hi + 1], style, color="navy", lw=2)
+        for i, color in enumerate(("violet", "yellowgreen")):
+            ex.plot(ts[lo:hi + 1], lam[lo:hi + 1, i], style, color=color, lw=2)
+    ex.set_ylabel(r"eigenvalues ($\lambda_i = \sigma_i^2$)")
     for idx in bounds:
-        dx.axvline(float(t["steps"][idx]), color="gray", lw=0.8, alpha=0.6)
+        dx.axvline(float(ts[idx]), color="gray", lw=0.8, alpha=0.6)
+    dx.legend(fontsize=8, handles=[
+        Line2D([], [], color="navy", lw=2, label="RankMe (phase-styled)"),
+        Line2D([], [], color="violet", lw=2, label=r"$\lambda_1$"),
+        Line2D([], [], color="yellowgreen", lw=2, label=r"$\lambda_2$")])
     fig.legend(loc="lower center", ncol=3,
                handles=[Line2D([], [], color="gray", ls=s, label=n) for n, s in PHASE_STYLES])
     fig.suptitle(f"toy {variant}: cross-entropy GD phases")
@@ -89,8 +105,10 @@ def fig_controls(variants: tuple[str, ...] = ("single", "uniform", "nobottleneck
     """RankMe curves: only `single` keeps the compression decline; every control is monotone."""
     fig, ax = plt.subplots(figsize=(7, 4.5))
     for v in variants:
-        ax.plot(*_rankme(_results(v)), lw=2, label=v)
-    ax.set(xscale="log", xlabel="training steps (log)", ylabel="RankMe(features)",
+        steps, rm = _rankme(_results(v))
+        d = VARIANTS[v].d
+        ax.plot(steps, rm / d, lw=2, label=f"{v} (d={d})")
+    ax.set(xscale="log", xlabel="training steps (log)", ylabel="RankMe / d (fraction of feature dim)",
            title="Controls remove the compression phase")
     ax.legend()
     _save(fig, "fig_controls")
@@ -146,8 +164,9 @@ def fig_arch(depth: int = 6, seeds: tuple[int, ...] = (0, 1, 2)) -> None:
                 w = res[fin][blk]["block_ledger"]["w"]
                 gx.scatter(w[1 if kind == "attn" else 2] / w[0], wrm[mn], s=50,
                            color=NORM_COLORS[norm], marker=marker, edgecolors="white", lw=0.8)
-    rx.set(xscale="log", xlabel="training steps (log)", ylabel="RankMe (centered stream)",
-           title="stream RankMe")
+    rx.set(xscale="log", xlabel="training steps (log)",
+           ylabel="RankMe (centered FINAL stream)",
+           title="final-stream RankMe (post-last-block; centered, unlike the\nuncentered Li-facing figures)")
     qx.axhline(0, color="gray", lw=0.8)
     qx.set(xscale="log", xlabel="training steps (log)", ylabel="sum over blocks",
            title="quality ledger term (the Pythia carrier)")

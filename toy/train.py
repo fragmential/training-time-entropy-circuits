@@ -33,6 +33,12 @@ class Spec:
     loss: str = "ce"             # "ce" | "mse"
     init: float = 0.1            # theta / W init std
     balanced: bool = False       # init with f^T f = W W^T (the paper's alignment assumption)
+    clustered: bool = False      # Li et al Fig-4 init (read off their gray t=0 markers):
+                                 #   frequent-class features clustered on separated directions with
+                                 #   W columns aligned; ALL rare classes coincident with zero weights.
+                                 #   GD preserves the rare-pair swap symmetry, so the shared path is
+                                 #   exact and `delta` sets the split time (~ log 1/delta).
+    delta: float = 1e-3          # clustered: global jitter std breaking the rare-class symmetry
     dup: int = 1                 # exact sample replication: identical init -> identical dynamics,
     seed: int = 0                # RankMe-invariant, lifts N above spectral_metrics' 13-eigval floor
     norm: str = "none"           # "prenorm": each write reads rms(stream) | "writenorm": each write's
@@ -46,7 +52,7 @@ SKEW, UNIFORM = (2, 2, 1, 1), (2, 2, 2, 2)   # the paper's Fig 4 / control class
 MULTI = Spec(tuple(max(2, 128 >> i) for i in range(32)), d=16, depth=6, lr=0.02, steps=30_000)
 
 VARIANTS: dict[str, Spec] = {
-    "single":                   Spec(SKEW, d=2, lr=0.3, steps=200, init=0.3, dup=3, seed=3),
+    "single":                   Spec(SKEW, d=2, lr=0.25, steps=300, clustered=True, dup=3),
     "uniform":                  Spec(UNIFORM, d=2, lr=0.3, steps=1000, init=0.3, dup=2),
     "nobottleneck":             Spec(SKEW, d=3, lr=0.3, steps=1000, init=0.3, dup=3),
     "mse_uniform":              Spec(UNIFORM, d=2, lr=0.3, steps=1000, init=0.3, dup=2, loss="mse"),
@@ -67,6 +73,25 @@ VARIANTS: dict[str, Spec] = {
 }
 
 
+def _clustered_init(s: Spec) -> tuple[torch.Tensor, torch.Tensor]:
+    """The paper's Fig-4 t=0 geometry (two frequent classes on separated directions, all
+    rare classes coincident): features per frequent class at scale·dir ± eps, rare samples
+    all at (-0.25, 0); W columns near the class directions, rare columns zero. A global
+    delta-scale jitter breaks the exact rare-class symmetry and sets the split time."""
+    assert s.d == 2 and len(s.counts) == 4 and s.counts[2:] == (1, 1), \
+        "clustered init implements the paper's Fig-4 geometry (4 classes, d=2, rare pair last)"
+    a = math.radians(100)
+    dirs = [torch.tensor([math.cos(a), math.sin(a)]), torch.tensor([1.0, 0.03])]
+    perp = lambda u: torch.tensor([-float(u[1]), float(u[0])])
+    rare = torch.zeros(2)   # exact origin: matches the paper's zero fork→decline lag (addendum)
+    theta0 = torch.stack([0.6 * dirs[0] + 0.05 * perp(dirs[0]), 0.6 * dirs[0] - 0.05 * perp(dirs[0]),
+                          0.75 * dirs[1] + 0.05 * perp(dirs[1]), 0.75 * dirs[1] - 0.05 * perp(dirs[1]),
+                          rare, rare])
+    W0 = torch.stack([torch.tensor([0.0, 0.6]), 0.74 * dirs[1],
+                      torch.zeros(2), torch.zeros(2)], dim=1)
+    return theta0 + s.delta * torch.randn_like(theta0), W0 + s.delta * torch.randn_like(W0)
+
+
 class Toy(torch.nn.Module):
     """f_0 = theta rows (inputs S = I, so features are free parameters, as in the paper);
     f_{k+1} = f_k [+] g_k(f_k); logits = f_L @ W."""
@@ -74,11 +99,16 @@ class Toy(torch.nn.Module):
     def __init__(self, s: Spec) -> None:
         super().__init__()
         self.s = s
-        self.theta = torch.nn.Parameter(s.init * torch.randn(sum(s.counts), s.d).repeat_interleave(s.dup, 0))
-        _, sv, Vt = torch.linalg.svd(self.theta.detach(), full_matrices=False)
-        Q = torch.linalg.qr(torch.randn(len(s.counts), s.d))[0].T
-        self.W = torch.nn.Parameter(Vt.T @ torch.diag(sv) @ Q if s.balanced
-                                    else s.init * torch.randn(s.d, len(s.counts)))
+        if s.clustered:
+            theta0, W0 = _clustered_init(s)
+            self.theta = torch.nn.Parameter(theta0.repeat_interleave(s.dup, 0))
+            self.W = torch.nn.Parameter(W0)
+        else:
+            self.theta = torch.nn.Parameter(s.init * torch.randn(sum(s.counts), s.d).repeat_interleave(s.dup, 0))
+            _, sv, Vt = torch.linalg.svd(self.theta.detach(), full_matrices=False)
+            Q = torch.linalg.qr(torch.randn(len(s.counts), s.d))[0].T
+            self.W = torch.nn.Parameter(Vt.T @ torch.diag(sv) @ Q if s.balanced
+                                        else s.init * torch.randn(s.d, len(s.counts)))
         make = ((lambda: torch.nn.Sequential(torch.nn.Linear(s.d, 4 * s.d), torch.nn.Tanh(),
                                              torch.nn.Linear(4 * s.d, s.d)))
                 if s.nonlinear else (lambda: torch.nn.Linear(s.d, s.d, bias=False)))
