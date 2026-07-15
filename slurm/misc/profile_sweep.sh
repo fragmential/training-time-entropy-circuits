@@ -10,6 +10,6 @@
 
 module purge
 export HF_HOME="/projects/prjs1815/hf_cache"
-cd "$HOME/Tracing-representation-geometry-reproduction" || exit 1
+cd "$SLURM_SUBMIT_DIR" || exit 1
 
 uv run scripts/profile_sweep.py "$@"

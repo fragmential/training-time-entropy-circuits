@@ -8,7 +8,7 @@
 #SBATCH --error=slurm/logs/build_mixes_%j.err
 
 export HF_HOME="/projects/prjs1815/hf_cache"
-cd ~/Tracing-representation-geometry-reproduction
+cd "$SLURM_SUBMIT_DIR"
 
 TOTAL_TOKENS="${1:-6000000}"
 uv run python scripts/build_shuffled_mix.py --dataset all --total_tokens "$TOTAL_TOKENS"

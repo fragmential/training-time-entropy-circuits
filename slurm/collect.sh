@@ -72,6 +72,6 @@ INDICES=(${INDICES_STR})
 module purge
 export HF_HOME="/projects/prjs1815/hf_cache"
 export MALLOC_ARENA_MAX=2
-cd "\$HOME/Tracing-representation-geometry-reproduction" || exit 1
+cd "\$SLURM_SUBMIT_DIR" || exit 1
 time uv run scripts/collect.py --config "${CONFIG}" --array_id "\${INDICES[\$SLURM_ARRAY_TASK_ID]}"
 EOF

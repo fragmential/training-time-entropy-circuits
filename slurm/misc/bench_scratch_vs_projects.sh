@@ -31,7 +31,7 @@ snapshot_download('EleutherAI/pythia-1b-deduped')
 print(f'download: {time.time()-t:.1f} s')"
 }
 
-cd "$HOME/Tracing-representation-geometry-reproduction" || exit 1
+cd "$SLURM_SUBMIT_DIR" || exit 1
 bench_fs "$HF_HOME_BASE_A"
 bench_fs "$HF_HOME_BASE_B"
 # alternate download order across the two rounds to average out network variability

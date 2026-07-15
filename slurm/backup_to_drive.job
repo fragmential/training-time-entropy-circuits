@@ -27,7 +27,7 @@ REMOTE="gdrive"
 DEST_BASE="msc-backup-data"
 LOCAL_BASE="data/inferences"
 
-cd "$HOME/Tracing-representation-geometry-reproduction" || exit 1
+cd "$SLURM_SUBMIT_DIR" || exit 1
 mkdir -p slurm/logs
 
 WORK="${TMPDIR:-/tmp}/gdrive_${SLURM_JOB_ID:-$$}"

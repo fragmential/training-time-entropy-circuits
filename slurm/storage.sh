@@ -111,7 +111,7 @@ MODEL_DIR="\${MODEL_DIRS[\$SLURM_ARRAY_TASK_ID]}"
 OUTPUT_BASE="${OUTPUT_BASE}"
 export HF_HOME="/projects/prjs1815/hf_cache"
 
-cd "\$HOME/Tracing-representation-geometry-reproduction" || exit 1
+cd "\$SLURM_SUBMIT_DIR" || exit 1
 export OMP_NUM_THREADS=1
 echo "Processing: \$MODEL_DIR"
 if [ -n "\$OUTPUT_BASE" ]; then
