@@ -101,6 +101,15 @@ def _drift_ema(V, beta=0.7):                            # series-mode: cosine vs
     for t in range(1, len(V)): out.append(_cos(V[t], h)); h = beta*h + (1-beta)*V[t]
     return out
 
+def _drift_rate(cka, steps, model, per='dex'):
+    """cka_drift corrected for unequal checkpoint spacing: (1 − CKA) per unit of training
+    progressed — per='dex' (Δlog10 tokens; log-schedule-natural) or 'gtok' (per 1e9 tokens).
+    The raw stored cka_drift compares consecutive checkpoints, so its level is confounded by
+    the gap between them (the samples schedule is ~5x denser in log-tokens near the end)."""
+    toks = np.array([get_token_count(model, s) for s in steps], float)
+    gaps = np.diff(np.log10(toks)) if per == 'dex' else np.diff(toks) / 1e9
+    return [np.nan] + [(1 - c) / g if g > 0 else np.nan for c, g in zip(cka[1:], gaps)]
+
 def _rankme(evs: np.ndarray) -> float:
     p = evs[evs > 0]
     p = p / p.sum()
@@ -133,6 +142,7 @@ virtual_hooks = {
     "magratio_res": ([{'yvar': 'acts_mean_vec'}, {'node': _joined_residual, 'yvar': 'acts_mean_vec'}], lambda a, b: float(np.linalg.norm(a) / np.linalg.norm(b))),
     "cos_drift":     ([{'yvar': 'acts_mean_vec'}], _drift, 'series'),
     "cos_drift_ema": ([{'yvar': 'acts_mean_vec'}], _drift_ema, 'series'),
+    "cka_drift_rate": ([{'key': lambda k: k, 'yvar': 'cka_drift'}], _drift_rate, 'series_steps'),
     # Per-sub-step ledger, assembled from incremental_overlap at blk*.{attn,mlp}.out nodes
     # (sequential families only — Pythia's parallel sub-steps are fictitious). s_next comes
     # from the sibling mlp's s_in (attn step) or the block ledger's s_next (mlp step).
@@ -183,14 +193,19 @@ def get_ys(source_file, model_name, hook, yvar, yvar_kwargs={}):
 
         required_yvars, hook_transform, *mode = virtual_hooks[yvar]   # 'series' => whole-series transform
         try:
-            operands = [get_ys(source_file, model_name, *_operand(req, hook, model_name))[0] for req in required_yvars]
+            results = [get_ys(source_file, model_name, *_operand(req, hook, model_name)) for req in required_yvars]
         except KeyError:
             print(f"hook: {hook}\nrequired vars: {required_yvars}\nhook transform: {hook_transform}")
             raise e
+        operands = [r[0] for r in results]
         if None in operands:
             return None, None
-        ys = (hook_transform(*operands, **yvar_kwargs) if mode and mode[0] == 'series'
-              else [hook_transform(*per, **yvar_kwargs) for per in zip(*operands)])
+        if mode and mode[0] == 'series_steps':                # transform also sees the operand's
+            step_nums = results[0][1]                         # steps + model (e.g. gap-normalized drift)
+            ys = hook_transform(*operands, steps=step_nums, model=model_name, **yvar_kwargs)
+        else:
+            ys = (hook_transform(*operands, **yvar_kwargs) if mode and mode[0] == 'series'
+                  else [hook_transform(*per, **yvar_kwargs) for per in zip(*operands)])
 
     hook_cache[cache_id] = (ys, step_nums)
     return ys, step_nums
@@ -295,6 +310,7 @@ YVAR_LABELS = {
     'delta_rankme':          r'$\Delta$RankMe (leave-one-out)',
     'rankme_ablated':        r'RankMe$(\Sigma_{r\setminus k})$',
     'cka_drift':             r'CKA$(c^{(t)}, c^{(t-1)})$',
+    'cka_drift_rate':        r'$(1-\mathrm{CKA})/\Delta$ (gap-corrected drift)',
     'tr_P':                  r'$\mathrm{tr}\,P_k$ (reinforce/cancel)',
     'tr_R':                  r'$\mathrm{tr}\,R_k$',
     'R_over_r':              r'$\mathrm{tr}\,R_k/\mathrm{tr}\,\Sigma_r$',

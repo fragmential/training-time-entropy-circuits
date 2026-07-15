@@ -12,6 +12,7 @@ AMBIENT dims plus a fixed per-leaf noise floor: spectral_metrics' power-law fit 
 import math
 import os
 from dataclasses import dataclass, replace
+from typing import Any
 
 import torch
 import torch.nn.functional as F
@@ -46,6 +47,17 @@ class Spec:
                                  #   reordered norm) | "bothnorm": both; the stream itself stays raw
     writes: int = 1              # writes per block; 2 dumps them as blk{k}.{attn,mlp}.out
     parallel: bool = True        # writes>1: all read the block input | each reads input + prior writes
+    flat_init: float = 0.0       # >0: theta starts LOW-RANK — every sample near one shared random
+                                 #   direction (per-sample scalar × u), + flat_init·randn jitter.
+                                 #   The multi-layer analog of the constructed init's saturated-
+                                 #   baseline condition: init rank ≈ 1, so a rise can print.
+    block_scale: float = 1.0     # <1: shrink every block's init params — writes start as small
+                                 #   perturbations of the stream (as in real pre-norm LLMs), so
+                                 #   the stream at t=0 ≈ theta and a constructed init survives depth.
+    block_identity: float = 0.0  # >0 (linear blocks only): init each block as I + val·randn —
+                                 #   the PLAIN-stack analog of small blocks: the composite map
+                                 #   starts near identity, so it transmits the feature spectrum
+                                 #   and passes gradients. (block_scale→0 starves a plain stack.)
 
 
 SKEW, UNIFORM = (2, 2, 1, 1), (2, 2, 2, 2)   # the paper's Fig 4 / control class counts
@@ -57,9 +69,22 @@ VARIANTS: dict[str, Spec] = {
     "nobottleneck":             Spec(SKEW, d=3, lr=0.3, steps=1000, init=0.3, dup=3),
     "mse_uniform":              Spec(UNIFORM, d=2, lr=0.3, steps=1000, init=0.3, dup=2, loss="mse"),
     "mse_skew":                 Spec(SKEW, d=2, lr=0.3, steps=1000, init=0.3, dup=3, loss="mse"),
+    "single_deep":              Spec(SKEW, d=2, lr=0.25, steps=1000, clustered=True, dup=3,
+                                     depth=6, block_scale=0.05),
+                                # the Fig-4 phases through a 6-block residual stack: constructed
+                                # init + small-at-init blocks; decline onset = rare-pair fork
+                                # (verified 3/3 seeds, Jul 13). block_scale=1 destroys the
+                                # timing (init writes swamp the constructed geometry) — no print.
+    "skewpair_deep":            Spec((32, 16, 8, 4, 2, 2), d=4, lr=0.25, steps=3000,
+                                     clustered=True, depth=6, block_scale=0.05),
+                                # the unification case: skewed multi-class + bottleneck (d=4 <
+                                # 6 classes) + generalized constructed init (rare PAIR last,
+                                # coincident at origin) through a 6-block residual stack
     "multi_residual":           MULTI,
     "multi_residual_nonlinear": replace(MULTI, nonlinear=True),
-    "multi_plain":              replace(MULTI, residual=False, lr=0.005, steps=100_000),
+    "multi_plain":              replace(MULTI, residual=False, lr=0.02, steps=100_000),
+                                # fair-shot lr (retune, Jul 13): 0.02 fully solves the task
+                                # (loss 0.000); 0.005 underfits, 0.05 diverges
     # architecture-knob grid on the multi_residual_nonlinear base (two writes per block,
     # identical parameter count across parallel/sequential): norm {none, prenorm} x wiring
     "arch_par":     (MULTI2 := replace(MULTI, nonlinear=True, writes=2)),
@@ -92,6 +117,27 @@ def _clustered_init(s: Spec) -> tuple[torch.Tensor, torch.Tensor]:
     return theta0 + s.delta * torch.randn_like(theta0), W0 + s.delta * torch.randn_like(W0)
 
 
+def _clustered_init_general(s: Spec) -> tuple[torch.Tensor, torch.Tensor]:
+    """The constructed init's GEOMETRY generalized to any d / class count: every non-rare
+    class clustered at scale·(random unit direction) with matched W column; the LAST TWO
+    classes are the rare pair, coincident at the origin with zero W columns (exact swap
+    symmetry, broken only by the global delta jitter — so the fork time is delta-controlled
+    exactly as in the paper case)."""
+    C = len(s.counts)
+    dirs = (torch.linalg.qr(torch.randn(s.d, C - 2))[0].T if C - 2 <= s.d
+            else torch.nn.functional.normalize(torch.randn(C - 2, s.d), dim=1))
+    # orthonormal frequent directions when they fit: the frequent geometry starts near its
+    # equilibrium, so the baseline saturates before the delta-timed rare fork (the paper's
+    # two directions are likewise ~maximally separated)
+    rows = [0.6 * dirs[c] + 0.05 * torch.randn(s.d)
+            for c, n in enumerate(s.counts[:-2]) for _ in range(n)]
+    rows += [torch.zeros(s.d)] * (s.counts[-2] + s.counts[-1])
+    theta0 = torch.stack(rows)
+    W0 = torch.zeros(s.d, C)
+    W0[:, :C - 2] = 0.74 * dirs.T
+    return theta0 + s.delta * torch.randn_like(theta0), W0 + s.delta * torch.randn_like(W0)
+
+
 class Toy(torch.nn.Module):
     """f_0 = theta rows (inputs S = I, so features are free parameters, as in the paper);
     f_{k+1} = f_k [+] g_k(f_k); logits = f_L @ W."""
@@ -100,9 +146,16 @@ class Toy(torch.nn.Module):
         super().__init__()
         self.s = s
         if s.clustered:
-            theta0, W0 = _clustered_init(s)
+            paper_case = s.d == 2 and len(s.counts) == 4 and s.counts[2:] == (1, 1)
+            theta0, W0 = (_clustered_init if paper_case else _clustered_init_general)(s)
             self.theta = torch.nn.Parameter(theta0.repeat_interleave(s.dup, 0))
             self.W = torch.nn.Parameter(W0)
+        elif s.flat_init:
+            u = torch.nn.functional.normalize(torch.randn(s.d), dim=0)
+            theta0 = s.init * torch.randn(sum(s.counts), 1) * u \
+                + s.flat_init * torch.randn(sum(s.counts), s.d)
+            self.theta = torch.nn.Parameter(theta0.repeat_interleave(s.dup, 0))
+            self.W = torch.nn.Parameter(s.init * torch.randn(s.d, len(s.counts)))
         else:
             self.theta = torch.nn.Parameter(s.init * torch.randn(sum(s.counts), s.d).repeat_interleave(s.dup, 0))
             _, sv, Vt = torch.linalg.svd(self.theta.detach(), full_matrices=False)
@@ -113,6 +166,18 @@ class Toy(torch.nn.Module):
                                              torch.nn.Linear(4 * s.d, s.d)))
                 if s.nonlinear else (lambda: torch.nn.Linear(s.d, s.d, bias=False)))
         self.blocks = torch.nn.ModuleList(make() for _ in range(s.depth * s.writes))
+        if s.block_scale != 1.0:
+            with torch.no_grad():
+                for p in self.blocks.parameters():
+                    p.mul_(s.block_scale)
+        if s.block_identity:
+            assert not s.nonlinear, "block_identity implemented for linear blocks only"
+            with torch.no_grad():
+                for blk in self.blocks:
+                    lin: Any = blk
+                    lin.weight.copy_(torch.eye(s.d) + s.block_identity * torch.randn(s.d, s.d))
+                    if lin.bias is not None:
+                        lin.bias.copy_(s.block_identity * torch.randn(s.d))
 
     def forward(self) -> tuple[list[torch.Tensor], list[list[torch.Tensor]]]:
         read = _rms if self.s.norm in ("prenorm", "bothnorm") else (lambda x: x)

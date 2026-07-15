@@ -94,11 +94,18 @@ def _subsample(items, max_n, spacing="linear"):
     else:
         t = np.linspace(0, n - 1, max_n)
     indices = np.unique(np.round(t).astype(int))
-    # If rounding lost slots, fill gaps with linear interpolation
+    # Rounding collapses early duplicates; refill by bisecting the largest gap in the
+    # requested spacing (a linear bisect here used to dump every refill into the late
+    # region, ~5x over-densifying the end of log schedules).
     while len(indices) < max_n and len(indices) < n:
-        gaps = np.diff(indices)
-        biggest = np.argmax(gaps)
-        mid = (indices[biggest] + indices[biggest + 1]) // 2
+        pos = np.log1p(indices) if spacing == "log" else indices.astype(float)
+        gaps = np.where(np.diff(indices) >= 2, np.diff(pos), -1.0)   # unit gaps can't be bisected
+        if gaps.max() < 0:
+            break
+        biggest = int(np.argmax(gaps))
+        lo, hi = indices[biggest], indices[biggest + 1]
+        mid = round(np.expm1((pos[biggest] + pos[biggest + 1]) / 2)) if spacing == "log" else (lo + hi) // 2
+        mid = min(max(mid, lo + 1), hi - 1)
         indices = np.sort(np.append(indices, mid))
     return [items[i] for i in indices]
 

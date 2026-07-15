@@ -27,7 +27,10 @@ final writes, and the same late re-entropy rise (S_final 5.75@320k → 6.08@1.8M
 family split is now consistent at both scales of both families. OLMo-1B's drift metrics add:
 mean CKA-drift starts at **0.12** (vs pythia-1b's mildest-point 0.82 — a far more violent early
 reorganization), recovers to 0.93@10k, dips again ~0.79 at the RankMe peak (a second
-reorganization), then climbs monotonically to 0.935.
+reorganization), then climbs monotonically to 0.935. ⚠️ These raw consecutive-checkpoint
+numbers conflate drift speed with checkpoint spacing; the "two events then stabilization"
+reading is NOT confirmed under the gap-corrected rate (final_report appendix; re-derivation
+on the plan).
 
 **Pythia: compression = one early rogue write.** In BOTH pythia models, blk3.mlp's write
 starts healthy (RankMe ≈ 470 / 830, trace ≈ 0.27× the stream) and collapses to rank ≈ 1–2
@@ -117,27 +120,42 @@ principled (e.g. k at the spectral knee) before it's a claim.
   scales: quality recovers (1B −3.8 → −0.5; 7B −6.0 → −1.0) while interference falls (→ −5.3 /
   −6.5), locus in the last 2–3 blocks with mutually *aligned* writes (+0.33 / +0.37), no rogue
   write (all write RankMe ≳ 900 except late ~200–280), same late re-entropy rise, and
-  OLMo-1B's drift double-dip (0.128 bottom → 0.947 → second dip ~0.84 at the RankMe peak).
+  OLMo-1B's drift double-dip (0.128 bottom → 0.947 → second dip ~0.84 at the RankMe peak;
+  same checkpoint-spacing caveat as the drift note above).
   Net: the family split (rogue-write quality-compression vs distributed
   interference-compression) is robust to the token-selection geometry; only the Pythia rogue
   write's *strength* is geometry-sensitive (weaker on last tokens, esp. at 6.9b).
 
-## The rogue direction identified: it's the newline direction
+## The rogue direction identified: a sink direction (window-start + first-newline slots)
 
 Raw-sample collection at the final checkpoint (`configs/block_rogue_id.yaml`; rows mapped back
-to mix tokens) settles the token-identity question: projecting blk3.mlp.out's samples onto its
-top centered eigendirection, the spiking tokens are **newlines** — `\n`/`\n\n` variants are 38
-of the top-40 rows in BOTH pythias, the top eigenvalue carries 98.8% / 94.3% of the write's
-variance, and the top 0.1% of tokens carry ~33% / 31% of the direction's variance. Combined
-with mean_frac ≈ 0.003 (variance-like, not bias-like): the write is a sparse newline-activated direction —
-enormous on line/paragraph boundaries, near-zero elsewhere.
+to mix tokens) settles the identity question in two stages. Type-level (first pass): the
+spiking tokens are **newlines** — `\n`/`\n\n` variants are 38 of the top-40 rows in BOTH
+pythias, the top eigenvalue carries 98.8% / 94.3% of the write's variance, and the top 0.1%
+of tokens carry ~33% / 31% of the direction's variance. Position-split (refinement, see "On
+the carrier token" below): the type-level newline signal is specifically the **first-newline
+slot** (96% of newlines are bulk-ordinary), and there is a second, type-agnostic slot at
+every window-start position. Combined with mean_frac ≈ 0.003 (variance-like, not bias-like):
+the write is a sparse **sink direction** — enormous at the per-window sink slots, near-zero
+elsewhere.
 
 So Pythia's compression phase, stated plainly: **from the RankMe peak onward, blk3's MLP
-writes an ever-larger newline-activated direction**; the direction's energy (→22× the stream) crushes
+writes an ever-larger sink direction**; the direction's energy (→22× the stream) crushes
 the ledger's quality term and with it the measured RankMe of any all-token covariance; late
 blocks partially cancel it before the output (signed trace −0.65); and last-token geometry
-sees it attenuated but present — 13.9% of padded last tokens are newline-bearing (trailing
-newlines + truncation boundaries). This connects to the massive-
+sees it attenuated but present — 13.9–14.2% of padded last tokens are newline-bearing
+(trailing newlines + truncation boundaries). **Caveat resolved NEGATIVE (Jul 13):** checked
+directly on the padded cache (pile_deduped_eleutherai_16384_s42, exact padded tokenization):
+of the 2,331 newline-bearing last tokens, only 5 (0.2%) are their document's FIRST newline —
+under the first-newline refinement, trailing newlines are bulk-ordinary, NOT sink slots. So
+the slot-inclusion account of the padded last-token rogue variance is dead, and the
+final-stream deposit test (sink_literature.md) rules out attention transport along v₁ at the
+output. The mid-stack depth profile (below) partly resolves the padded last-token
+persistence: EVERY ordinary token carries rogue-direction content mid-stack (~27% of its
+centered row norm at blk4) and retains a nonzero residue (~4%) at the final stream after the
+late-block scrub — so an attenuated presence at arbitrary (incl. padded last) tokens is the
+expected baseline, no sink slot needed. Whether that residue quantitatively matches the
+padded measurement is still unchecked. This connects to the massive-
 activations / delimiter-token literature — the new pieces here are the training-time onset
 (exactly at the RankMe peak), the exact rank-cost accounting, the late-layer cancellation, and
 the OLMo-2 contrast (whose architecture shows no such direction and compresses via aligned
@@ -169,6 +187,29 @@ while the output score separates hugely (+81 vs ~10) — so **the spike is const
 MLP** (nonlinear gating / processed features), not linearly echoed from the newline embedding.
 Literal layer inversion is ill-posed (down-projection nullspace + nonlinearity); this
 statistical preimage is the sound version of "push the direction back and unembed it".
+
+### Sink-slot follow-ups: EOT-twin and the depth profile (Jul 13)
+
+Two targeted re-collections at the final checkpoint (`oneoff_scripts/rogue_id_followups.py`,
+results in `data/results/rogue_id_followups.pt`; the rogue direction is identical across all
+three runs, |cos| > 0.9999):
+
+**EOT-twin (`block_rogue_id_eot`):** same windows with an explicit `<|endoftext|>` prepended
+at position 0 — the attention-sinks papers' per-prompt protocol always provides a resting
+token, our packed stream provides none, so the first-newline slot could have been a
+stand-in. It is not: with the EOT present (itself taking the position-0 slot, mean |proj|
+1583 vs 1657 for arbitrary tokens), the window's first newline still spikes at 2178
+(original run 2132). Both slots are structural properties of the window, not artifacts of a
+missing resting token.
+
+**Depth profile (`block_rogue_id_midstack`):** mean |(x − μ)·v₁| of the stream at blk4/6/9/
+12/15.attn.in and before_final_norm, per token class. The sink-slot spike is deposited at
+blk3 and rides the stream essentially unchanged through blk12 (sink rows are ≈99% along v₁
+by centered norm), halves at blk15 (831/1249), and is nearly gone at before_final_norm
+(9.5/20.8 absolute, ≈0.17–0.20 of by-then-much-larger rows) — the "late blocks write against
+it" signed-trace observation seen directly as a depth-wise scrub. Ordinary tokens are NOT
+clean mid-stack: ~27% of their centered row norm at blk4 lies along v₁, decaying
+monotonically (0.24 → 0.21 → 0.14 → 0.05) to ~3.6% at the final stream.
 
 ### Rogue-direction interventions: reconciliation with the massive-activations literature
 
@@ -217,10 +258,22 @@ On the carrier token: 2510.06477's valleys are typically BOS-driven (BOS norm sp
 in layers 0–5 — our blk3 onset sits in that depth range), but their theorem is
 token-identity-agnostic, and Sun et al already list delimiters ("." and "\n") among massive-
 activation carriers alongside first tokens (model-dependent; cf. secondary-sinks work,
-2512.22213). Our packed streams contain NO BOS (GPT-NeoX prepends none; every position is
-mid-text), so the sink/bias role necessarily lands on the delimiter class — the newline
-direction is the BOS phenomenon's packed-stream form. Optional future check: prepend a
-first-token/BOS and watch the spike partially migrate to position 0.
+2512.22213). Our packed streams contain NO BOS (GPT-NeoX prepends none; zero id-0 tokens in
+the mix) — and the position-split analysis (Jul 13) sharpens the earlier "the sink role lands
+on the delimiter class" reading in an important way: **the sink direction has TWO carriers
+per window**. (1) Position 0 fires UNCONDITIONALLY — signed proj +1657 on arbitrary mid-text
+content tokens, 510/512 windows, no BOS needed (their "BOS" is positional, row x₀); (2) the
+FIRST newline of the window (+2135; 478 of the 486 spiking newlines are the window's first,
+median position 25). The other 96% of newlines are bulk-ordinary (−9.5, indistinguishable
+from the bulk's −7); "mean |proj| 98 on newline rows" is that mixture. Variance shares of
+the rogue score: first-newline slots 60.4%, pos-0 slots 38.7%, remaining 249k rows 0.9%.
+So "the newline direction" is really "the sink direction, whose packed-stream slots are
+window-start + first-newline"; the per-token-type ranking hid the pos-0 carrier (512
+heterogeneous window-start tokens spread across 13k types). blk3's write creates the spike
+(pos-0 raw write norm 1663 vs 13.9 bulk) and the late blocks largely cancel it at the output
+(pos-0 before_final_norm norm 70.7 < bulk 131). Direct comparability with 2510.06477 still
+wants the twin experiment: prepend `<|endoftext|>` per window and rerun block_rogue_id
+(cheap) to see whether an explicit resting token absorbs the first-newline slot.
 
 **Valley emergence timing:** valleys are not present early — they EMERGE at/just after the
 spectrum-entropy peak, synchronized with the rogue write's rank collapse, then deepen
@@ -248,18 +301,20 @@ effective dimension (levels not commensurable; trends only), while alpha is scal
 the window an explicit part of the definition. Padded caveat: at $N/d \approx 4$–8,
 Marchenko–Pastur broadening contaminates the deep tail — keep padded windows ≲ low hundreds.
 
-## Most promising metrics (ranked)
+## Which metric evidences which finding
 
-1. **block_ledger** — the workhorse; every headline above is a ledger read-out.
-2. **block_block_coupling.signed_trace** — found the rogue-cancellation structure
-   (blk3↔last −0.65) and OLMo's late-block reinforcement; cheap to read, very interpretable.
-3. **eigendirection_attribution** (head-mass summaries) — the H1.3 test; sharp signal.
-4. **block_residual_coupling** (tr_P / R_over_r / cos_cr) — useful, partly redundant with 1–2.
-5. **incremental_overlap (χ_k)** — stable and interpretable but low variance; mostly context.
-6. **cka_drift / geneig_drift** — the early-reorganization V-shape (1b), otherwise quiet;
-   keep for the 1Bs only (already the config).
-7. **gen_block_vs_residual, mean_migration** — nothing notable yet; candidates to drop from
-   future configs if space is needed.
+| metric | finding it carries |
+|---|---|
+| block_ledger | every headline decomposition above (quality vs interference carrier, per family) |
+| block_block_coupling.signed_trace | rogue cancellation (blk3↔last −0.65); OLMo's late-block mutual alignment |
+| eigendirection_attribution (head-mass) | H1.3: the last write's concentration (0.26→0.92 at 6.9b) |
+| block_residual_coupling (tr_P / R_over_r / cos_cr) | corroborates the two above; no finding rests on it alone |
+| incremental_overlap (χ_k) | χ stability ("compression is never writes-stop-exploring") |
+| cka_drift / geneig_drift | the two reorganization events bracketing entropy-seeking (1Bs) |
+| gen_block_vs_residual, mean_migration | no finding; collected but unused |
+
+(Collection-planning judgements about which metrics to keep or drop in future sweeps live in
+docs/next_run_additions.md, not here.)
 
 Data caveats: packed all-token rows (correlated within sequence); N/d ≈ 25 for the 7Bs on some
 per-write spectra; quality-carrier percentages are window-dependent (13k→143k shown). OLMo-1B

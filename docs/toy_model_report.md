@@ -55,6 +55,14 @@ Full evidence, mechanism, and the decline-onset-lag analysis:
 | mse_skew | monotone rise → 1.990 | none (0.0000) |
 | mse_uniform | rise → 1.979, flat | none (0.002 saturation wobble) |
 
+**mse_skew's small dip (~steps 40–90) is not a rare-class fork** (trajectory check,
+`toy/appendix_sweeps.py mse_skew_check`, 3 seeds): under MSE the rare classes are never
+learned — per-class MSE stays pinned at the 0.25 no-prediction floor and the rare weight
+columns decay from their random init (norm ≈0.42) to ≤0.016 — confirming Li et al's
+supplementary gradient-starvation claim ("only information about the most frequently
+occurring classes are learned"). With the rare classes inert, the dip can only be
+frequent-class reorganization; the CE fork mechanism is structurally unavailable.
+
 **Honesty caveat, revised:** an earlier version of this section claimed the toy's compression
 was seed-dependent (~25% of seeds) and insinuated the paper's 300-step window was doing the
 same cherry-picking. That is **retracted**: under the paper's own (constructed) init the
@@ -67,6 +75,31 @@ at any scale. Worth remembering when citing the toy as "explaining" the phases: 
 compression is neither inevitable nor an endpoint, and it rests on an initialization
 condition the paper never states.
 
+## ⚠️ MULTI-LAYER STREAM-TRAJECTORY CLAIMS: UNDER REVISION (Jul 13) — partially RESOLVED
+
+Every earlier reading of the multi-layer toys' stream-RankMe trajectories failed
+verification: the "pattern fades with depth" reading (uncentered — mean-contaminated), the
+"init artifact of depth" reading (wrong — centered streams start near-full-rank), and the
+"init rank vs solution rank" reading (its positive test failed: a rank-1 "flat" init, all
+samples starting on one shared direction + jitter, produced no clean rise either, 2 seeds).
+Established facts: at every tested depth (1/2/3/6) and under both inits, the MULTI task's
+centered final stream shows plateau → collapse at learning onset → partial recovery to
+~2.1–2.5 — never Li et al's dip→rise→peak→decline. Trajectory-shape statements about
+multi_residual*/multi_plain (including "the residual stream is constitutive for the
+phases" and the arch-grid "post-peak decline" wording) remain unverified pending the
+re-presentation pass; the ledger-term attributions (quality-carried, χ stable) are
+computed on centered quantities and are not implicated.
+
+**RESOLVED — full study in [toy_multilayer.md](toy_multilayer.md)** (Jul 13 evening):
+depth is not the obstacle. The phase curve prints through deep stacks — residual with
+small-at-init blocks (2/6/12 blocks, 3/3 seeds, decline onset = the rare-pair fork), a
+NO-residual stack with identity-initialized blocks (3/3), and a skewed 6-class bottleneck
+task where moving only the fork delay δ toggles masked ↔ printed. The general mechanism
+(dS/dt = −Cov_p(g, log p)), the three print conditions (event timing, kick size,
+near-identity transmission), the complete ablation table, the corrected form of "the
+residual is constitutive" (it provides near-identity transmission by default), and the
+open items (nonlinear pre-fork decline; kick-vs-depth scaling) all live in that doc.
+
 ## H3.2 — Residual toy's ledger signature: PARTIAL, Pythia-flavored
 
 The rank ledger fired unmodified on the multi-layer dumps (`block_ledger` at every `blk{k}`,
@@ -78,9 +111,24 @@ The rank ledger fired unmodified on the multi-layer dumps (`block_ledger` at eve
   χ stays positive and stable** — the same term-attribution as pythia-1b/6.9b, present in a
   6-layer linear toy with no attention, no norms, no tokens.
 - **multi_residual_nonlinear**: same qualitative shape.
-- **multi_plain (no residual): loses the phases entirely** — monotone rank decay into total
-  collapse (RankMe → 1.0, loss stuck at 0.97). The stream is not incidental to the phase
+- **multi_plain (no residual): loses the phases entirely.** At the original lr 0.005 it also
+  underfit (loss stuck at 0.97); the fair-shot retune (Jul 13; the spec now ships lr 0.02)
+  removes that confound — the plain stack fully solves the task (final loss 3e-5) and STILL
+  shows no phases: every depth flat until ~10⁴ steps, then collapse to RankMe ~1–2 with a
+  small recovery, never dip→rise→peak→decline. The stream is not incidental to the phase
   structure; without it the entropy-seeking expansion never happens.
+- **Depth × centering on the residual toys** (corrected Jul 13; full analysis:
+  showcase_appendix §C). The earlier per-depth reading ("pattern only at the earliest
+  stream; deep streams start collapsed") was an artifact of the UNCENTERED measurement: the
+  nonlinear writes' bias terms add a shared per-depth mean that accumulates and holds ~50%
+  of the uncentered trace at every depth ≥ 1 (uncentered init RankMe falls 15.5 → 2.4 with
+  depth while centered stays 15.5 → 8.9). CENTERED — the object all LLM figures and the
+  ledger use — every stream starts near-full-rank and compresses strongly toward ~2 over
+  training, and the FINAL stream compresses hardest (8.91 → 2.49, with a small early bump
+  to 9.14): the end-of-model compression pattern matches the LLMs. What the toy lacks at
+  every depth is a pronounced entropy-seeking rise, because theta (the free-parameter
+  feature matrix, Setup above) initializes as random noise already at full rank 15.5 —
+  unlike Li's constructed near-degenerate single-layer init, there is nothing to expand.
 
 ## H3.3 — Representativeness guard
 

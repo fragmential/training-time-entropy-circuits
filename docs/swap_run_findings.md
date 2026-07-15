@@ -68,7 +68,7 @@ Every headline finding replicates on the other family's data, to within a few pe
 **What these verdicts support.** The dig_findings family split — rogue-write
 quality-compression (Pythia) vs distributed aligned-late-write interference-compression
 (OLMo-2) — is attributable to the models (architecture + optimization + tokenizer), not to
-Pile-vs-olmo-mix data content. Specifically: H1.1's family split, the blk3 newline-activated
+Pile-vs-olmo-mix data content. Specifically: H1.1's family split, the blk3 sink-slot-activated
 mechanism and its late-block cancellation, the absence of a rogue write in OLMo-2, and the
 head-confinement universal all survive. **Limits:** the swap keeps everything about the
 model fixed (including tokenizer and its interaction with the text), so it separates

@@ -73,8 +73,8 @@ def fig_single(variant: str = "single") -> None:
     for j in range(0, len(y), VARIANTS[variant].dup):
         c = int(y[j])
         _plot_phased(cx, t["F"][:, j, :2].numpy(), bounds, CLASS_COLORS[c], CLASS_MARKERS[c])
-    bx.set(title="$W_i$", xlabel="dim 1", ylabel="dim 2")
-    cx.set(title=r"$f_\theta(x)$", xlabel="dim 1", ylabel="dim 2")
+    bx.set(title="$W_i$", xlabel="dim 1", ylabel="dim 2", aspect="equal")
+    cx.set(title=r"$f_\theta(x)$", xlabel="dim 1", ylabel="dim 2", aspect="equal")
     bx.legend(fontsize=7, handles=[
         Line2D([], [], color=CLASS_COLORS[i], marker=CLASS_MARKERS[i], ls="-",
                label=f"class {i} (n={n})") for i, n in enumerate(counts)])
@@ -100,17 +100,22 @@ def fig_single(variant: str = "single") -> None:
     _save(fig, f"fig4_{variant}")
 
 
-def fig_controls(variants: tuple[str, ...] = ("single", "uniform", "nobottleneck",
+def fig_controls(variants: tuple[str, ...] = ("single_long", "uniform", "nobottleneck",
                                               "mse_uniform", "mse_skew")) -> None:
-    """RankMe curves: only `single` keeps the compression decline; every control is monotone."""
-    fig, ax = plt.subplots(figsize=(7, 4.5))
-    for v in variants:
+    """RankMe curves, one panel per variant (own axes): only the skew+bottleneck+CE reference
+    shows the peak-then-decline; every control is monotone. `single_long` = the canonical
+    clustered `single` spec run to 3000 steps, showing the decline AND its transience."""
+    fig, axes = plt.subplots(1, len(variants), figsize=(3.6 * len(variants), 3.4))
+    for ax, v in zip(axes, variants):
         steps, rm = _rankme(_results(v))
-        d = VARIANTS[v].d
-        ax.plot(steps, rm / d, lw=2, label=f"{v} (d={d})")
-    ax.set(xscale="log", xlabel="training steps (log)", ylabel="RankMe / d (fraction of feature dim)",
-           title="Controls remove the compression phase")
-    ax.legend()
+        ax.plot(steps, rm, lw=2, color="tab:blue")
+        d = VARIANTS[v.removesuffix("_long")].d
+        ax.set(xscale="log", xlabel="steps (log)", title=f"{v} (d={d})")
+        if v.startswith("single"):
+            ax.axvline(300, color="gray", lw=0.8, ls=":")   # the paper's Fig-4 window
+    axes[0].set_ylabel("RankMe(features)")
+    fig.suptitle("Only skew + bottleneck + CE compresses — controls are monotone "
+                 "(single shown past the paper's 300-step window: the decline is transient)")
     _save(fig, "fig_controls")
 
 

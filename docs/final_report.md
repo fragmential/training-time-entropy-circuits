@@ -28,12 +28,16 @@ padded last-token):
    absolute index at 1b and 6.9b) collapses to rank ≈ 1 exactly at the RankMe peak and then
    grows to ≈22× the stream's energy. Its dominant variance direction (the top centered
    eigenvector of the write's output, carrying 94–99% of its variance — "the rogue direction")
-   is **newline-activated**: projecting raw per-token activations onto it, 38/40 top-spiking
-   tokens are `\n` variants in both models; the
-   final blocks learn to *cancel* it before the output (signed trace → −0.65). OLMo-2 shows
-   none of this: it compresses via the *interference* term — distributed, mutually **aligned**
-   late writes — with shallower total compression. Stated plainly: a substantial part of
-   Pythia's measured "compression" is the model devoting one enormous direction to newline tokens.
+   is a **sink direction** with two carriers per packed window (position-split analysis,
+   dig_findings): every window-start position fires unconditionally regardless of token
+   identity (+1657, 510/512 windows — the packed-stream form of the attention-sinks
+   literature's "BOS" slot), and each window's FIRST newline fires hardest (+2135; 96% of
+   newlines are bulk-ordinary — the earlier "newline-activated, 38/40 top rows" framing was
+   this mixture read per token type). The final blocks learn to *cancel* it before the output
+   (signed trace → −0.65). OLMo-2 shows none of this: it compresses via the *interference*
+   term — distributed, mutually **aligned** late writes — with shallower total compression.
+   Stated plainly: a substantial part of Pythia's measured "compression" is the model devoting
+   one enormous direction to its attention-sink slots.
 
 3. **Norm placement and the rogue mechanism — corrected reading.** Pythia is itself pre-norm
    (writes READ a normalized stream) and develops the rogue write anyway; OLMo-2's
@@ -70,7 +74,9 @@ literature (2510.06477, which did not test OLMo-2) and extending the write-norm 
 a third axis. Details: dig_findings "Compression valleys".
 
 RQ2 (does maths have more shared geometry than memorised data, beyond the general
-population's?) ran to completion: **maths text does carry genuine shared structure beyond the
+population's?) — **⚠️ the paragraph below is UNDER REVISION (see §4 banner): its numbers
+mixed gradient excess into the activation claims; acts-only inverts the quotes/memorized
+ordering.** As originally written: **maths text does carry genuine shared structure beyond the
 general population** (2.3–2.4× the split-half null's excess, both families) though
 mid-spectrum rather than in the tail; the two "memorised" populations split sharply
 (high-entropy verbatim strings add almost nothing beyond early-layer lexical novelty; famous
@@ -86,9 +92,9 @@ quotes are the most structured population measured); and H2.1's coupling predict
 | H1.2 late-layer locus | **holds for OLMo, refuted for Pythia** (blk3 early rogue + late cancellation) |
 | H1.3 toy-like last write | **holds for Pythia** (head-mass 0.26→0.92), weaker for OLMo (0.63, falling) |
 | H1.4 write-norm selects the concentration mode | **CONFIRMED, all 3 deciders**: toy write-norm suppresses the rogue (6/6, both wirings); dataset swap rules the data out; and the nanochat PRE-REGISTERED prediction hit — nanochat-d12 (pre-norm, sequential, no write-norm) shows the full Pythia signature |
-| H1.5 rogue direction functionally inert at output | **REFUTED**, and reconciled with Sun et al via the intervention triptych (zero +1.04 / global-mean +0.74 / token-conditional +0.43): the apparent divergence was a protocol artifact (global mean ≈ zeroing for spike tokens); with the aligned token-conditional protocol their bias account holds at newline positions (+0.09) — but the within-class spike variance is READ BY THE NEXT POSITION (+1.15 after newlines, worse than zeroing), a functional role their constant-bias account misses. Details: dig_findings 'interventions' section |
+| H1.5 rogue direction functionally inert at output | **REFUTED**, and reconciled with Sun et al via the intervention triptych (zero +1.04 / global-mean +0.74 / token-conditional +0.43): the apparent divergence was a protocol artifact (global mean ≈ zeroing for spike tokens); with the aligned token-conditional protocol their bias account holds at newline positions (+0.09) — but the within-class spike variance is READ BY THE NEXT POSITION (+1.15 after newlines, worse than zeroing), a functional role their constant-bias account does not describe — though the recorded alternative reading (mean-substitution also perturbs LayerNorm statistics, a known confound of massive-activation ablations; research_questions) is not excluded. Details: dig_findings 'interventions' section |
 | H2.1 grads↔acts coupling: math > memorised | **refuted in all three variants** — incl. the clean subspace test: excess-acts and excess-grads subspaces overlap at ≈ chance for every population (max ~2× null, OLMo math-web) |
-| H2.2 math's excess structure in G's tail | **half-supported**: math has real excess (2.3–2.4× null, both families) but it lives mid-spectrum, not the tail; mem populations split (strings ≈ nothing, quotes = largest excess of all) |
+| H2.2 math's excess structure in G's tail | ⚠️ UNDER REVISION (§4 banner — acts/grads conflation). Original verdict: **half-supported**: math has real excess (2.3–2.4× null, both families) but it lives mid-spectrum, not the tail; mem populations split (strings ≈ nothing, quotes = largest excess of all) |
 | H3.1 toy replication | **confirmed**, incl. panels B/C — requires the paper's CONSTRUCTED init (an unstated fourth condition beyond skew+bottleneck+CE; read off their figure's t=0 markers). Robust 4/5 jitter seeds under that init; the earlier seed-dependence caveat was an artifact of our iid init and is retracted. Details: toy_fig4_addendum.md |
 | H3.2 residual toy shares transformer's ledger signature | **partial**: Pythia's signature, yes (6/6 no-norm seeds); OLMo's, no |
 | H3.3 representativeness guard | worked as designed (flagged the linear variant, passed the nonlinear + all grid cells) |
@@ -141,17 +147,23 @@ tail fall-off anywhere (band RankMes at 512+/1024+ are monotone non-decreasing).
 
 ### 2.2 Family mechanisms
 
-**Pythia — the newline rogue write.** blk3.mlp's write starts ordinary (RankMe ≈ 470/830,
+**Pythia — the sink-direction rogue write.** blk3.mlp's write starts ordinary (RankMe ≈ 470/830,
 ~0.27× stream energy) and collapses to rank ≈ 1–2 *exactly at the RankMe peak* (1b: over steps
 2k→5k, peak 4k; 6.9b: 10k→26k, peak 13k), then grows in energy for the rest of training
 (→22.6× / 3.7×). It carries ~90–100% of the total quality decline. Token attribution (raw
-samples, final checkpoint): the direction is a **sparse newline direction** — `\n`/`\n\n` are 38 of
-the top-40 spiking tokens in both models; the top eigenvalue holds 94–99% of the write's
-variance; mean_frac ≈ 0.003 (pure variance, not a bias — distinct from the "constant massive
-activation" reading). The last blocks increasingly write *against* it (signed trace vs blk3 →
-−0.65 in both models) — the late positive interference is rank *restoration*. Attenuated but
-present in last-token geometry (13.9% of padded last tokens are newline-bearing — trailing
-newlines + truncation boundaries — enough to keep the direction's variance alive there). Figures:
+samples, final checkpoint; position-split Jul 13): the direction is a **sink direction with
+two slots per window** — position 0 unconditionally (+1657 on arbitrary content tokens) and
+the window's first newline (+2135; the remaining 96% of newlines are bulk-ordinary, so the
+earlier "38/40 top-spiking tokens are `\n`" reading was the type-level shadow of the
+first-newline slot); the top eigenvalue holds 94–99% of the write's variance; mean_frac ≈
+0.003 (pure variance, not a bias — distinct from the "constant massive activation" reading). The last blocks increasingly write *against* it (signed trace vs blk3 →
+−0.65 in both models) — the late positive interference is rank *restoration*, seen directly
+as a depth-wise scrub in the mid-stack profile (the spike rides the stream ~unchanged
+blk4–blk12, nearly gone at before_final_norm). Robustness follow-ups (Jul 13: an explicit
+EOT does not absorb the first-newline slot — both slots structural; ordinary tokens carry a
+decaying mid-stack residue of the direction): dig_findings "Sink-slot follow-ups" +
+showcase §4 depth figure; how that residue relates to the padded last-token measurement is
+an open question (§6). Figures:
 experiments.ipynb Exp 4.9 (write trajectory + newline-vs-other projection histogram) and
 Exp 4.10 (cancellation trajectory, head-mass, per-write concentration bars).
 
@@ -165,9 +177,10 @@ ordinary-token subspaces rather than one write flagging a token class. No write 
 *recovers* over late training (1B: −3.9 → −1.0; 7B: −6.0 → −1.3) while interference falls
 steadily (→ −4.1 / −5.5), concentrated in the last 2–3 blocks whose writes are mutually
 *aligned* (+0.32…+0.39 — reinforcement, the opposite of Pythia's cancellation). OLMo's late
-writes are also the mean-heavy ones (mean_frac 0.15–0.6), where Pythia's rogue is mean-free —
-the two families' anomalies are different objects. Both scales, both geometries. OLMo also
-shows the late *re-entropy* rise Li et al note.
+writes were also claimed to be "the mean-heavy ones (mean_frac 0.15–0.6), where Pythia's
+rogue is mean-free" — ⚠️ that mean_frac family split is FLAGGED as unverified/faulty (see
+appendix: the figures contradict its cross-model form). Both scales, both geometries (for
+the non-flagged claims). OLMo also shows the late *re-entropy* rise Li et al note.
 
 **Unifying statement:** in every model measured, compression is concentration of write energy
 into few shared directions — never a per-write phase turnover ($\sum\chi$ stable everywhere).
@@ -199,8 +212,9 @@ phases *coexist spectrally* — the bulk never stops entropy-seeking, so "compre
 a head event superimposed on continuing expansion, which their sequential-phases framing does
 not contain; (ii) composition: which writes, which ledger term, and that two architectures
 produce the same curve by different mechanisms; (iii) the mechanism identity in Pythia
-(newline direction + late cancellation) and the resulting metric caveat — an all-token RankMe on a
-Pythia-lineage model is substantially measuring delimiter-token direction energy; (iv) the
+(sink direction — window-start + first-newline slots — plus late cancellation) and the
+resulting metric caveat — an all-token RankMe on a Pythia-lineage model is substantially
+measuring sink-slot direction energy; (iv) the
 toy's unstated fourth condition — their Fig 4 needs its constructed init, and its compression
 is a covariance-collapse transient whose visibility depends on split timing (§3, addendum).
 
@@ -221,8 +235,32 @@ canonical run, decline onset coincides with the fork) — and
 saturation-before-split is the VISIBILITY condition determining whether the kick prints as a
 compression phase or is swallowed by the rising baseline. Toy compression remains a transient
 (RankMe recovers to ~2.0 by step ~3000).
-(b) **Residual vs plain**: the no-residual stack loses the phases entirely (monotone collapse
-to RankMe 1); the stream is constitutive, not incidental. (c) **Ledger signature**: the
+(b) **Residual vs plain — RESOLVED (Jul 13, full study: toy_multilayer.md):** the phase
+curve prints through deep stacks whenever three conditions hold — a compression event
+timed after spectrum saturation, a large-enough kick, and near-identity transmission from
+the feature layer to the measurement point. Residual stacks with small-at-init writes
+print it (2/6/12 blocks, decline onset = the rare-pair fork, 3/3 seeds), and so does a
+NO-residual stack with identity-initialized blocks (3/3) — so the corrected form of "the
+residual stream is constitutive" is: the residual provides near-identity transmission BY
+DEFAULT (LLMs inherit it architecturally), while plain stacks only have it if arranged.
+The MULTI task lacks the phases for task-structure reasons (frequency-ordered learning;
+its 26 rare forks smear across the entropy-seeking rise — masked). The wording below is
+pre-revision. As originally written: the no-residual stack loses the phases entirely — and the
+trainability confound is now RESOLVED (Jul 13 fair-shot retune): at lr 0.01/0.02 the plain
+stack fully solves the task (final loss 3e-5) and still shows no phase structure (every depth
+flat until ~10⁴ steps, then collapse to RankMe ~1–2 with partial recovery — never
+dip→rise→peak→decline).
+"The stream is constitutive for the phases" stands unconfounded (the multi_plain spec now
+ships the fair-shot lr and the figure is regenerated from it). Depth nuance (corrected
+Jul 13; showcase_appendix §C): the earlier "pattern only at the earliest stream" reading
+was an uncentered-measurement artifact — the writes' accumulated bias means hold ~50% of
+the uncentered trace at depth. CENTERED (the LLM-comparable object), every stream starts
+near-full-rank and the FINAL stream compresses hardest (8.9 → 2.5), matching the LLMs'
+end-of-model pattern; what the toy lacks everywhere is a pronounced entropy-seeking rise,
+because theta (the toy's learnable feature matrix — each sample's feature vector is a free
+parameter, Li et al's f(x)) initializes as random noise already at full rank — nothing to
+expand.
+(c) **Ledger signature**: the
 residual toy reproduces *Pythia's* quality-driven signature (6/6 no-norm seeds, wiring-
 independent), including a rogue-like rank-collapsed write (though never Pythia's 20× energy
 growth). (d) **Architecture knobs**: pre-norm suppresses the rogue/quality mechanism 6/6
@@ -233,7 +271,22 @@ toy lacks (attention / token structure are the candidates). (e) **H3.3 guard** w
 the linear multi-layer variant (max w_k = 0.87), passed the nonlinear base and all grid cells
 (0.12–0.19).
 
-## 4. RQ2: task geometry (maths vs memorised) — ⏳ running
+## 4. RQ2: task geometry (maths vs memorised) — ⚠️ UNDER REVISION, DO NOT CITE (Jul 13)
+
+**This section's headline numbers are contaminated and its verdicts are suspect.** The
+"excess mass" aggregates below averaged over leaf×QUANTITY entries — i.e. they mixed
+GRADIENT excess into an activation-geometry claim. Recomputed on activations only
+(pythia-1b): quotes 274 vs padded null 338 (BELOW the null — "quotes = largest excess of
+any population" was carried by quotes' gradient excess, 1385), memorized 926 (the actual
+largest padded population on acts, ~2.7× null), math-web 209 vs packed null 117 (~1.8×,
+not 2.4×). Every H2.2 verdict needs re-derivation with acts and grads reported separately.
+The tail_centroid conclusion ("mid-spectrum, matches the null") is contaminated the same
+way: the doc numbers (math 510 vs null 555) are the acts+grads mixtures; acts-only, math's
+excess sits HEAD-ward of the null (816 vs 1012 of 2048) — the tail prediction fails even
+more clearly, but there is a real locality signal the mixture erased.
+Parked by user decision (plan.md); the split-half coherence results use a different
+(subspace-overlap) machinery and are not automatically implicated, but should be re-checked
+for the same conflation before reuse.
 
 **Design** (final checkpoint only; pythia-1b-deduped + OLMo-2-0425-1B; grads via `:both`
 hooks at blk\*.attn.in / blk\*.mlp.up.in / before_final_norm; storage cov_svd):
@@ -253,33 +306,10 @@ excess directions live in G's eigenrank — H2.2's tail-locality). H2.1 = acts�
 (the `gen` metric) compared math-vs-memorised after G-whitening. Deferred to a second pass:
 shuffled-math lexical control; multi-checkpoint sweep.
 
-**Methods, step by step.** Reading a geneig spectrum: $\Sigma_A v = \lambda \Sigma_B v$ is
-solved by whitening ($x \mapsto \Sigma_B^{-1/2}x$ with $\Sigma_B^{-1/2} = V_B\Lambda_B^{-1/2}V_B^\top$,
-damped) — in whitened coordinates B has identity covariance, and the eigenvalues of
-$W = \Sigma_B^{-1/2}\Sigma_A\Sigma_B^{-1/2}$ are the per-direction variance ratios
-$\lambda_i = v_i^\top\Sigma_A v_i / v_i^\top\Sigma_B v_i$. If $\Sigma_A = c\Sigma_B$ the
-spectrum is perfectly flat ($W = cI$; RankMe = d) — so **flat ratio spectrum = proportional
-geometries**; spread = mismatch, with large $\lambda$ = directions A over-expresses.
-
-*Experiment A (H2.2), per (task, model, geometry):* (1) collect centered per-leaf covariances
-for T and G, same hooks/checkpoint/token-selection; (2) per leaf compute
-$W = \Sigma_G^{-1/2}\Sigma_T\Sigma_G^{-1/2}$ from the two eigendecompositions; (3) interpret
-$\lambda_i$ as T's variance per unit G-variance; (4) reduce to excess_mass
-$=\sum_{\lambda>1}\log\lambda$ and $n(\lambda>2)$, leaf-averaged; (5) calibrate against the
-identical pipeline run on a second independent G sample (the split-half null — "structure"
-means above THIS, not above 1); (6) locate the excess: generalized eigenvectors are new directions (in neither operand's
-eigenbasis), but the implementation returns their *components* indexed by G's eigenrank
-(whitened coordinates), so tail_centroid = rank-centroid of the top-8 excess directions'
-squared components over G's eigenrank — the equal-variance-footing profile (the raw-space
-profile would carry a $1/\lambda_G$ weighting that skews tailward tautologically). *Not run:* the additive variant (rotate onto $V_G$, subtract
-$\Lambda_G$, resort) — only the multiplicative/whitening version was implemented.
-
-*Experiment B (H2.1), per population:* (1) collect $\Sigma_{\text{acts}}$ AND
-$\Sigma_{\text{grads}}$ ($\partial L/\partial h$, next-token CE) at each leaf; (2) geneig of
-grads w.r.t. acts; (3) flat ⇔ gradient geometry ∝ activation geometry ("coupled"); (4) reduce
-to RankMe of the ratio spectrum, leaf-averaged, compared across populations within one
-geometry only (the statistic is whitener-conditioning-sensitive, so cross-model/geometry
-absolute values are not comparable). *Pending:* the design's G-whitening prior step.
+**Methods:** the full step-by-step derivation — whitening, reading a geneig spectrum,
+excess mass / tail_centroid, both experiments (A: task-vs-G geneig; B: acts↔grads
+coupling), and the not-run additive variant — lives in docs/rq2_methods.md; the split-half
+estimator (independent whiteners, raw-space subspace overlap) in docs/splithalf_note.md.
 
 **Results** (both models at 1B scale; geometry-matched nulls; "excess mass" =
 $\sum (\log\lambda)_+$ over geneig $\lambda > 1$ vs G, averaged over 66 leaf×quantity entries):
@@ -326,12 +356,8 @@ $\sum (\log\lambda)_+$ over geneig $\lambda > 1$ vs G, averaged over 66 leaf×qu
   output-side phenomenon (a common high-entropy-text prediction mode, not shared storage).
   Math's coherence depth-shape splits by family like its excess does (pythia mid/late
   plateau ~0.72; OLMo strongest early, 0.88–0.94). Nulls are ≤0.12 at every depth.
-  Methodological notes that this measurement forced: (i) with a SHARED whitener the null
-  overlap is hugely inflated (0.43–0.60) — both comparisons inherit the same reference-
-  estimation error, so split-half designs need independent whiteners per side; (ii) whitened
-  coordinates are whitener-specific — cross-whitener comparisons must map directions back to
-  raw activation space (orthonormalized subspace overlap) or they collapse to chance
-  spuriously.
+  The methodological findings this measurement forced (shared-whitener inflation of the
+  null; cross-whitener comparisons must return to raw activation space): splithalf_note.md.
 - **Packed memorized populations (added later, N-matched nulls):** the Merullo et al OLMo-2
   memorized set (650 seqs, packed all-token, ~73k tokens) shows **excess ≈ 954 vs its
   N-matched null of 61 (~16×)**, concentrated at MID blocks (blk8–10.attn.in) with
@@ -361,24 +387,7 @@ $\sum (\log\lambda)_+$ over geneig $\lambda > 1$ vs G, averaged over 66 leaf×qu
   and excess-grads subspaces directly (raw-space overlap, as in the split-half machinery) —
   noted as future work.
 
-## 5. Side findings
-
-- **Mean anomalies are a separate object from the rogue write** and split by family the same
-  way: Pythia's rogue is variance-only (mean_frac → 0.003); OLMo's late writes carry means
-  worth 15–60% of their energy, pointing *within* high-variance subspace (top_overlap ≈ 0.5).
-  mean_migration (centered-tail ↔ uncentered-top subspace overlap — the "hidden bias axis"
-  detector) is ≈ 0 at every write/checkpoint sampled: no mean ever hides in the variance
-  tail's bottom-32. This does not contradict the earlier graded tail-alignment observation
-  (a centroid statement, not a subspace one).
-- **Drift**: both 1B models show a violent early reorganization (OLMo-1B's mean CKA-drift
-  bottoms at 0.12 vs pythia-1b's 0.82) and a second dip at the RankMe peak — two
-  reorganization events bracketing the entropy-seeking phase — then monotone stabilization.
-- **Data-mode robustness**: every family-level claim survived packed→padded; the only
-  geometry-sensitive quantity found is the rogue write's *strength* (weaker on last tokens).
-- **Ops finding**: a 2×-RSS bug in collection (`captured()` retained per-batch chunks) caused
-  the padded-7B OOMs and explains historical memory peaks; fixed, all budgets now honest.
-
-## 6. Caveats
+## 5. Caveats
 
 - Ledger exactness holds for the λ-entropy RankMe (`matrix_entropy`); `true_rankme` tracks it
   but the identity is not exact there. Both stored.
@@ -397,32 +406,50 @@ $\sum (\log\lambda)_+$ over geneig $\lambda > 1$ vs G, averaged over 66 leaf×qu
 - GSM8K's train split is small (~7.5k rows); the answer-slot population is correspondingly
   lower-N than the others.
 
-## 7. In flight and next steps
+## 6. Open questions
 
-**Done — dataset-swap control** (the data-vs-model confound check): both 1B models re-run on
-  the OTHER family's pretraining mix, cross-tokenized from the SAME texts (only the
-  model/tokenizer varies). **Every headline finding replicates within a few percent on the
-  swapped data — the family split is MODEL-dependent**: pythia-on-olmo-mix grows the same
-  blk3 rank-one write (RankMe 1.2, trace ratio 24.4× vs 22.6×, identical collapse onset),
-  same quality-driven ledger, same cancellation (−0.67); OLMo-on-Pile stays
-  interference-driven with no rogue (all writes ≥ 284). Head-confinement universal in both
-  directions. Only visible data effect: the magnitude of pythia's bulk rise (+2% vs +11%;
-  sign/structure unchanged). Full verdict table: docs/swap_run_findings.md.
-- ~~Toy write-norm variant~~ — **done** (see §0.3): write-norm suppresses the rogue
-  mechanism completely; toy_model_report.md "Architecture knobs" carries the full grid +
-  fig_arch_grid.png.
+What we do not know (statements of ignorance, not plans — plans live in docs/plan.md):
 
-**Next (ranked):**
-1. Rogue-write intervention: project out the newline direction at inference, measure loss —
-   the behavioral price of the direction (cheap, no training).
-2. Separation-clean H2.1: overlap between a task's acts-excess and grads-excess subspaces
-   (raw-space, independent whiteners — the split-half machinery), replacing the confounded
-   scalar variants.
-3. Toy: add an attention-like ingredient (token-addressed mixing) to test whether it produces
-   OLMo's interference mode — the missing half of the knob result.
-4. More checkpointed families (OLMo-1, LLM360, SmolLM) to turn the norm→mechanism correlation
-   into a cross-family regularity.
-5. Deferred pending infgrams (other session): TriviaQA distributional-memorization uses — the
-   memorization-peak vs spectral-event alignment check, checkpoint-wise head-ablation cost,
-   and a behaviorally-grounded memorized population for RQ2.
-5. Principled head/bulk cut (spectral knee) + a figure pass for the thesis.
+- **The origin of OLMo-2's interference mode.** No toy knob (norm placement × wiring, 24
+  runs) produces interference-carried compression; the responsible ingredient is missing
+  from the toy (attention / token structure are the candidates).
+- **How rogue-direction variance reaches padded last tokens — now narrowed, not closed.**
+  Not slot inclusion (only 5/2,331 newline-bearing last tokens are their document's first
+  newline) and not carried along v₁ at the final stream. The mid-stack run (Jul 13) shows
+  ordinary tokens DO carry the direction mid-stack (~27% of centered row norm at blk4,
+  ~3.6% residue at the final stream); what remains unchecked is whether that residue
+  quantitatively accounts for the padded last-token measurement.
+- **Whether QK-norm alone suppresses the rogue mechanism.** The sink literature finds
+  QK-norm the stronger lever at 7B scale; our toy grid only tested write-norm, and OLMo-2
+  has both.
+- **Whether the norm→mechanism link is a cross-family regularity** or a three-family
+  correlation plus one confirmed prediction.
+
+## Appendix: side findings (real results, not load-bearing for RQ1–RQ3)
+
+- **"Mean anomalies" — ⚠️ FLAGGED, NO VERIFIED FINDING, DO NOT CITE (Jul 13).** The claim
+  formerly here ("mean anomalies split by family: Pythia's rogue variance-only, OLMo's late
+  writes mean-heavy 0.15–0.6") is retracted as a misinterpretation: the showcase §8 panels
+  contradict its cross-model form (OLMo-1B's late writes have LOWER mean_frac — the
+  write's constant per-token offset ‖μ‖² relative to its variance trace — than pythia's
+  ordinary writes; the 0.15–0.6 range was OLMo-7B alone), and the "mean anomaly"
+  terminology drifted between analyses. Everything mean_frac/mean_migration-related is
+  unverified until re-derived from scratch.
+- **Drift — ⚠️ NOT re-verified under the gap-corrected metric.** The original claim (raw
+  consecutive-checkpoint CKA: violent early reorganization, second dip at the RankMe peak,
+  then monotone stabilization) conflates checkpoint spacing with drift speed. A first look
+  at the corrected rate ((1−CKA)/Δ, `cka_drift_rate`) does NOT reproduce it: pythia-1b's
+  largest per-dex rates sit mid-training (blk8 ≈ steps 14k–70k) and OLMo-1B's rates rise
+  toward the END of training rather than stabilizing. Needs a proper pass (incl. the
+  per-dex vs per-gtok normalization choice) before the claim is used anywhere.
+- **mlp×attn coupling**: near-diagonal negative signed traces show MLPs partially consuming
+  their neighbouring attention outputs (the GELU-4L "memory management" pattern) — showcase
+  §8; independent of the family mechanisms.
+- **Data-mode robustness**: every family-level claim survived packed→padded; the only
+  geometry-sensitive quantity found is the rogue write's *strength* (weaker on last tokens).
+- **Rogue follow-up detail (Jul 13, oneoff_scripts/rogue_id_followups.py, full numbers in
+  dig_findings "Sink-slot follow-ups"):** EOT-twin — with `<|endoftext|>` prepended, the
+  first newline still spikes (2178 vs 2132; the EOT takes the position-0 slot at 1583 vs
+  1657). Mid-stack depth profile — sink rows ≈99% along v₁ from blk4 through blk12, halved
+  at blk15, ≈0.17–0.20 at before_final_norm; ordinary tokens carry ~27% of centered row
+  norm along v₁ at blk4, decaying to ~3.6% at the final stream.

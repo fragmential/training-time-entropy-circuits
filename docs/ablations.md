@@ -22,7 +22,7 @@ guards, what was done, the outcome, and where the evidence lives. Companion to
 | 262k vs 1.2M token budget | "samples-mode budgets too small for stable RankMe" | ablation on the 1Bs | RankMe within ~1%, corr ≥ 0.993 | early-session check (block_representations_all_262k) |
 | Shuffled text sampling | "padded populations = head-of-dataset bias" | seeded shard-shuffle; disjoint opening docs verified | bias removed; cache keys carry the seed | data_utils `text_shuffle_seed` |
 | N-matched nulls (RQ2) | "geneig excess inflates as task-side N shrinks" | split-half nulls at matched N per geometry; small-N packed nulls (73k/1M) for the memorized populations | padded conclusions N-matched by design; packed mem numbers held until matched nulls land ⏳ | rq2_methods §2 step 5 |
-| MP-broadening caveat | "deep-tail levels comparable across different-N runs" | trends-at-fixed-N only; deep-band windows kept ≲ low hundreds padded | stated wherever bands are read | dig_findings; final_report §6 |
+| MP-broadening caveat | "deep-tail levels comparable across different-N runs" | trends-at-fixed-N only; deep-band windows kept ≲ low hundreds padded | stated wherever bands are read | dig_findings; final_report §5 |
 
 ## Statistics / nulls
 

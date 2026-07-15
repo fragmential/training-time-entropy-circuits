@@ -34,6 +34,12 @@ _REGISTRY = {
     "merullo_memorized_olmo": ("allenai/OLMo-2-0425-1B", {}),  # Merullo et al mem set; prebuilt cache
     "merullo_memorized_olmo_a": ("allenai/OLMo-2-0425-1B", {}),  # disjoint halves (split-half)
     "merullo_memorized_olmo_b": ("allenai/OLMo-2-0425-1B", {}),
+    "pythia_memorized_69b":   ("EleutherAI/pythia-memorized-evals", {}),  # deduped.6.9b (prebuilt cache)
+    "pythia_memorized_69b_a": ("EleutherAI/pythia-memorized-evals", {}),  # disjoint halves (prebuilt caches)
+    "pythia_memorized_69b_b": ("EleutherAI/pythia-memorized-evals", {}),  # for split-half coherence
+    "merullo_memorized_olmo7b": ("allenai/OLMo-2-1124-7B", {}),  # Merullo et al 7B mem set; prebuilt cache
+    "merullo_memorized_olmo7b_a": ("allenai/OLMo-2-1124-7B", {}),  # disjoint halves (split-half)
+    "merullo_memorized_olmo7b_b": ("allenai/OLMo-2-1124-7B", {}),
 }
 
 AVAILABLE_DATASETS = sorted(_REGISTRY)

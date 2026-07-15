@@ -157,6 +157,38 @@ in which rare classes start (near-)coincident so their separation arrives after 
 phase saturates but inside the training window. That is a fourth necessary condition the
 paper's text never states, and their Fig 4's init visibly encodes it.
 
+## Appendix: proof sketch — why the decline is transient
+
+Setting: d=2, classes (2,2,1,1), features F free parameters, logits FW, CE, full-batch GD.
+Write G = FᵀF; the eigengap obeys λ₁ − λ₂ = √((G_xx − G_yy)² + 4G_xy²), and RankMe is a
+scale-invariant function of λ₂/λ₁ (maximal iff isotropic).
+
+1. **Shared path (exact).** The GD vector field commutes with the rare-pair swap (2↔3): if
+   f₂ = f₃ and w₂ = w₃ then their time-derivatives are identical (verified symbolically —
+   the difference dynamics vanish). Coincident init ⇒ the co-travel is exact; a jitter δ
+   evolves under the linearization around the symmetric path.
+2. **Fork time (linearized instability, rate measured).** The antisymmetric (2↔3) mode grows
+   exponentially at rate r (measured 0.031/step at lr 0.25; log-linear over 4+ decades), so
+   the fork arrives at t_fork ≈ log(1/δ)/r — validated across δ ∈ [1e-6, 1e-1] within
+   10–15%. The fork's spectral effect is the collapse of the pair's off-diagonal covariance
+   cancellation: a BOUNDED change ΔG_xy of order (pair amplitude at fork)².
+3. **Asymptotics under CE.** After all classes separate, CE on separable data drives margins
+   to grow ~log t with the parameter direction converging (implicit-bias regime à la
+   Soudry et al): F(t) = ρ(t)·F̂ + o(ρ), ρ → ∞. Hence G(t) = ρ²·F̂ᵀF̂ + o(ρ²) — spectrum
+   shape converges to that of the FIXED limit Gram F̂ᵀF̂.
+4. **Transience.** RankMe(t) → RankMe(F̂), and the fork's ΔG_xy is o(ρ²) relative to the
+   growing diagonal, so its rank-entropy kick decays like (ρ(t_fork)/ρ(t))² — the decline is
+   a transient of relative size (fork amplitude / current scale)². Empirically the limit
+   configuration is balanced (blue → −x, green → −y, symmetric against the frequent pair),
+   so RankMe(F̂) ≈ 2 and the curve recovers fully (measured 1.9993 at steps 3000–6000).
+
+What is proven vs assumed: step 1 is exact; step 2's exponential rate is measured, not
+derived from the Hessian; step 3 invokes the standard separable-CE implicit-bias picture
+without re-deriving per-class rate equalization for unequal counts (empirically the λ ratios
+do converge); step 4's RankMe(F̂) ≈ 2 is numerical. A complete proof needs (i) the max-margin
+characterization of (F̂, Ŵ) for this dataset, (ii) isotropy of its Gram, (iii) a decay-rate
+bound for the fork transient. Appendix-grade sketch, flagged accordingly.
+
 *Experiments live in the session scratchpad (`part1.py`, `part1c.py`, `part1d.py`,
 `refine.py`); dynamics
 identical to `toy/train.py` (imports `_clustered_init`), per-step logging, dup=1 ≡ dup=3.*

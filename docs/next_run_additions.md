@@ -27,4 +27,19 @@ persisted), so existing results can't be patched — these land on the next coll
    prev checkpoint's eigvals/eigvecs sit in its resolver cache; persisting them (~+1–2 GB on
    the spill) saves the ~1–2 min/ckpt re-decomposition on the next checkpoint.
 
+5. **Gap-aware drift** (Jul 13): stored `cka_drift` compares consecutive checkpoints without
+   normalizing for the gap between them, and the samples schedule was ~5× denser in
+   log-tokens near the end (the `_subsample` linear-refill bug, fixed Jul 13) — so late-run
+   drift levels read artificially low. A plotting-side correction exists
+   (`cka_drift_rate` virtual hook, `per='dex'|'gtok'`), but the clean fix is at collection
+   time: either store the per-checkpoint token gap alongside the drift value, or compute the
+   drift against a fixed-Δ reference (e.g. the checkpoint nearest half a dex back) instead of
+   "previous checkpoint". Note the fixed `_subsample` also means the NEXT sweep's step set
+   differs from the old one (36 shared + 14 shifted) — incremental reruns won't line up.
+
 Decided against: drift at 7B scale (not needed — user call, Jul 3 2026).
+
+## Historical ops note (moved from final_report — not science, kept for the record)
+
+A 2×-RSS bug in collection (`captured()` retained per-batch chunks) caused the padded-7B
+OOMs and explains historical memory peaks; fixed — memory budgets since are honest.

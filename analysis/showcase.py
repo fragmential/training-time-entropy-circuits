@@ -8,7 +8,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.4
 #   kernelspec:
-#     display_name: representation-geometry
+#     display_name: representation-geometry (3.14.0)
 #     language: python
 #     name: python3
 # ---
@@ -36,8 +36,8 @@ from analysis.experiments_lib import (grid_start, grid_show, plot_group, plot_he
 def caption(txt):
     """Paper-style figure caption, rendered below the figure it follows."""
     from IPython.display import display, HTML
-    display(HTML(f'<div style="font-size:0.88em; color:#555; max-width:56em; '
-                 f'margin:0.2em 0 1.2em 0.5em"><b>Figure.</b> {txt}</div>'))
+    display(HTML(f'<div style="font-size:0.88em; opacity:0.8; max-width:56em; '   # inherit theme
+                 f'margin:0.2em 0 1.2em 0.5em"><b>Figure.</b> {txt}</div>'))      # text color
 
 HK = build_hooks()
 BLOCK_SAMPLES = "block_representations_samples"
@@ -77,71 +77,112 @@ for model in ALL4:
 # = entropy-seeking never ends there). Both statistics are invariant to the head's growth.
 
 # %%
-KS, WINDOWS = (0, 1, 8, 32, 128, 512), ((11, 100), (32, 128), (128, 512), (512, -20))
+KS, WINDOWS = (0, 8, 32, 128, 512), ((11, 100), (128, 512), (512, -20))
 for model in PAIR:
-    tails = [(BLOCK_SAMPLES, ('before_final_norm', 'acts_centered'), f'k={k}', ('tail_rankme', {'k': k})) for k in KS]
-    alphas = [(BLOCK_SAMPLES, ('before_final_norm', 'acts_centered'), f'{a}-{b}', ('alpha_window', {'k0': a, 'k1': b})) for a, b in WINDOWS]
+    tails = [(BLOCK_SAMPLES, ('after_final_norm', 'acts_centered'), f'k={k}', ('tail_rankme', {'k': k})) for k in KS]
+    alphas = [(BLOCK_SAMPLES, ('after_final_norm', 'acts_centered'), f'{a}-{b}', ('alpha_window', {'k0': a, 'k1': b})) for a, b in WINDOWS]
     grid_start(ncols=2, title=f'Head-removed RankMe / band alpha — {get_model_label(model)}')
     plot_group('tail_rankme', tails, [model], color_palette='gradient')
     plot_group('alpha_window', alphas, [model], color_palette='gradient')
     grid_show()
-    caption(f'Spectral locality of the phases, {get_model_label(model)}, centered pre-final-norm '
-            f'stream. Left: RankMe of the spectrum with the top k eigendirections removed '
-            f'(k = 0…512, light→dark). Right: power-law slope α fit inside fixed rank windows. '
-            f'The compression decline survives k=1–32 but is gone by k=512; the deepest window '
+    caption(f'Spectral locality of the phases, {get_model_label(model)}, centered final stream '
+            f'(after the final norm — Li et al\'s measurement point). Left: RankMe of the '
+            f'spectrum with the top k eigendirections removed (k = 0…512, light→dark). Right: '
+            f'power-law slope α fit inside fixed rank windows. '
+            f'The compression decline survives k=8–32 but is gone by k=512; the deepest window '
             f'(512–end) moves in the OPPOSITE direction (α falls = flattening) throughout '
             f'training. The compression is a top-of-spectrum concentration front, not a global '
             f'contraction.')
 
 # %% [markdown]
-# ### What a selection-bias dynamic actually does to the bands (synthetic reference)
-# Li et al's mechanism (σ̇_i ∝ σ_i, dominant directions winning — their Prop. in the xent
-# supplement), implemented in its most aggressive multiplicative form d log λ_i ∝ λ_i/Σλ and
-# run on pythia-1b's MEASURED spectrum at its RankMe peak. What it actually produces: the
-# HEAD collapses (full RankMe 555 → 1) while every deep-band statistic is essentially FROZEN
-# (tail-RankMe k=512 moves 0.08%, band-α 32–128 moves 3.8% — multiplicative selection is
-# scale-invariant below the head, and once the head dominates, relative growth in the tail
-# vanishes; no η/T tuning changes this). Contrast with the measured bands above: the real
-# deep band is NOT frozen — its α falls / band-RankMe rises through the compression phase.
-# So a selection-bias dynamic reproduces the headline RankMe collapse but predicts an inert
-# deep spectrum; it cannot account for the measured deep-band motion in either direction.
+# ### Baseline: what a pure spectrum-tilt compression would look like
+# Not an experiment — a boring reference curve to overlay on the measured ones. The simplest
+# caricature of "selection bias compresses the spectrum" is a power-law spectrum whose tilt
+# steepens steadily: λ_i(t) = i^{−α(t)}, α increasing linearly in log-tokens (each unit of
+# time multiplies λ_i by i^{−c} — relative growth proportional to relative rank, spectrum-
+# wide). α's endpoints are calibrated so the synthetic RankMe matches the measured value at
+# the RankMe peak and at the end of training — the overlay therefore isolates SHAPE and band
+# behaviour, not level. Under the baseline everything moves together: a smooth, featureless
+# decline, and every tail band falls in lockstep. The measured trajectory can then be judged
+# against that: its decline is carried by the head while the deep band moves the OTHER way
+# (band figure above) — i.e. real compression is not a uniform tilt.
 
 # %%
-from analysis.experiments_lib import _rankme as _rm, _alpha as _al
+from analysis.experiments_lib import _rankme as _rm
 
-def selection_bias_reference(model='pythia-1b-deduped', T=60, eta=6.0):
-    ys, steps = _lib.get_ys(BLOCK_SAMPLES, model, ('before_final_norm', 'acts_centered'), 'rankme')
-    peak = steps[int(np.argmax(ys[2:])) + 2]                       # skip the init transient
-    lam = np.asarray(_lib.get_y(BLOCK_SAMPLES, model, ('before_final_norm', 'acts_centered'),
-                                'eigenspectrum', peak), float)
-    stats = {'RankMe (k=0)': lambda l: _rm(l), 'tail RankMe k=32': lambda l: _rm(l[32:]),
-             'tail RankMe k=512': lambda l: _rm(l[512:]),
-             'α 32-128': lambda l: _al(l, 32, 128), 'α 512-end': lambda l: _al(l, 512, -20)}
-    traj = {k: [] for k in stats}
-    for _ in range(T):
-        for k, f in stats.items(): traj[k].append(f(lam))
-        lam = lam * np.exp(eta * lam / lam.sum()); lam /= lam.sum()
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-    fig.suptitle(f'Synthetic selection-bias dynamic from {get_model_label(model)} peak spectrum')
-    for k in ('RankMe (k=0)', 'tail RankMe k=32', 'tail RankMe k=512'):
-        axes[0].plot(traj[k], lw=2, label=k)
-    axes[0].set(yscale='log', xlabel='synthetic step',
-                title='full RankMe collapses; tail RankMes frozen'); axes[0].legend(fontsize=8)
-    for k in ('α 32-128', 'α 512-end'):
-        axes[1].plot(traj[k], lw=2, label=k)
-    axes[1].set(xlabel='synthetic step',
-                title='band α: frozen (measured: 32-128 rises, 512+ falls)'); axes[1].legend(fontsize=8)
+def _rm_of_alpha(a, d=2048, k=0):
+    lam = np.arange(1, d + 1, dtype=float) ** -a
+    return _rm(lam[k:])
+
+def _alpha_for_rm(target, d=2048):
+    lo, hi = 1e-3, 12.0                       # RankMe is monotone-decreasing in the tilt
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if _rm_of_alpha(mid, d) > target else (lo, mid)
+    return (lo + hi) / 2
+
+def tilt_baseline(model='pythia-1b-deduped'):
+    hook = ('after_final_norm', 'acts_centered')
+    ys, steps = _lib.get_ys(BLOCK_SAMPLES, model, hook, 'rankme')
+    xs = np.asarray(_lib.get_xs_tokens(model, steps), float)
+    pk = int(np.argmax(ys[2:])) + 2
+    tr = pk + int(np.argmin(ys[pk:]))            # RankMe minimum = end of the compression phase
+    a0, a1 = _alpha_for_rm(ys[pk]), _alpha_for_rm(ys[tr])
+    sl = slice(pk, tr + 1)
+    u = (np.log(xs[sl]) - np.log(xs[pk])) / (np.log(xs[tr]) - np.log(xs[pk]))
+    alphas = a0 + (a1 - a0) * u
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    fig.suptitle(f'Tilt baseline vs measured — {get_model_label(model)}')
+    axes[0, 0].plot(xs, ys, lw=2, label='measured stream RankMe')
+    axes[0, 0].plot(xs[sl], [_rm_of_alpha(a) for a in alphas], 'k--', lw=2,
+                    label=f'tilt baseline (α {a0:.2f}→{a1:.2f})')
+    axes[0, 0].set(xscale='log', xlabel='tokens', ylabel='RankMe',
+                   title='headline curve: baseline calibrated peak → RankMe minimum')
+    axes[0, 0].legend(fontsize=8)
+    for k, c in ((32, 'tab:orange'), (512, 'tab:red')):
+        mys, msteps = _lib.get_ys(BLOCK_SAMPLES, model, hook, 'tail_rankme', {'k': k})
+        mx = np.asarray(_lib.get_xs_tokens(model, msteps), float)
+        axes[0, 1].plot(mx[pk:], np.asarray(mys[pk:]) / mys[pk], lw=2, color=c,
+                        label=f'measured tail k={k}')
+        axes[0, 1].plot(xs[sl], [_rm_of_alpha(a, k=k) / _rm_of_alpha(a0, k=k) for a in alphas],
+                        '--', lw=2, color=c, alpha=0.6, label=f'baseline tail k={k}')
+    axes[0, 1].axhline(1, color='gray', lw=0.8)
+    axes[0, 1].set(xscale='log', xlabel='tokens', ylabel='tail RankMe / value at peak',
+                   title='bands: baseline drags every band down together')
+    axes[0, 1].legend(fontsize=8)
+    ays, asteps = _lib.get_ys(BLOCK_SAMPLES, model, hook, 'alpha')
+    ax_ = np.asarray(_lib.get_xs_tokens(model, asteps), float)
+    axes[1, 0].plot(ax_, ays, lw=2, label='measured α (global fit)')
+    axes[1, 0].plot(xs[sl], alphas, 'k--', lw=2, label='baseline α(t)')
+    axes[1, 0].set(xscale='log', xlabel='tokens', ylabel='α',
+                   title='global power-law slope vs the baseline tilt')
+    axes[1, 0].legend(fontsize=8)
+    for (k0, k1), c in zip(WINDOWS, ('tab:blue', 'tab:orange', 'tab:green', 'tab:red')):
+        wys, wsteps = _lib.get_ys(BLOCK_SAMPLES, model, hook, 'alpha_window', {'k0': k0, 'k1': k1})
+        wx = np.asarray(_lib.get_xs_tokens(model, wsteps), float)
+        axes[1, 1].plot(wx, wys, lw=2, color=c, label=f'measured α {k0}–{k1}')
+    axes[1, 1].plot(xs[sl], alphas, 'k--', lw=2, label='baseline α(t), ALL bands')
+    axes[1, 1].set(xscale='log', xlabel='tokens', ylabel='band α',
+                   title='band slopes: a pure tilt has ONE α at every rank')
+    axes[1, 1].legend(fontsize=7)
+    plt.tight_layout()
     plt.show()
 
-selection_bias_reference()
-caption('Synthetic reference: the multiplicative selection-bias dynamic d log λ_i ∝ λ_i/Σλ '
-        'iterated from pythia-1b\'s measured peak spectrum (2048 eigvals, 60 steps, η=6). '
-        'Left (log y): full RankMe collapses to 1 as the top eigenvalue absorbs the spectrum, '
-        'but the head-removed tail RankMes barely move (k=32: −1.3%; k=512: −0.08%). Right: '
-        'band α is likewise near-constant (32–128: +3.8%; 512–end: +0.3%). The dynamic '
-        'predicts compression as a pure head phenomenon with a frozen deep spectrum — the '
-        'measured deep band (previous figure) moves instead, in the anti-compression '
-        'direction. Note these curves being flat IS the result, not a plotting artifact.')
+tilt_baseline()
+caption('The tilt baseline (dashed): a power-law spectrum λ_i = i^{−α(t)} with α increasing '
+        'linearly in log-tokens, endpoints calibrated so its RankMe equals the measured '
+        'stream RankMe at the peak and at the RankMe MINIMUM — the point where the '
+        'compression-seeking phase ends; the baseline is a model of the compression phase '
+        'only, not of the late re-expansion. Top left: the headline curves (agreement at '
+        'both calibration points is by construction; what matters is the smooth featureless '
+        'shape in between). Top right: head-removed tail RankMes, normalized to their value '
+        'at the peak — under the baseline every band falls in lockstep with the head '
+        '(dashed), whereas the measured deep band (k=512, solid red) RISES through the '
+        'compression phase. Bottom row, the same contrast in α: a pure tilt has a single '
+        'slope at every rank, so the baseline α(t) (dashed) should describe every band at '
+        'once — measured, the global α (left) steepens far less than the baseline needs, and '
+        'the band slopes (right) fan out: the 512+ band FALLS (flattens) while the head '
+        'bands steepen. Real compression is a head-concentration event, not a uniform tilt.')
 
 # %% [markdown]
 # ## 3. The ledger: what carries the compression, per family
@@ -191,36 +232,50 @@ for model in ALL4:
     ledger_stack(model)
 
 # %% [markdown]
-# ## 4. Pythia's rogue write: a newline-activated direction
+# ## 4. Pythia's rogue write: a sink direction (window-start + first-newline)
 # **Definition:** the "rogue direction" = the top eigenvector v1 of the CENTERED covariance of
 # blk3.mlp's output (final ckpt) — the axis of maximal variance of that write. It earns a name
 # because it alone carries 94–99% of the write's variance (that is what "rank ≈ 1 write" means).
 # "Projection onto it" = (x − μ)·v1 per token row.
-# **Precise claim (and no more):** that direction's large activations occur overwhelmingly at newline-token positions
-# (38/40 top rows; mean |projection| 98 on newline rows vs 10.5 elsewhere). Final-checkpoint,
-# correlational: it does NOT establish what the direction is FOR, only where it activates —
-# and a heavy tail of non-newline spikes exists too. The write collapses to rank ≈ 1 at the
-# RankMe peak, grows to ~22× the stream's energy, and the late blocks increasingly write
-# against it (signed trace → −0.65). OLMo-2 shows none of this (top-eigval share ~0.01 vs 0.99).
-# Systematic all-token check (mean |projection| per token TYPE, n>=20): newline variants top
-# the ranking with by far the largest counts ('\n' 99.3 @ n=11.6k, '\n\t', '\n\n'); a noisy
-# tail of low-count word types reaches 70-95 (n≈20-26, small-sample). Preimage check: the
-# input direction that best predicts the score is UNALIGNED with the raw '\n' embedding
-# (cos −0.013) and only weakly separates newline rows at the input — the spike is constructed
-# by the MLP (nonlinearly / from processed features), not echoed from the token embedding.
+# **Precise claim (position-split analysis, Jul 13):** the direction is a SINK direction with
+# two carriers per 511-token window: (1) POSITION 0, unconditionally — signed proj +1657 on
+# arbitrary mid-text content tokens, 510/512 windows (the packed-stream form of the
+# attention-sinks papers' "BOS" slot, which is positional — our mix contains no BOS at all);
+# (2) the FIRST NEWLINE of the window (+2135; 478/486 spiking newlines are the window's
+# first, median position 25). The other 96% of newlines are bulk-ordinary (−9.5 vs bulk −7) —
+# the earlier headline "mean |proj| 98 on newlines" is that 4%/96% mixture. Variance shares:
+# first-newline slots 60.4%, pos-0 slots 38.7%, all remaining 249k rows 0.9%. Correlational,
+# final-checkpoint: it locates WHERE the direction activates, not what it is for. The write
+# collapses to rank ≈ 1 at the RankMe peak, grows to ~22× the stream's energy, and the late
+# blocks increasingly write against it (signed trace → −0.65; pos-0 output norm 70.7 < bulk
+# 131 — the spike is largely cancelled by the end). OLMo-2 shows none of this (top-eigval
+# share ~0.01 vs 0.99). Preimage check: the input direction that best predicts the score is
+# UNALIGNED with the raw '\n' embedding (cos −0.013) — the spike is constructed by the MLP
+# from processed features (sequence-position / novelty-like), not echoed from the embedding.
+# **Follow-ups (Jul 13, figures below):** an explicit <|endoftext|> at position 0 does NOT
+# absorb the first-newline slot (both slots are structural, not a missing-resting-token
+# artifact), and the depth profile shows deposit at blk3 → unchanged ride through blk12 →
+# scrubbed by the late blocks, with ordinary tokens carrying ~27%→4% of their centered norm
+# along the direction mid-stack.
 
 # %%
 for model in ('pythia-1b-deduped',):
-    outs = [(BLOCK_SAMPLES, (f'blk{l}.mlp.out', 'acts_centered'), f'mlp {l}') for l in (1, 3, 5)]
+    half = n_blocks[model] // 2
+    outs = [(BLOCK_SAMPLES, (f'blk{l}.mlp.out', 'acts_centered'), f'mlp {l}')
+            for l in range(half)]
     grid_start(ncols=2, title=f'Rogue write trajectory — {get_model_label(model)}')
     plot_group('rankme', outs, [model], color_palette='gradient', ylog=True, title='write RankMe (centered)')
     plot_group('trace', outs, [model], color_palette='gradient', ylog=True, title='write trace')
     grid_show()
     caption(f'The rogue write forming, {get_model_label(model)}: RankMe (left) and total '
-            f'variance/trace (right) of the centered mlp-output covariance for blocks 1, 3, 5 '
-            f'(light→dark). blk3\'s write collapses to rank ≈ 1 at the stream RankMe peak '
-            f'while its trace keeps growing to ~22× the stream\'s energy — one huge direction, '
-            f'not a quiet write. Neighbouring writes do neither.')
+            f'variance/trace (right) of the centered mlp-output covariance for the FIRST {half} '
+            f'mlp writes (light→dark = deeper; the late half is omitted — late writes '
+            f'legitimately need large magnitude to move the by-then-large stream, so their '
+            f'traces would dominate the right panel without saying anything about blk3). '
+            f'Among its early peers exactly one write departs from the family: blk3 collapses '
+            f'to rank ≈ 1 at the stream RankMe peak while its trace keeps growing to ~22× the '
+            f'stream\'s energy — one huge direction, not a quiet write. Every other early '
+            f'write keeps a broad spectrum.')
 
 # %%
 # rogue_hist, step by step: (1) load the RAW per-token activations of blk3.mlp's output
@@ -245,8 +300,11 @@ def rogue_hist(model, step=143000):
     toks = tok.convert_ids_to_tokens(uniq.tolist())     # one vectorized call, not 50k decodes
     nl = {int(i) for i, t in zip(uniq, toks) if 'Ċ' in t or '\n' in t}   # 'Ċ' = byte-level \n
     is_nl = torch.tensor([int(t) in nl for t in ids])
+    is_p0 = (torch.arange(len(score)) % 511) == 0                        # window-start rows
     plt.figure(figsize=(7, 4))
-    for m, lbl, c in ((~is_nl, 'other tokens', 'tab:gray'), (is_nl, 'newline tokens', 'tab:red')):
+    for m, lbl, c in ((~is_nl & ~is_p0, 'other tokens', 'tab:gray'),
+                      (is_nl & ~is_p0, 'newline tokens', 'tab:red'),
+                      (is_p0, 'position 0 (any token)', 'tab:blue')):
         plt.hist(score[m].abs().numpy(), bins=120, log=True, alpha=0.6, color=c, label=lbl)
     plt.xlabel('|projection onto rogue direction|'); plt.ylabel('token count (log)')
     plt.title(f'Who carries the rogue direction — {get_model_label(model)}'); plt.legend(); plt.show()
@@ -254,11 +312,12 @@ def rogue_hist(model, step=143000):
 rogue_hist('pythia-1b-deduped')
 caption('Token attribution of the rogue direction (pythia-1b, final checkpoint, raw per-token '
         'activations of blk3.mlp.out): histogram of |(x − μ)·v₁| — the projection of each '
-        'centered token row onto the write\'s top centered eigendirection — split into '
-        'newline-bearing tokens (red) vs all others (gray); log count axis. The separated red '
-        'tail is the attribution evidence: large rogue activations occur overwhelmingly at '
-        'newline positions. Correlational and final-checkpoint only — it locates WHERE the '
-        'direction activates, not what it is for.')
+        'centered token row onto the write\'s top centered eigendirection — split three ways: '
+        'window-start rows (blue, ANY token identity), newline-bearing tokens elsewhere (red), '
+        'all others (gray); log count axis. Both sink slots separate from the bulk: position 0 '
+        'fires unconditionally (~1657 mean), and the red tail is almost entirely each '
+        'window\'s FIRST newline (~2135) — 96% of newlines sit in the bulk. Correlational and '
+        'final-checkpoint only — it locates WHERE the direction activates, not what it is for.')
 
 # %%
 # Systematic version: mean |projection| per token TYPE (all tokens, n>=20, no prior grouping) —
@@ -286,7 +345,8 @@ def rogue_ranking(model, step=143000, top=20):
     ypos = range(top)[::-1]
     plt.figure(figsize=(9, 5))
     plt.barh(ypos, vals, color=colors)
-    plt.errorbar(vals, ypos, xerr=[ci, [0] * top], fmt='none', ecolor='k', lw=1, capsize=2)
+    lo = [max(v - c, 0) for v, c in zip(vals, ci)]                       # tick at the CI lower edge
+    plt.scatter(lo, ypos, marker='|', color='k', s=80, zorder=3)
     plt.yticks(ypos, [f'{t!r}  (n={c})' for t, c in zip(decoded, ns)], fontsize=7)
     plt.xlabel('mean |projection onto rogue direction|')
     plt.title(f'Token types ranked by rogue-direction activation — {get_model_label(model)}\n(red = newline-bearing; small n = noisy)')
@@ -295,10 +355,70 @@ def rogue_ranking(model, step=143000, top=20):
 rogue_ranking('pythia-1b-deduped')
 caption('Systematic version of the previous figure: mean |projection onto the rogue direction| '
         'per token TYPE, all types with n ≥ 20 occurrences, top 20 shown. Red bars = the '
-        'decoded token contains a newline; whiskers mark the lower edge of the 95% CI of the '
-        'mean (1.96·SD/√n), so low-count word types whose whisker reaches far left are '
-        'noise-compatible with the bulk. Newline variants top the ranking with by far the '
-        'largest counts.')
+        'decoded token contains a newline. The black tick on each bar marks the LOWER edge of '
+        'the 95% CI of the mean (1.96·SD/√n, clamped at 0): a tick far left of its bar means '
+        'the mean is noise-dominated — the low-count word types wash toward the bulk, while '
+        'the newline variants\' huge n pins their means tightly. The wide CIs on the n≈20 '
+        'types are the honest picture: only the newline rows are statistically solid. NB this '
+        'per-TYPE view structurally hides the other sink slot — the 512 window-start rows '
+        '(unconditional ~1657 spikes) are spread across ~500 distinct types; see the histogram '
+        'above for the position-split view.')
+
+# %% [markdown]
+# ### Follow-ups: is the newline slot just a missing resting token? and where does the
+# ### spike live over depth?
+# Two targeted re-collections (pythia-1b, final ckpt; `oneoff_scripts/rogue_id_followups.py`):
+# - **EOT-twin:** same windows with an explicit `<|endoftext|>` prepended at position 0 —
+#   the attention-sinks papers give models a resting token per prompt, our packed stream has
+#   none, so maybe the first newline only spikes as a stand-in. It does NOT: with the EOT
+#   present (and itself taking the position-0 slot at 1583), the window's first newline
+#   still spikes at 2178 (original run: 2132). Both slots are structural.
+# - **Mid-stack depth profile:** the same projection measured on the STREAM at several
+#   depths. The sink-slot spike is deposited at blk3 and rides the stream essentially
+#   unchanged through blk12 (~99% of those rows' centered norm), halves at blk15, and is
+#   almost fully removed by before_final_norm. Ordinary tokens DO carry rogue-direction
+#   content mid-stack — ~27% of their centered row norm at blk4, decaying monotonically to
+#   ~3.6% at the final stream — confirming the mid-stack route by which rogue variance can
+#   reach ordinary (e.g. padded last) tokens even though the final stream looks clean.
+
+# %%
+def rogue_depth_profile():
+    r = torch.load('data/results/rogue_id_followups.pt')
+    ms = r['midstack']
+    leaves = ['blk3.mlp.out (write)', 'blk4.attn.in', 'blk6.attn.in', 'blk9.attn.in',
+              'blk12.attn.in', 'blk15.attn.in', 'before_final_norm']
+    slots = (('pos0', 'tab:blue'), ('first_nl', 'tab:red'), ('other_nl', 'tab:orange'),
+             ('bulk', 'tab:gray'))
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4))
+    fig.suptitle('The rogue spike over depth — pythia-1b, final ckpt (midstack run)')
+    for slot, c in slots:
+        absv = [ms['write'][slot]] + [ms[l]['abs'][slot] for l in leaves[1:]]
+        frac = [ms[l]['frac'][slot] for l in leaves[1:]]
+        axes[0].plot(range(len(leaves)), absv, marker='o', lw=2, color=c, label=slot)
+        axes[1].plot(range(1, len(leaves)), frac, marker='o', lw=2, color=c, label=slot)
+    axes[0].set(yscale='log', ylabel='mean |projection onto rogue direction|',
+                title='absolute (log)')
+    axes[1].set(ylabel='mean |projection| / centered row norm', title='fraction of the row')
+    for ax in axes:
+        ax.set_xticks(range(len(leaves)))
+        ax.set_xticklabels(leaves, rotation=30, ha='right', fontsize=8)
+        ax.legend(fontsize=8)
+    plt.tight_layout()
+    plt.show()
+
+rogue_depth_profile()
+caption('Depth profile of the rogue-direction content per token class (blue/red = the two '
+        'sink slots, orange = other newlines, gray = ordinary tokens): mean |(x − μ)·v₁| of '
+        'the stream at each depth, absolute (left, log) and as a fraction of each row\'s '
+        'centered norm (right). The blk3 write deposits the spike; the sink slots carry it '
+        'at ~full row strength (fraction ≈ 0.99) until blk12, blk15 halves it, and '
+        'before_final_norm has removed almost all of it (fraction ≈ 0.2 of much larger '
+        'rows). Ordinary tokens are NOT clean mid-stack: a quarter of their centered norm '
+        'at blk4 lies along the rogue direction, decaying to ~4% by the final stream — '
+        'the late blocks scrub the direction from every token, sinks most of all. '
+        'EOT-twin control (not plotted): prepending <|endoftext|> does not absorb the '
+        'first-newline slot (2178 vs 2132 without it), so the second slot is not a missing '
+        'resting-token artifact.')
 
 # %%
 def cancellation_headmass(model):
@@ -341,37 +461,118 @@ for model in ALL4:
 # token space (top-eigval share ~10%, no dominant token class), and carry the interference-driven compression.
 
 # %%
-# Two views of the signed-trace coupling matrix: mlp×mlp (the write-ensemble structure: OLMo's
-# aligned late block, Pythia's blk3 anti-diagonal) and mlp×attn — the near-diagonal negatives
-# show MLPs partially CONSUMING their neighboring attention outputs, cf. "An Adversarial
-# Example for Direct Logit Attribution: Memory Management in GELU-4L" and the CKA structure in
-# "The Remarkable Robustness of LLMs: Stages of Inference?".
+# The write-ensemble structure that carries §5's claim: the mlp×mlp signed-trace coupling.
+# (The mlp×attn view — a separate memory-management observation — lives in §8.)
 from analysis.experiments_lib import submatrix
 
-def coupling_views(model, step=None):
-    bb = lambda y: _lib.get_y(BLOCK_SAMPLES, model, ('', 'block_block_coupling'), y, step)
-    st, leaves = bb('signed_trace'), bb('leaves')
-    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
-    fig.suptitle(f'Signed-trace coupling (final ckpt) — {get_model_label(model)}')
-    for ax, (rows, cols, title) in zip(axes, (('mlp', 'mlp', 'mlp × mlp'), ('mlp', 'attn', 'mlp × attn'))):
-        M, rl, cl = submatrix(st, leaves, rows=rows, cols=cols)
-        if rows == cols: M = M - np.diag(np.diag(M))
+def coupling_grid(models, rows='mlp', cols='mlp', step=None):
+    nrows = (len(models) + 1) // 2
+    fig, axes = plt.subplots(nrows, 2, figsize=(11, 4.5 * nrows), squeeze=False)
+    fig.suptitle(f'{rows} × {cols} signed-trace coupling, final checkpoint')
+    for ax, model in zip(axes.flat, models):
+        bb = lambda y: _lib.get_y(BLOCK_SAMPLES, model, ('', 'block_block_coupling'), y, step)
+        M, rl, cl = submatrix(bb('signed_trace'), bb('leaves'), rows=rows, cols=cols)
+        if rows == cols:
+            M = M - np.diag(np.diag(M))
         v = np.abs(M).max()
         im = ax.imshow(M, cmap='coolwarm', vmin=-v, vmax=v)
-        ax.set(title=title, xlabel=cols + ' block', ylabel=rows + ' block')
+        ax.set(title=get_model_label(model), xlabel=f'{cols} block', ylabel=f'{rows} block')
         plt.colorbar(im, ax=ax, shrink=0.8)
+    plt.tight_layout()
     plt.show()
-    caption(f'Signed-trace coupling between block outputs at the final checkpoint, '
-            f'{get_model_label(model)} (red = aligned/reinforcing, blue = opposed/cancelling; '
-            f'diagonal removed on the left). Left, mlp × mlp: OLMo-2\'s late writes form an '
-            f'aligned (red) block — distributed reinforcement; Pythia shows the blk3 '
-            f'anti-band — late writes cancel the rogue. Right, mlp × attn: the near-diagonal '
-            f'negatives show MLPs partially consuming their neighbouring attention outputs '
-            f'(cf. the memory-management picture in "An Adversarial Example for Direct Logit '
-            f'Attribution").')
+
+coupling_grid(ALL4)
+caption('Signed trace between every pair of mlp writes at the final checkpoint, all four '
+        'models in one grid (red = aligned/reinforcing, blue = opposed/cancelling; diagonal '
+        'removed; each panel has its own color scale). The family contrast is the point: '
+        'both OLMo-2 panels show the late-block red square (rows/cols ~L/2 onward — every '
+        'late write positively aligned with every other, the distributed reinforcement of '
+        'the section title), while both Pythia panels instead show a blue band through the '
+        'rogue block (the late writes anti-aligned with the rogue write — cancellation). '
+        'Combined with the diffuse token attribution (§4\'s top-eigval share panel: OLMo\'s '
+        'writes never exceed ~0.1) and the interference-carried ledger (§3), this is what '
+        '"distributed aligned reinforcement" means operationally.')
+
+# %% [markdown]
+# ### Does the alignment actually carry the compression?
+# The chain this figure closes: §3's ledger says OLMo-2's rank-entropy decline sits in the
+# INTERFERENCE term — the part of ΔS attributable to cross-covariances between DIFFERENT
+# blocks' writes (negative interference = the cross-terms pile variance onto shared
+# directions, concentrating the stream spectrum). §5's heatmap says the late writes are
+# mutually aligned. Neither alone shows the aligned writes are the thing compressing. The
+# test, in two halves:
+# - **When (top two panels, shared token axis):** "late-write alignment" = the mean signed
+#   trace over all pairs of distinct mlp writes in the deeper half of the stack (one number
+#   per checkpoint, from the coupling matrix above). If alignment causes the interference
+#   compression, its rise and the interference term's fall must begin together.
+# - **Which blocks (right panel):** per block, x = that block's mean signed-trace coupling to
+#   the late-half writes, y = that block's own interference ledger term; both averaged over
+#   the final third of checkpoints, where the compression phase is in full swing. If aligned
+#   writes carry it, the blocks with the most negative interference must be exactly the
+#   most-coupled (rightmost) ones — points should run diagonally down-right for OLMo-2.
+#   For Pythia the prediction is the opposite corner: its negative interference sits at
+#   blocks ANTI-aligned with the ensemble (the cancellation of the rogue write).
+
+# %%
+def alignment_vs_interference(model):
+    L = n_blocks[model]
+    mats, csteps = _lib.get_ys(BLOCK_SAMPLES, model, ('', 'block_block_coupling'), 'signed_trace')
+    leaves = _lib.get_y(BLOCK_SAMPLES, model, ('', 'block_block_coupling'), 'leaves', csteps[0])
+    cxs = _lib.get_xs_tokens(model, csteps)
+    idx = [leaves.index(f'blk{k}.mlp.out') for k in range(L // 2, L)]
+    late = [float(np.mean([m[i, j] for i in idx for j in idx if i != j])) for m in mats]
+    intf = {k: np.asarray(_lib.get_ys(BLOCK_SAMPLES, model, (f'blk{k}', 'block_ledger'), 'interference')[0])
+            for k in range(L)}
+    isteps = _lib.get_ys(BLOCK_SAMPLES, model, ('blk0', 'block_ledger'), 'interference')[1]
+    ixs = _lib.get_xs_tokens(model, isteps)
+    fig = plt.figure(figsize=(13, 5))
+    gs = fig.add_gridspec(2, 2, width_ratios=(1.3, 1), hspace=0.15, wspace=0.25)
+    fig.suptitle(f'Does the late-write alignment carry the compression? — {get_model_label(model)}')
+    top = fig.add_subplot(gs[0, 0])
+    bot = fig.add_subplot(gs[1, 0], sharex=top)
+    top.plot(cxs, late, color='tab:red', lw=2)
+    top.axhline(0, color='gray', lw=0.8)
+    top.set_ylabel('late-write\nalignment', fontsize=9)
+    top.set(xscale='log', title='when: alignment (top) vs interference (bottom), same token axis')
+    plt.setp(top.get_xticklabels(), visible=False)
+    bot.plot(ixs, np.sum(list(intf.values()), axis=0), color='tab:purple', lw=2)
+    bot.axhline(0, color='gray', lw=0.8)
+    bot.set(xscale='log', xlabel='tokens')
+    bot.set_ylabel('Σ interference\n(rank entropy)', fontsize=9)
+    sc = fig.add_subplot(gs[:, 1])
+    seg = slice(2 * len(isteps) // 3, None)                 # final third of checkpoints
+    cseg = mats[2 * len(mats) // 3:]
+    for k in range(L):
+        i = leaves.index(f'blk{k}.mlp.out')
+        coup = float(np.mean([m[i, j] for m in cseg for j in idx if j != i]))
+        sc.scatter(coup, float(np.mean(intf[k][seg])), s=45,
+                   color=plt.get_cmap('viridis')(k / (L - 1)))
+        sc.annotate(str(k), (coup, float(np.mean(intf[k][seg]))), fontsize=7,
+                    xytext=(3, 3), textcoords='offset points')
+    sc.axhline(0, color='gray', lw=0.8)
+    sc.axvline(0, color='gray', lw=0.8)
+    sc.set(xlabel='coupling to the late writes',
+           ylabel='own interference term',
+           title='which blocks: coupling vs interference\n(each avg over final third of ckpts)')
+    plt.show()
+    caption(f'{get_model_label(model)} — left pair (shared token axis): the late-write '
+            f'alignment (red; mean signed trace over all pairs of deeper-half mlp writes — '
+            f'positive = the late writes add variance along shared directions) above the '
+            f'total interference ledger term (purple; the cross-block part of the stream\'s '
+            f'rank-entropy change, §3 — negative = cross-terms are compressing the stream). '
+            f'Right: one dot per block (label = block index, dark = deep); x = how aligned '
+            f'that block\'s write is with the late-half writes, y = that block\'s own '
+            f'interference contribution, both averaged over the final third of checkpoints. '
+            + ('For OLMo-2 the two onsets coincide (left) and the compression-carrying '
+               'negative-interference blocks are exactly the strongly-coupled late ones '
+               '(dots run down-right): the aligned ensemble IS the compressor.'
+               if 'OLMo' in model else
+               'For Pythia there is no positive alignment to speak of (left, red stays ≤ 0) '
+               'and the negative-interference blocks sit at NEGATIVE coupling (upper/lower '
+               'LEFT): its interference is the rogue-write cancellation, not reinforcement.'))
 
 for model in ALL4:
-    coupling_views(model)
+    alignment_vs_interference(model)
 
 # %% [markdown]
 # ## 6. The toy bridge (RQ3)
@@ -403,11 +604,29 @@ for model in ALL4:
 # outputs + the architecture-knob grid.
 
 # %% [markdown]
+# # ⚠️ Multi-layer toy trajectories: RESOLVED (Jul 13) — full study in docs/toy_multilayer.md
+# The MULTI-task toys (figures below) never reproduce Li et al's dip→rise→peak→decline at
+# any depth or init — and the reason is now demonstrated, not conjectured: the curve needs
+# (T) a compression event timed after spectrum saturation, (K) a large-enough kick, and
+# (I) near-identity transmission from the feature layer to the measurement point. Deep
+# stacks print the FULL sequence when those hold (residual with small-at-init blocks,
+# 2/6/12 blocks; a no-residual stack with identity-initialized blocks; and a skewed
+# 6-class bottlenecked task where moving ONLY the fork delay δ toggles the print). The
+# MULTI task fails (T) by construction (its 26 rare-class forks smear across the
+# entropy-seeking rise). Trajectory-shape wording in the older captions below (incl. "the
+# residual stream is constitutive for the phases" and arch-grid "post-peak decline") is
+# pre-revision; the corrected form of the residual claim is transmission (toy_multilayer
+# §5). Ledger-term attributions are not implicated.
+#
 # **Reading note — centered vs uncentered.** All LLM figures in this notebook use CENTERED
 # spectra unless labeled otherwise. The Li-facing toy figures below (Fig 4 reproduction,
 # controls, multi-layer stream panels) use UNCENTERED RankMe, matching Li et al's definition
 # on raw features; only the architecture-grid figure (and its rogue check) uses centered
 # spectra, to match the LLM-side pipeline it is compared against — its axes say so.
+# CAUTION for the multi-layer stream panels specifically: at depth the writes' accumulated
+# bias means dominate the uncentered spectrum (~50% of trace), so those per-depth curves
+# mostly track the mean, not the representation geometry — appendix §C plots uncentered vs
+# centered side by side and resolves the apparent depth pattern.
 
 # %%
 lifig = 'reference/li et al reference tex/figures/Fig4_top.png'
@@ -438,24 +657,45 @@ TOY_CAPS = {
         'the paper), so the dashes begin at the visible split.',
     'fig_controls.png':
         'Negative controls, all three from the paper (uniform class counts; no bottleneck '
-        'd=3 = |V|−1; MSE loss on both count patterns), plus "single" = the skew+bottleneck+CE '
-        'reference that DOES compress. RankMe is plotted as a fraction of the feature '
-        'dimension d so the d=3 no-bottleneck run is comparable to the d=2 runs. Only the '
-        'reference declines after its peak; every control is monotone — each removed '
-        'ingredient (skew, bottleneck, CE) is necessary for the compression phase.',
+        'd=3 = |V|−1; MSE loss on both count patterns), one panel per variant with its own '
+        'axes. First panel: the skew+bottleneck+CE reference (the canonical clustered spec '
+        'run to 3000 steps; dotted vertical = the paper\'s 300-step Fig-4 window) — it alone '
+        'shows the post-peak decline, and past the window the decline is a transient that '
+        'recovers by ~3000 (addendum). The CE controls are monotone after their warmup dip. '
+        'NB mse_skew\'s small dip-then-recovery (~steps 40–90) is NOT a rare-class fork: '
+        'checked on the trajectories (toy/appendix_sweeps.py mse_skew_check, 3 seeds), the '
+        'rare classes are never learned under MSE — per-class MSE stays pinned at the 0.25 '
+        'no-prediction floor and the rare weight columns DECAY from their random init '
+        '(norm ~0.42) to ≤0.016 — Li et al\'s gradient-starvation claim confirmed. With the '
+        'rare classes inert, the wobble can only be frequent-class reorganization; the CE '
+        'fork mechanism (a rare pair being learned and splitting) is not available here.',
     'fig_multi_multi_residual_nonlinear.png':
         'Residual multi-layer toy (6 blocks, nonlinear writes, d=16, 32 classes, skewed '
-        'counts). Left: uncentered stream RankMe at every depth (viridis light→dark = deeper), '
-        'i.e. blk k input, last curve = final stream. Middle: the rank ledger summed over '
-        'blocks — ΔS with its χ/quality/interference decomposition, the same object as the '
-        'LLM ledger figures in §3; the decline is quality-carried, reproducing Pythia\'s '
-        'signature. Right: per-write energy shares w_k (guard: no single write dominates the '
-        'ledger, so the summed terms are representative).',
+        'counts; final loss 0.0004 — the task is fully solved). Left: uncentered stream '
+        'RankMe at every depth (viridis light→dark = deeper), blk k input, last curve = '
+        'final stream. Reading warning on this panel (appendix C has the full analysis): '
+        'these per-depth curves are UNCENTERED (Li\'s definition), and in the multi-layer '
+        'toy the writes\' accumulated bias means hold ~50% of the uncentered trace at every '
+        'depth ≥ 1 — the apparent "deep streams start collapsed and only decline" shape is '
+        'that shared-mean artifact. CENTERED (the LLM-comparable object), every stream '
+        'starts near-full-rank and the FINAL stream compresses hardest of all (8.9 → 2.5, '
+        'small early bump to 9.1) — the end-of-model compression pattern is present, '
+        'matching the LLMs. What the toy lacks at every depth is a pronounced '
+        'entropy-seeking rise, because theta (the toy\'s learnable feature matrix — each '
+        'sample\'s feature vector is a free parameter, Li et al\'s f(x)) initializes as '
+        'random noise already at full rank — nothing to expand. '
+        'The toy\'s compression evidence is the LEDGER (middle panel: ΔS = '
+        'χ/quality/interference summed over blocks, quality-carried — Pythia\'s signature), '
+        'computed on centered quantities throughout. Right: per-write energy shares w_k '
+        '(guard: no single write dominates, so summed terms are representative).',
     'fig_multi_multi_plain.png':
         'The same multi-layer toy WITHOUT the residual stream (each block replaces rather '
-        'than adds). Same three panels as above. The phase structure is gone — stream RankMe '
-        'collapses monotonically at every depth — showing the residual stream is constitutive '
-        'for the warmup/expansion/compression trajectory, not incidental.',
+        'than adds), at the fair-shot lr 0.02 that FULLY solves the task (final loss '
+        '0.00003; the natural objection "maybe it just fails to learn" does not apply — '
+        'lr 0.005 underfit, 0.05 diverges). Same three panels. The phase structure is '
+        'still gone: every stream depth sits flat until ~10⁴ steps, then collapses to '
+        'RankMe ~1–2 with a small recovery — never dip→rise→peak→decline. The residual '
+        'stream is constitutive for the phase structure, not incidental.',
     'fig_arch_grid.png':
         'Architecture-knob grid: 2 writes per block × {no norm, pre-norm, write-norm, '
         'both} × {parallel, sequential wiring} × 3 seeds (one thin line per run; color = norm '
@@ -474,49 +714,82 @@ for f, cap_txt in TOY_CAPS.items():
         caption(cap_txt)
 
 # %% [markdown]
-# ### The dataset-swap control (data vs model)
-# Each 1B model re-run on the OTHER family's pretraining mix (same texts, re-tokenized) —
-# if the family split followed the data, these curves would swap; they don't. Σquality
-# trajectories, original (solid) vs swapped data (dashed): pythia stays quality-collapsing,
-# OLMo stays quality-recovering, on either corpus. Full verdict table:
-# docs/swap_run_findings.md.
+# ### The multi-layer resolution: the phase curve passes through deep stacks
+# The study behind this figure — every ablation, the exact dS/dt = −Cov_p(g, log p)
+# mechanism, and the three print conditions (event timing, kick size, near-identity
+# transmission) — is docs/toy_multilayer.md. Shown here: the three decisive positives.
 
 # %%
-SWAP = 'block_representations_samples_swap'
-n_blocks_swap = {'pythia-1b-deduped': 16, 'OLMo-2-0425-1B': 16}
+def _toy_rm(tag):
+    r = np.load(f'data/results/toy_{tag}/results_toy-{tag}.npy', allow_pickle=True).item()
+    steps = sorted(r)
+    return steps, [r[s]['before_final_norm']['acts_uncentered']['rankme'] for s in steps]
 
-def swap_quality(model):
-    out = {}
-    for src, lbl in ((BLOCK_SAMPLES, 'original data'), (SWAP, 'swapped data')):
-        q = np.sum([_lib.get_ys(src, model, (f'blk{l}', 'block_ledger'), 'quality')[0]
-                    for l in range(n_blocks_swap[model])], axis=0)
-        steps = _lib.get_ys(src, model, ('blk0', 'block_ledger'), 'chi')[1]
-        out[lbl] = (steps, q)
-    return out
+def _toy_fork(tag):
+    import torch.nn.functional as Fn
+    t = torch.load(f'data/results/toy/trajectories_{tag}.pt')
+    ts, W = t['steps'].tolist(), t['W']
+    cos = [float(Fn.cosine_similarity(W[i][:, -2], W[i][:, -1], dim=0)) for i in range(len(ts))]
+    shared = next((ts[i] for i in range(len(ts)) if cos[i] > 0.97), 0)
+    return next((ts[j] for j in range(len(ts)) if ts[j] >= shared and cos[j] < 0.9), None)
 
-plt.figure(figsize=(9, 4.5))
-for model, c in (('pythia-1b-deduped', 'tab:red'), ('OLMo-2-0425-1B', 'tab:blue')):
-    for lbl, (st, q) in swap_quality(model).items():
-        plt.plot(st, q, color=c, lw=2, ls='--' if 'swap' in lbl else '-',
-                 label=f'{get_model_label(model)}, {lbl}')
-plt.xscale('log'); plt.xlabel('step'); plt.ylabel('Σ quality (over blocks)')
-plt.title('Dataset-swap control: the ledger driver follows the MODEL, not the data')
-plt.legend(fontsize=8); plt.show()
-caption('Dataset-swap control: summed quality ledger term for each 1B model on its own '
-        'pretraining mix (solid) vs re-run on the OTHER family\'s mix, same texts re-tokenized '
-        '(dashed). If the family split (Pythia quality-collapsing, red, vs OLMo-2 '
-        'quality-recovering, blue) followed the data, the dashed curves would swap sides; '
-        'they track their solid counterparts instead — the ledger signature is a property of '
-        'the model/architecture, not the corpus.')
+fig, axes = plt.subplots(1, 3, figsize=(15.5, 4.2))
+for ax, (title, tags) in zip(axes, (
+        ('residual, 6 blocks, small-init writes\n(single_deep, 3 seeds)',
+         [f'single_d6_bs_s{s}' for s in (0, 1, 2)]),
+        ('NO residual, identity-init blocks\n(3 seeds)',
+         [f'single_d6_id_plain_s{s}' for s in (0, 1, 2)]),
+        ('skewed 6-class bottleneck task:\nfork mid-rise (δ=1e-3) vs after saturation (δ=1e-8)',
+         ['skewpair_deep_s0', 'skewpair_deep_d8_s0']))):
+    for tag in tags:
+        st, rm = _toy_rm(tag)
+        ln, = ax.plot(st, rm, lw=1.6,
+                      label=('δ=1e-3 (masked)' if tag == 'skewpair_deep_s0'
+                             else 'δ=1e-8 (prints)' if tag == 'skewpair_deep_d8_s0' else None))
+        fk = _toy_fork(tag)
+        if fk:
+            ax.axvline(fk, color=ln.get_color(), lw=0.9, ls=':')
+    ax.set(xscale='log', xlabel='step', title=title)
+    if ax is axes[2]:
+        ax.legend(fontsize=8)
+axes[0].set_ylabel('RankMe (uncentered features)')
+fig.suptitle('Li et al\'s phase curve through multi-layer stacks — decline onset = the rare-pair fork (dotted)')
+plt.tight_layout(); plt.show()
+caption('The multi-layer resolution (full study: docs/toy_multilayer.md). Left: Li et al\'s '
+        'constructed init under a 6-block RESIDUAL stack with small-at-init writes — the '
+        'complete dip → rise → peak → decline → transient recovery prints at the final '
+        'stream, with the decline starting exactly at the rare-pair fork (dotted vertical, '
+        'detected from cos(w_rare) leaving the shared path), 3/3 seeds. Middle: the same '
+        'WITHOUT a residual stream, blocks initialized as identity + noise — it prints '
+        'equally well (3/3): the operative condition is near-identity transmission from '
+        'features to measurement point, which the residual provides by default and a plain '
+        'stack must have arranged. Right: the unification case — a skewed 6-class task '
+        'through a d=4 bottleneck and a depth-6 stack, where ONLY the fork delay δ is '
+        'moved: at δ=1e-3 the fork lands mid-rise and is masked (no decline); at δ=1e-8 it '
+        'lands after the saturation plateau and the decline prints at the fork checkpoint '
+        '(2.96 → 2.58). One mechanism, three instantiations; conditions and their LLM '
+        'mapping in the doc. Known open items (doc §6): the nonlinear-block variant '
+        'declines BEFORE its fork (a second, unexplained mechanism), and the kick\'s '
+        'growth with depth is observed, not derived.')
 
 # %% [markdown]
 # ## 7. RQ2: task geometry beyond the general population
-# **Findings:** maths text carries real shared structure (excess 2.3–2.4× the split-half null,
-# both families), located mid-spectrum (not the predicted tail). The two "memorised"
-# populations split: verbatim strings ≈ lexical early-layer novelty; famous quotes = the most
-# structured population measured. Split-half coherence (independent whiteners, raw-space
-# subspaces): math > quotes > memorized everywhere, and memorized coherence is LOWEST at the
-# early blocks where its excess lives — independent per-item storage where storage happens.
+# # ⚠️ EVERYTHING IN THIS SECTION IS UNDER HEAVY REVISION — DO NOT CITE (Jul 13)
+# The documented excess-mass aggregates mixed ACTIVATION and GRADIENT quantities (acts-only
+# recomputation inverts the quotes/memorized ordering and weakens math), the ref pairing of
+# the stored gen_vs_ref results is unverified, and several cross-population comparisons
+# straddle incompatible geometries (packed all-token vs padded last-token covariances are
+# different measured objects). Verdicts and figures below are the ORIGINAL, contaminated
+# versions, kept only until the redo (plan.md item 1); final_report §4 carries the full
+# diagnosis.
+#
+# **Findings (as originally written — suspect):** maths text carries real shared structure
+# (excess 2.3–2.4× the split-half null, both families), located mid-spectrum (not the
+# predicted tail). The two "memorised" populations split: verbatim strings ≈ lexical
+# early-layer novelty; famous quotes = the most structured population measured. Split-half
+# coherence (independent whiteners, raw-space subspaces): math > quotes > memorized
+# everywhere, and memorized coherence is LOWEST at the early blocks where its excess lives —
+# independent per-item storage where storage happens.
 
 # %%
 RQ2_MODELS = ['pythia-1b-deduped', 'OLMo-2-0425-1B']
@@ -534,9 +807,12 @@ for model in RQ2_MODELS:
     pops = {'math web (packed)': 'rq2_math_web', 'null packed': 'rq2_general_packed_b',
             'quotes (padded)': 'rq2_quotes', 'memorized (padded)': 'rq2_memorized',
             'null padded': 'rq2_general_padded_b'}
+    if model.startswith('OLMo'):                # pythia_memorized is a pythia-specific dataset;
+        pops.pop('memorized (padded)')          # OLMo's mem set is Merullo et al's, packed
+        pops['memorized OLMo (packed)'] = 'rq2_memorized_olmo'
+        pops['null packed 73k (N-matched)'] = 'rq2_general_packed_n73k'
     plt.figure(figsize=(8, 4))
     for name, cfg in pops.items():
-        if model.startswith('OLMo') and cfg == 'rq2_memorized': continue
         plt.plot(range(len(L16)), [leaf_stat(cfg, model, lf) for lf in L16], marker='o', lw=2,
                  ls='--' if 'null' in name else '-', label=name)
     plt.title(f'Excess over G by depth — {get_model_label(model)}')
@@ -547,7 +823,12 @@ for model in RQ2_MODELS:
             f'that G cannot account for, per stream depth). Dashed = held-out general splits '
             f'(the null: what a same-size resample of G itself scores). Math sits 2.3–2.4× '
             f'above its null mid-stack; the two "memorised" populations diverge — quotes carry '
-            f'the most structure, verbatim-memorized peaks early (lexical novelty).')
+            f'the most structure, verbatim-memorized peaks early (lexical novelty). '
+            + ('OLMo\'s memorized population is Merullo et al\'s 650-seq set, packed all-token '
+               '(padded/last impossible at N=650 < d) — compare it against the 73k N-matched '
+               'packed null, not the padded curves: ~16× its null, peaking blk8–10.'
+               if model.startswith('OLMo') else
+               'Pythia\'s memorized set = EleutherAI pythia-memorized-evals (padded/last).'))
 
 # %%
 SH = np.load('data/results/rq2_splithalf.npy', allow_pickle=True).item()
@@ -571,10 +852,14 @@ for model in RQ2_MODELS:
 
 # %% [markdown]
 # ## 8. Side findings
-# **Mean anomalies split by family the same way** (Pythia's rogue is variance-only,
-# mean_frac → 0.003; OLMo's late writes are mean-heavy, 0.15–0.6) — and **drift** shows two
-# reorganization events bracketing the entropy-seeking phase (violent early: OLMo-1B CKA-drift
-# bottoms at 0.12; a second dip at the RankMe peak).
+# # ⚠️ "WRITE MEANS" PANELS: FLAGGED — NO VERIFIED FINDING, DO NOT CITE (Jul 13)
+# The claim previously here ("mean anomalies split by family: Pythia's rogue variance-only,
+# OLMo's late writes mean-heavy 0.15–0.6") is retracted as a misinterpretation: the panels
+# themselves contradict its cross-model form (OLMo-1B's late writes have LOWER mean_frac
+# than pythia's ordinary writes; the 0.15–0.6 range was OLMo-7B only), and the underlying
+# "mean anomaly" terminology drifted between analyses. Panels are kept for the record;
+# nothing mean_frac-related should be cited until re-derived from scratch.
+# **Drift** panels are raw consecutive-checkpoint CKA — see the caption caveat below.
 
 # %%
 bs_out = lambda model, family: [(BLOCK_SAMPLES, (f'blk{l}.mlp.out', family), f'mlp {l}')
@@ -585,12 +870,12 @@ for model in PAIR:
     if not model.endswith('7B'):
         plot_group('cka_drift', bs_out(model, 'cka_drift'), [model], color_palette='gradient')
     grid_show()
-    caption(f'Write means, {get_model_label(model)}: mean_frac = ‖μ‖² / (‖μ‖² + trace) per mlp '
-            f'write (every ~L/8th block, light→dark = deeper) — how much of the write\'s '
-            f'energy is a constant offset vs variance. Pythia\'s rogue is variance-only '
-            f'(mean_frac → 0.003 at blk3); OLMo-2\'s late writes are mean-heavy (0.15–0.6) — '
-            f'the same family split as the ledger. Right panel (1B models only): '
-            f'checkpoint-to-checkpoint CKA drift of the same writes.')
+    caption(f'⚠️ FLAGGED (see section note) — kept for the record, no verified finding. '
+            f'What is plotted, {get_model_label(model)}: mean_frac = ‖μ‖² / trace(Σ_centered) '
+            f'per mlp write (every ~L/8th block, light→dark = deeper) — the write\'s constant '
+            f'per-token offset relative to its token-dependent variance. Right panel (1B '
+            f'models only): checkpoint-to-checkpoint CKA drift of the same writes (its own '
+            f'caveat below).')
 
 drift_srcs = [(BLOCK_SAMPLES, (f'blk{l}.mlp.out', 'cka_drift'), f'mlp {l}') for l in (0, 4, 8, 12, 15)]
 for model in ('pythia-1b-deduped', 'OLMo-2-0425-1B'):
@@ -599,9 +884,24 @@ for model in ('pythia-1b-deduped', 'OLMo-2-0425-1B'):
     grid_show()
     caption(f'Representation drift, {get_model_label(model)}: CKA similarity between the same '
             f'mlp write at consecutive checkpoints (1 = static geometry; dips = '
-            f'reorganization), blocks 0–15 light→dark. Two reorganization events bracket the '
-            f'entropy-seeking phase: a violent early one (OLMo-1B bottoms at CKA 0.12) and a '
-            f'second dip at the RankMe peak where the compression phase begins.')
+            f'reorganization), blocks 0–15 light→dark. ⚠️ Interpretation caveat: consecutive '
+            f'checkpoints are not equally spaced, so this raw view conflates drift speed '
+            f'with checkpoint gap — the "two reorganization events bracketing the '
+            f'entropy-seeking phase" reading is NOT confirmed under the gap-corrected rate '
+            f'((1−CKA)/Δ), which places pythia\'s fastest drift mid-training and shows '
+            f'OLMo-1B still accelerating late. Treat as a raw time series, not a verdict '
+            f'(final_report appendix; re-derivation is on the plan).')
+
+# %%
+# mlp×attn coupling (moved out of §5 — a separate observation from the write-ensemble claim)
+coupling_grid(PAIR, rows='mlp', cols='attn')
+caption('Signed trace between mlp writes (rows) and attention writes (cols), final '
+        'checkpoint, one panel per exemplar model. The near-diagonal negatives show MLPs '
+        'partially CONSUMING their neighbouring attention outputs — the memory-management '
+        'pattern of "An Adversarial Example for Direct Logit Attribution: Memory '
+        'Management in GELU-4L"; cf. the CKA depth structure in "The Remarkable '
+        'Robustness of LLMs: Stages of Inference?". Side observation, independent of the '
+        'family mechanisms.')
 
 # %% [markdown]
 # ### Compression valleys: the depth-axis view (one object, three shadows)
@@ -617,20 +917,37 @@ VALLEY = {('block_representations_samples', 'pythia-1b-deduped'): 16,
           ('block_representations_samples', 'OLMo-2-0425-1B'): 16,
           ('block_representations_samples', 'OLMo-2-1124-7B'): 32,
           ('nanochat_samples', 'nanochat-d12'): 12}
-plt.figure(figsize=(9, 5))
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 for (cfg, model), L in VALLEY.items():
     res, steps = load_results(cfg, model)
     leaves = [f'blk{k}.attn.in' for k in range(L)] + ['before_final_norm']
-    ys = [res[steps[-1]].get(lf, {}).get('acts_centered', {}).get('rankme', np.nan) for lf in leaves]
-    plt.semilogy(np.linspace(0, 1, len(ys)), ys, marker='o', lw=2,
-                 ls='-' if 'OLMo' in model else '--', label=get_model_label(model))
-plt.xlabel('relative depth'); plt.ylabel('stream RankMe (centered, log)')
-plt.title('Compression valleys at the final checkpoint — dashed = no write-norm')
-plt.legend(fontsize=8); plt.show()
-caption('The depth-axis view: RankMe of the centered residual stream at every block INPUT '
-        '(blk k attn.in, plus the pre-final-norm stream as the last point), final checkpoint, '
-        'x = depth normalized to [0, 1]. Dashed = families without write-norm (Pythia, '
-        'nanochat): the stream crashes to rank ~2 right after blk3\'s rogue write enters and '
-        'recovers via late-block cancellation — the "compression valley". Solid = OLMo-2 '
-        '(write-norm): no valley. The massive activation (feature axis), the valley (depth '
-        'axis) and the compression phase (training axis) are one object seen three ways.')
+    fin = res[steps[-1]]
+    rank = [fin.get(lf, {}).get('acts_centered', {}).get('rankme', np.nan) for lf in leaves]
+    hbits = [fin.get(lf, {}).get('acts_uncentered', {}).get('matrix_entropy', np.nan) / np.log(2)
+             for lf in leaves]                       # sinks-paper metric: H(p=σ²/‖X‖²) in bits
+    x, ls = np.linspace(0, 1, len(leaves)), '-' if 'OLMo' in model else '--'
+    axes[0].semilogy(x, rank, marker='o', lw=2, ls=ls, label=get_model_label(model))
+    axes[1].plot(x, hbits, marker='o', lw=2, ls=ls, label=get_model_label(model))
+axes[0].set(xlabel='relative depth', ylabel='stream RankMe (centered, log)',
+            title='RankMe view')
+axes[1].set(xlabel='relative depth', ylabel='matrix-based entropy (bits, uncentered)',
+            title='sinks-paper metric: matrix entropy $H(\\sigma_i^2/\\|X\\|_F^2)$')
+axes[0].legend(fontsize=8)
+fig.suptitle('Compression valleys at the final checkpoint — dashed = no write-norm')
+plt.show()
+caption('The depth-axis view, two metrics over the same stream states (blk k attn.in per '
+        'block, plus the pre-final-norm stream as the last point; final checkpoint; x = depth '
+        'normalized to [0, 1]). Left: centered RankMe (log). Right: the attention-sinks paper\'s '
+        'metric — Shannon entropy of the UNCENTERED singular-value distribution p_i = '
+        'σ_i²/‖X‖_F², in bits — for direct numeric comparison with their layer profiles '
+        '(their pythia valleys drop below ~0.5 bits). Protocol caveat for that comparison: '
+        'they compute H per 1024-token GSM8K example and average over 7.5k examples; ours is '
+        'the pooled 262k-token pile population covariance — shapes are comparable, absolute '
+        'values only approximately. Dashed = families without write-norm (Pythia, nanochat): '
+        'the valley right after blk3–4; solid = OLMo-2 (write-norm): no valley. The massive '
+        'activation (feature axis), the valley (depth axis) and the compression phase '
+        '(training axis) are one object seen three ways.')
+
+# %% [markdown]
+# Appendix material (the dataset-swap control, the toy edge-case maps) lives in its own
+# notebook: [showcase_appendix.ipynb](showcase_appendix.ipynb).
