@@ -16,12 +16,16 @@ Y = torch.repeat_interleave(torch.arange(4), torch.tensor(SKEW))
 
 
 def run(theta0: torch.Tensor, W0: torch.Tensor, steps: int = STEPS, lr: float = LR) -> dict:
-    """Full-batch GD on CE for the single-layer toy; per-step spectral/fork trajectories."""
+    """Full-batch GD on CE for the single-layer toy; per-step spectral/fork trajectories
+    plus the full weight/feature paths (for Fig-4-style trajectory panels)."""
     theta, W = theta0.clone().requires_grad_(), W0.clone().requires_grad_()
     out: dict = {"rm": [], "cos_w": [], "lam": []}
+    paths: dict = {"theta_path": [], "W_path": []}
     for _ in range(steps + 1):
         loss = F.cross_entropy(theta @ W, Y)
         with torch.no_grad():
+            paths["theta_path"].append(theta.detach().clone())
+            paths["W_path"].append(W.detach().clone())
             lam = torch.linalg.svdvals(theta).square()
             p = lam / lam.sum()
             out["rm"].append(float(torch.exp(-(p * torch.log(p.clamp(min=1e-12))).sum())))
@@ -32,7 +36,8 @@ def run(theta0: torch.Tensor, W0: torch.Tensor, steps: int = STEPS, lr: float = 
             theta -= lr * g_theta
             W -= lr * g_w
     out["loss"] = float(loss)
-    return {k: torch.tensor(v) for k, v in out.items()}
+    return ({k: torch.tensor(v) for k, v in out.items()}
+            | {k: torch.stack(v) for k, v in paths.items()})
 
 
 def _init(delta: float = 1e-3, rx: float = 0.0, iid_mix: float = 0.0, seed: int = 0):

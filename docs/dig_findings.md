@@ -21,6 +21,32 @@ bin — *where the concentration lives*:
 | compression driver | quality | quality | **interference** | **interference** |
 | locus | blk3 (90% of Δquality) + blk15 | blk3 (~all of Δquality) + blk31 | blk14–15, aligned (+0.32) | late blocks 29–31, aligned (+0.39) |
 
+### Per-block quality decomposition (primary packed run, final checkpoint — Jul 17 readout)
+
+The layer-resolved quality ledger term, quantifying "locus" above (previously the exact
+numbers lived only in the swap appendix). Sum = the Σquality row; per-block shares can
+exceed 100% where other blocks are net positive.
+
+| model | Σquality | largest per-block contributors |
+|---|---|---|
+| pythia-160m | −3.89 | split: blk3 −1.76 + blk11 (final) −1.72, blk0 −0.85 |
+| pythia-410m | −5.75 | **blk5 −5.44 (95%)**, blk0 −0.69, blk23 −0.65 |
+| pythia-1b | −6.34 | **blk3 −6.26 (99%)**, blk15 −0.88, blk0 −0.51; blk4–14 all mildly positive |
+| pythia-6.9b | −5.03 | **blk3 −5.10 (101%)**, blk31 −1.24, blk4 −0.92; blk5–30 all mildly positive |
+| OLMo-2-1B | −0.95 | diffuse: blk14 −0.31, blk0 −0.28, blk1 −0.19 (worst block = 33%) |
+| OLMo-2-7B | −1.30 | diffuse: blk0 −0.41, blk30 −0.22, blk1 −0.13 (worst block = 31%) |
+| nanochat-d12 | −6.56 | **blk11 (final) −2.74 (42%)**, blk3 −2.15 (33%), blk4 −1.34 (20%) |
+
+⚠️ Two corrections this forces. (1) The quality LOCUS is scale-dependent within the pythia
+family, not "the same absolute block index 3": blk3 dominates at 1b/6.9b, blk5 at 410m,
+and at 160m (and nanochat-d12) the collapse splits between an early block and the FINAL
+block. The confirmed part of the nanochat prediction is the carrier TERM (quality,
+Σ −6.56, interference crossing zero), not a blk3 locus. (2) pythia-160m's signature is
+MIXED, not cleanly quality-carried: Σinterference ends at −2.93 alongside Σquality −3.89
+and never crosses zero — the clean pythia signature (dominant quality + interference
+crossing to positive) may itself emerge with scale. pythia-410m is clean (quality −5.75,
+interference crosses to +1.37). Figure: showcase §3 per-block quality panel (7 models).
+
 **2+2 confirmed** (OLMo-1B, completed after the first pass): no rogue write (all write RankMe
 1150–1420; late blocks ~350 at worst), interference-driven, late-locus with mutually aligned
 final writes, and the same late re-entropy rise (S_final 5.75@320k → 6.08@1.8M). The
@@ -35,9 +61,14 @@ on the plan).
 **Pythia: compression = one early rogue write.** In BOTH pythia models, blk3.mlp's write
 starts healthy (RankMe ≈ 470 / 830, trace ≈ 0.27× the stream) and collapses to rank ≈ 1–2
 *exactly at the RankMe peak* (1b: 46→2.5 over steps 2k→5k, peak 4k; 6.9b: 12→2 over 10k→26k,
-peak 13k), then grows in energy for the rest of training (trace ratio → 22.6× / 3.7× the
-incoming stream). Same block index at both scales (16 vs 32 blocks) — absolute depth, not
-relative. This looks like the massive-activations / rogue-dimension phenomenon, now with a
+peak 13k), then grows in energy for the rest of training. DEFINITIONAL (the repo's single
+authoritative statement of this number): the trace of the write's centered covariance over
+the trace of its own incoming stream (blk3.attn.in) — a block-LOCAL, input-relative ratio,
+NOT a share of the final stream's energy — reaches 22.6× at 1b / 3.7× at 6.9b by the final
+checkpoint (from ≈ 0.27× at init). Every other mention of this number in the repo should
+point here. Same block index at both scales (16 vs 32 blocks) — absolute depth, not
+relative (though the per-block quality table below shows the locus is NOT index-3 at
+410m/160m). This looks like the massive-activations / rogue-dimension phenomenon, now with a
 ledger price: it carries essentially the whole quality collapse.
 
 **Pythia's late blocks cancel it.** The signed trace between blk3.mlp.out and the *last*
@@ -104,7 +135,7 @@ principled (e.g. k at the spectral knee) before it's a claim.
 
 - **The rogue write survives the geometry change.** pythia-1b blk3 in padded/last-token:
   write RankMe 145 → ~2, trace ratio → 3.3×, quality → −3.9, same collapse timing at the
-  RankMe peak — attenuated relative to packed (1.2 / 22.6× / −6.3) but unmistakably the same
+  RankMe peak — attenuated relative to packed (cf. the packed values above) but unmistakably the same
   object. pythia-6.9b is much milder in this geometry (RankMe → ~13–16, ratio 0.68): the
   rogue direction lives more strongly on non-final token positions at 6.9b. The
   anti-alignment with the final write is also far weaker here (−0.11 vs packed's −0.65).
@@ -140,8 +171,10 @@ the write is a sparse **sink direction** — enormous at the per-window sink slo
 elsewhere.
 
 So Pythia's compression phase, stated plainly: **from the RankMe peak onward, blk3's MLP
-writes an ever-larger sink direction**; the direction's energy (→22× the stream) crushes
-the ledger's quality term and with it the measured RankMe of any all-token covariance; late
+writes an ever-larger sink direction**; the write's outsized local energy (definitional
+ratio above) crushes the ledger's quality term and with it the measured RankMe of any
+all-token covariance (the causal quantity is the quality term: blk3 −6.26 of Σ −6.34,
+table above); late
 blocks partially cancel it before the output (signed trace −0.65); and last-token geometry
 sees it attenuated but present — 13.9–14.2% of padded last tokens are newline-bearing
 (trailing newlines + truncation boundaries). **Caveat resolved NEGATIVE (Jul 13):** checked

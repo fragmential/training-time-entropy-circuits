@@ -68,8 +68,9 @@ totals.
 **Statement (original):** the compression phase is carried by the late layers' terms,
 specifically their interference with the top eigendirections of the final spectrum.
 **Confidence:** low-medium → **partially refuted** on pythia-1b: the quality collapse is
-carried by blk3 (an early-mid block whose rank-one MLP write grows over training to 22× the
-stream's trace), while late blocks are where the *positive* interference appears. Revised:
+carried by blk3 (an early-mid block whose rank-one MLP write grows enormous relative to
+its own incoming stream — local ratio, definitional numbers in dig_findings), while late
+blocks are where the *positive* interference appears. Revised:
 *the compression phase is carried by a small number of identifiable writes (not necessarily
 late), and their energy lands on the head of the final spectrum.*
 **Decide by:** depth profiles of $\mathrm{quality}_k$ and $I_k$ at/after the transition
@@ -137,8 +138,10 @@ Original statement below, kept for the record:
 **Statement:** since the late blocks cancel the newline direction before the output (signed trace
 → −0.65), the direction barely reaches the logits: projecting the rogue direction out of the
 residual stream at inference should cost little loss overall, with any cost concentrated at
-newline-adjacent predictions. The sharp phrasing: *Pythia spends ~22× the stream's energy on
-a signal it then discards* — a framing the intervention refuted (see verdict above). Companion (vocab-entropy lens, from the nanochat-session metrics):
+newline-adjacent predictions. The sharp phrasing: *Pythia spends, locally at blk3, a large
+multiple of its incoming stream's energy on a signal it then discards* — a framing the
+intervention refuted (see verdict above; the ratio is blk3-local, not a final-stream
+share; numbers in dig_findings). Companion (vocab-entropy lens, from the nanochat-session metrics):
 the compression phase should coincide with an output-entropy drop concentrated at structural
 token positions — the functional face of the direction, if it has one.
 **Confidence:** medium.
@@ -246,6 +249,10 @@ reproduces warmup → entropy-seeking → compression in RankMe$(f)$, and the fo
 controls).
 **Decide by:** qualitative match of Fig 4 B–D (weight/feature trajectories; RankMe and
 $\sigma_1, \sigma_2$ curves) and the controls' monotone-expansion signature.
+**STATUS (Jul 13): CONFIRMED, with a discovered fourth condition** — the print requires the
+paper's constructed (unstated) initialisation; iid init leaves the compression event masked
+by the rising baseline. Mechanism (covariance-collapse kick) and transience:
+toy_fig4_addendum.md; controls incl. the MSE-starvation check: toy_model_report.md.
 
 ### H3.2 — The residual toy and its ledger signature
 **Statement:** a multi-layer *residual* toy ($f_{k+1} = f_k + g_k(f_k)$, $g_k$ linear or
@@ -260,6 +267,19 @@ concentration against the transformer runs. Match on both ⇒ the mechanism is
 optimization-driven and architecture-generic; phases-without-matching-ledger ⇒ the trajectory
 is generic but the transformer's mechanism is architectural; no phases ⇒ the stream changes
 the story entirely.
+**STATUS (Jul 13–17): resolved with the INVERSE of the anticipated split** —
+ledger-without-phases: the MULTI-task residual toy reproduces Pythia's decomposition
+signature (quality-carried, rank-collapsed dominant write, 6/6 no-norm seeds) while its
+stream shows NO phase trajectory at ANY depth (1/2/3/6) or init; the missing phases are
+task-structure (frequency-ordered learning smears the rare-class forks across the
+entropy-seeking rise), not depth. The phases DO print through deep stacks when the
+compression event lands after saturation and the feature-to-output map starts
+near-identity — residual with small-init blocks (3/3 seeds, decline onset = the fork),
+a NO-residual stack with identity-init blocks (3/3), and a skewed 6-class bottleneck task
+toggled by the fork delay δ alone. So "the residual stream is constitutive" is corrected
+to: the residual provides near-identity transmission BY DEFAULT; replacement stacks fail
+only under generic inits. Full evidence: toy_multilayer.md + analysis/toy_multilayer.ipynb.
+Open: the nonlinear-block variant's pre-fork decline (unexplained, 3/3 seeds).
 
 ### H3.3 — Representativeness guard (precondition, not hypothesis)
 The multi-layer toy may effectively use one layer, making H3.2 vacuous (the stated fear,
@@ -267,6 +287,9 @@ formalized): **measure** the ledger trace weights $w_k$ — if $\max_k w_k \to 1
 non-representative and H3.2 is *not evaluable* on it (report as such; try depth/width/init
 variations before concluding). The ledger is itself the diagnostic for "does it really use its
 layers".
+**STATUS: worked as designed** — flagged the linear multi-layer variant (max w_k = 0.87,
+non-representative) and passed the nonlinear base (0.55) and all architecture-grid cells
+(0.12–0.19), which is where H3.2 was evaluated.
 
 **Implementation:** isolated `toy/` directory (architecturally incompatible with the collection
 pipeline, so no hooks/model_registry reuse), but dumping per-step activations in DataAccessor

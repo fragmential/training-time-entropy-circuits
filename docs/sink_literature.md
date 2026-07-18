@@ -72,8 +72,8 @@ the full Pythia signature anyway — so QK-norm alone does not prevent the rogue
 this setting. Note SSS never tested QK-norm alone either (their "QKNorm" ablation is sandwich
 PLUS QK-norm), so the two results are consistent: QK-norm alone insufficient (nanochat),
 write-norm alone suppressive (SSS 3818→520; our toy 6/6), both together eliminate (SSS →92;
-OLMo-2 clean). So H1.4 (final_report: write-norm forbids the 22×-energy rogue
-write by construction; toy write-norm 6/6 suppression; nanochat pre-registered confirmation)
+OLMo-2 clean). So H1.4 (final_report: write-norm forbids the outsized rogue
+write by construction; toy write-norm 6/6 suppression; nanochat out-of-family confirmation)
 is the same causal claim SSS establishes at 7B scale from scratch — independent, convergent,
 and published. Their numbers even preserve our nuance: write-norm alone *attenuates* (3818→520)
 rather than abolishes; QK-norm finishes the job. Note their framing slightly differs from ours:

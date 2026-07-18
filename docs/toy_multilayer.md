@@ -51,7 +51,7 @@ share). Every phase is a regime of this one quantity:
   size; the addendum derives it: the co-traveling pair's off-diagonal covariance cancels
   the frequent tilt, the fork collapses the cancellation and reopens the eigengap. In the
   LLMs (RQ1) it is a **sustained** concentration mechanism: Pythia's rogue sink-write
-  growing to ~22× the stream, or OLMo-2's mutually aligned late writes.
+  growing enormous relative to its local input, or OLMo-2's mutually aligned late writes.
 
 Three conditions decide whether a decline **prints** in the measured curve:
 
@@ -102,7 +102,7 @@ band-α data supports.
 | 12 | `skewpair_deep_s0/1/2` (+`deep2` ortho-dirs twin) | generalized constructed init (§4), δ=1e-3 | no print: fork@132–174 lands mid-rise → masked, exactly (T) |
 | 13 | `skewpair_deep_d8_s0/1/2` | as 12, δ=1e-8 | **FULL PRINT 3/3** (§4) — same task, only the fork delay moved: the within-task demonstration of (T) |
 
-## 4. The unification run
+## 4. The conditions carried to a skewed multi-class task (skewpair_deep)
 
 `skewpair_deep` (named variant): a MULTI-style task — 6 classes with skewed counts
 32:16:8:4:2:2 through a genuine bottleneck (d=4 < 6) — with the constructed init

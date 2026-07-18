@@ -26,7 +26,10 @@ padded last-token):
 2. **The concentration mechanism is architecture-dependent — and in Pythia it has a name.**
    Pythia compresses via the ledger's *quality* term: a single early write (blk3.mlp, same
    absolute index at 1b and 6.9b) collapses to rank ≈ 1 exactly at the RankMe peak and then
-   grows to ≈22× the stream's energy. Its dominant variance direction (the top centered
+   grows enormous relative to its own incoming stream (a block-local, input-relative trace
+   ratio — definitional statement and numbers in dig_findings; it says nothing about the
+   write's share of the final stream's energy, which is small). Its dominant variance
+   direction (the top centered
    eigenvector of the write's output, carrying 94–99% of its variance — "the rogue direction")
    is a **sink direction** with two carriers per packed window (position-split analysis,
    dig_findings): every window-start position fires unconditionally regardless of token
@@ -43,7 +46,7 @@ padded last-token):
    (writes READ a normalized stream) and develops the rogue write anyway; OLMo-2's
    distinguishing feature is the *reordered norm* — RMSNorm on the sublayer **output**, i.e.
    the WRITE itself is per-token normalized before entering the stream, which forbids a
-   22×-energy token-activated write by construction (plus QK-norm, irrelevant to an MLP write). The toy
+   outsized token-activated write by construction (plus QK-norm, irrelevant to an MLP write). The toy
    grid tested read-norm (`prenorm` = normalize what the write reads): it suppressed the
    rogue 6/6 seeds — but since real Pythia has read-norm and a rogue anyway, that is a
    toy-vs-LLM discrepancy, NOT support for the OLMo story. The architecturally relevant knob —
@@ -58,8 +61,12 @@ padded last-token):
 data): nanochat-d12 (standard pre-norm, OLMo-style sequential wiring, **no write-norm**)
 shows the complete Pythia signature despite the OLMo wiring — quality-carried compression
 (Σquality −0.07 → −6.43 dominating; Σχ stable ~2.8), interference *rising and crossing zero*
-(−1.3 → +0.98), **rank-collapsed early-mid writes carrying the collapse** (blk3.mlp RankMe
-2.7 at 1.3× stream, blk4 RankMe 1.7 — the same absolute block index 3 as both pythias),
+(−1.3 → +0.98), **rank-collapsed early-mid writes carrying much of the collapse** (blk3.mlp
+RankMe 2.7 at 1.3× its incoming stream, blk4 RankMe 1.7). ⚠️ Locus correction (Jul 17,
+per-block quality decomposition, dig_findings): nanochat is NOT blk3-dominated the way the
+pythias are — its largest single quality contributor is the FINAL block (blk11: −2.74 of
+Σ −6.56, 42%), with blk3+blk4 at 53% together; the confirmed prediction is the carrier
+TERM (quality; interference crossing zero), not a blk3 locus. Continuing:
 late-block rank restoration (blk10 I = +1.6) and head-targeting (blk11 head-mass 0.95). The
 architecture story now stands on: 2+2 observation → data ruled out (swap) → knob identified
 (toy write-norm) → prediction confirmed (nanochat). Caveats: token attribution not run for
@@ -150,7 +157,8 @@ tail fall-off anywhere (band RankMes at 512+/1024+ are monotone non-decreasing).
 **Pythia — the sink-direction rogue write.** blk3.mlp's write starts ordinary (RankMe ≈ 470/830,
 ~0.27× stream energy) and collapses to rank ≈ 1–2 *exactly at the RankMe peak* (1b: over steps
 2k→5k, peak 4k; 6.9b: 10k→26k, peak 13k), then grows in energy for the rest of training
-(→22.6× / 3.7×). It carries ~90–100% of the total quality decline. Token attribution (raw
+(local trace ratios: dig_findings' definitional sentence). It carries ~90–100% of the
+total quality decline (per-block table in dig_findings). Token attribution (raw
 samples, final checkpoint; position-split Jul 13): the direction is a **sink direction with
 two slots per window** — position 0 unconditionally (+1657 on arbitrary content tokens) and
 the window's first newline (+2135; the remaining 96% of newlines are bulk-ordinary, so the
@@ -244,22 +252,16 @@ NO-residual stack with identity-initialized blocks (3/3) — so the corrected fo
 residual stream is constitutive" is: the residual provides near-identity transmission BY
 DEFAULT (LLMs inherit it architecturally), while plain stacks only have it if arranged.
 The MULTI task lacks the phases for task-structure reasons (frequency-ordered learning;
-its 26 rare forks smear across the entropy-seeking rise — masked). The wording below is
-pre-revision. As originally written: the no-residual stack loses the phases entirely — and the
-trainability confound is now RESOLVED (Jul 13 fair-shot retune): at lr 0.01/0.02 the plain
-stack fully solves the task (final loss 3e-5) and still shows no phase structure (every depth
-flat until ~10⁴ steps, then collapse to RankMe ~1–2 with partial recovery — never
-dip→rise→peak→decline).
-"The stream is constitutive for the phases" stands unconfounded (the multi_plain spec now
-ships the fair-shot lr and the figure is regenerated from it). Depth nuance (corrected
-Jul 13; showcase_appendix §C): the earlier "pattern only at the earliest stream" reading
-was an uncentered-measurement artifact — the writes' accumulated bias means hold ~50% of
-the uncentered trace at depth. CENTERED (the LLM-comparable object), every stream starts
-near-full-rank and the FINAL stream compresses hardest (8.9 → 2.5), matching the LLMs'
-end-of-model pattern; what the toy lacks everywhere is a pronounced entropy-seeking rise,
-because theta (the toy's learnable feature matrix — each sample's feature vector is a free
-parameter, Li et al's f(x)) initializes as random noise already at full rank — nothing to
-expand.
+its 26 rare forks smear across the entropy-seeking rise — masked; the collapse is the
+stream snapping onto the frequent-class solution and the recovery IS the entropy-seeking
+phase). Supporting facts folded in: the plain MULTI stack solving the task (fair-shot lr,
+final loss 3e-5) without phases is over-determined — it fails transmission (default init)
+AND its task fails the timing condition — so it is not evidence that replacement
+architectures cannot have phases; and the earlier per-depth readings were
+uncentered-measurement artifacts (accumulated write-bias means, ~50% of uncentered trace
+at depth; showcase_appendix §C). Every ablation is plotted in
+analysis/toy_multilayer.ipynb; open items (nonlinear pre-fork decline; kick-vs-depth
+scaling) in toy_multilayer.md §6.
 (c) **Ledger signature**: the
 residual toy reproduces *Pythia's* quality-driven signature (6/6 no-norm seeds, wiring-
 independent), including a rogue-like rank-collapsed write (though never Pythia's 20× energy

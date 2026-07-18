@@ -22,19 +22,29 @@
 # lr 0.25).
 
 # %%
-import os, sys
+import os, sys, importlib
 if os.path.basename(os.getcwd()) == "analysis":
     os.chdir("..")
 sys.path.insert(0, os.getcwd())
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
+from analysis import experiments_lib as _lib
+importlib.reload(_lib)
+from analysis.experiments_lib import get_model_label
+
+BLOCK_SAMPLES = 'block_representations_samples'
+SWAP = 'block_representations_samples_swap'
+PADDED = 'block_representations_samples_padded'
 
 def caption(txt):
+    """Paper-style figure caption, rendered below the figure it follows."""
     from IPython.display import display, HTML
-    display(HTML(f'<div style="font-size:0.88em; opacity:0.8; max-width:56em; '
+    display(HTML(f'<div style="font-size:0.97em; opacity:0.95; max-width:56em; '
                  f'margin:0.2em 0 1.2em 0.5em"><b>Figure.</b> {txt}</div>'))
 
+# %%
+# Shared data + helpers (no plots in this cell): toy sweeps, fork/peak detectors.
 SW = torch.load('data/results/toy/appendix_sweeps.pt', weights_only=True)
 
 def fork_step(r):                      # first step the rare pair leaves cos > 0.97
@@ -54,11 +64,6 @@ def peak_step(r, skip=4):
 # table (all ledger terms, rogue diagnostics, coupling) is in docs/swap_run_findings.md.
 
 # %%
-from analysis import experiments_lib as _lib
-from analysis.experiments_lib import get_model_label
-
-BLOCK_SAMPLES = 'block_representations_samples'
-SWAP = 'block_representations_samples_swap'
 n_blocks_swap = {'pythia-1b-deduped': 16, 'OLMo-2-0425-1B': 16}
 
 def swap_quality(model):
@@ -154,7 +159,7 @@ caption('Answer: yes — decline size is a function of fork timing alone here. L
 # evidence that their rare pair initializes at the origin.
 
 # %%
-fig, ax = plt.subplots(figsize=(8, 4))
+fig, ax = plt.subplots(figsize=(9, 4.5))
 for rx, c in zip(('0', '-0.1', '-0.25', '-0.5'), plt.get_cmap('plasma')(np.linspace(0.1, 0.8, 4))):
     r = SW['rx'][rx]
     rm, fk, pk = r['rm'].numpy(), fork_step(r), peak_step(r)
@@ -162,7 +167,18 @@ for rx, c in zip(('0', '-0.1', '-0.25', '-0.5'), plt.get_cmap('plasma')(np.linsp
     if fk: ax.axvline(fk, color=c, lw=0.8, ls=':')
     ax.axvline(pk, color=c, lw=0.8, ls='--')
 ax.set(xlabel='step', ylabel='RankMe', title='fork onset (dotted) vs decline onset (dashed) by rx')
-ax.legend(fontsize=8); plt.show()
+ax.legend(fontsize=8, loc='upper left')
+axz = ax.inset_axes([0.55, 0.07, 0.43, 0.5])            # zoom: the peak/decline region
+for rx, c in zip(('0', '-0.1', '-0.25', '-0.5'), plt.get_cmap('plasma')(np.linspace(0.1, 0.8, 4))):
+    r = SW['rx'][rx]
+    rm, fk, pk = r['rm'].numpy(), fork_step(r), peak_step(r)
+    axz.plot(rm, color=c, lw=1.4)
+    if fk: axz.axvline(fk, color=c, lw=0.8, ls=':')
+    axz.axvline(pk, color=c, lw=0.8, ls='--')
+axz.set(xlim=(150, len(rm) - 1), ylim=(1.99, 2.005))
+axz.tick_params(labelsize=7)
+ax.indicate_inset_zoom(axz, edgecolor='0.4')
+plt.show()
 caption('Answer: the rare pair\'s starting distance from the origin controls the delay. '
         'Dotted vertical = fork onset (the weights\' cosine drops below 0.97); dashed '
         'vertical = RankMe peak, where the decline starts. Moving the pair from the origin '
@@ -172,6 +188,68 @@ caption('Answer: the rare pair\'s starting distance from the origin controls the
         'rendering. Logical scope: a monotone four-point trend consistent with the '
         'mechanism; the quantitative threshold model (~1/3 of final separation) is checked '
         'in the addendum, not here.')
+
+# %% [markdown]
+# #### The same four runs in Li et al's Fig-4 style
+# Classifier rows $W_i$ and features $f_\theta(x)$ as 2-D trajectories, phase-styled as in
+# the paper (dotted warmup, solid expansion, dashed compression; gray dot = start), plus
+# RankMe with the top two eigenvalues. One figure per rare-pair offset rx. The fork
+# (dotted vertical line) and the decline onset (dashed vertical line) drift apart as the
+# pair starts further from the origin.
+
+# %%
+CLASS_COLORS4 = ('magenta', 'orange', 'royalblue', 'seagreen')
+CLASS_MARKERS4 = ('^', 'o', 's', 'D')
+PHASES4 = (':', '-', '--')                               # warmup / expansion / compression
+Y4 = (0, 0, 1, 1, 2, 3)                                  # class of each feature row
+
+def _bounds4(rm):
+    pk = int(np.argmax(rm))
+    return int(np.argmin(rm[:pk + 1])), pk
+
+def _phased4(ax, path, bounds, color, marker):
+    for lo, hi, style in zip((0, *bounds), (*bounds, len(path) - 1), PHASES4):
+        ax.plot(path[lo:hi + 1, 0], path[lo:hi + 1, 1], style, color=color, lw=1.5)
+    ax.scatter(*path[0], color='0.6', s=18, zorder=2)
+    ax.scatter(*path[-1], color=color, s=60, marker=marker, zorder=3)
+
+for rx in ('0', '-0.1', '-0.25', '-0.5'):
+    r = SW['rx'][rx]
+    rm, lam = r['rm'].numpy(), r['lam'].numpy()
+    bounds, fk = _bounds4(rm), fork_step(r)
+    fig, (bx, cx, dx) = plt.subplots(1, 3, figsize=(15, 4.2))
+    for i in range(4):
+        _phased4(bx, r['W_path'][:, :, i].numpy(), bounds, CLASS_COLORS4[i], CLASS_MARKERS4[i])
+    for j, c in enumerate(Y4):
+        _phased4(cx, r['theta_path'][:, j, :].numpy(), bounds, CLASS_COLORS4[c], CLASS_MARKERS4[c])
+    for ax in (bx, cx):
+        m = 1.1 * max(abs(v) for v in (*ax.get_xlim(), *ax.get_ylim()))
+        ax.set(xlabel='dim 1', ylabel='dim 2', aspect='equal', xlim=(-m, m), ylim=(-m, m))
+    bx.set_title('$W_i$')
+    cx.set_title(r'$f_\theta(x)$')
+    steps = np.arange(len(rm))
+    for lo, hi, style in zip((0, *bounds), (*bounds, len(rm) - 1), PHASES4):
+        dx.plot(steps[lo:hi + 1], rm[lo:hi + 1], style, color='navy', lw=2)
+    ex = dx.twinx()
+    ex.plot(steps, lam[:, 0], color='violet', lw=1.5, label=r'$\lambda_1$')
+    ex.plot(steps, lam[:, 1], color='yellowgreen', lw=1.5, label=r'$\lambda_2$')
+    ex.set_ylabel(r'eigenvalues $\lambda_i$')
+    ex.legend(fontsize=8, loc='center right')
+    if fk is not None:
+        dx.axvline(fk, color='gray', lw=0.9, ls=':')
+    dx.axvline(bounds[1], color='gray', lw=0.9, ls='--')
+    dx.set(title='RankMe & eigenvalues', xlabel='step', ylabel='RankMe')
+    fig.suptitle(f'rare-pair offset rx = {rx}  (fork: dotted vertical; decline onset: dashed vertical)')
+    plt.tight_layout()
+    plt.show()
+caption('The four rx runs in the paper\'s presentation. As the rare pair starts further '
+        'from the origin (top to bottom figure), the shared path the blue/green singleton '
+        'classes travel gets longer before the fork, and the gap between the fork (dotted '
+        'vertical) and the decline onset (dashed vertical) widens from zero to tens of '
+        'steps, while the printed decline shrinks — both as the squared-separation account '
+        'predicts. The dashed compression styling in the trajectory panels begins at the '
+        'RankMe peak, so at rx = 0 it starts at the visible split (the paper\'s rendering) '
+        'and at larger offsets it starts after it.')
 
 # %% [markdown]
 # ### B3. When no decline is visible, is the kick absent — or hidden? (init blend)
@@ -327,3 +405,101 @@ caption('Answer: no contradiction — the "deep streams start collapsed and only
         'variant (nonlinear residual, canonical '
         'spec); the plain stack has no such mean artifact (bias share ~9%) and its missing '
         'phases are real.')
+
+# %% [markdown]
+# ## D. Compression valleys, packed vs padded final-token (pythia)
+# **Question.** The depth-axis valley (main showcase §8) is measured on packed all-token
+# data. Does it survive padded final-token geometry — the geometry Li et al measure in —
+# and does the stream recover by the output there too?
+
+# %%
+fig, axes = plt.subplots(1, 2, figsize=(13.5, 4.6))
+for ax, cfg, title in ((0, BLOCK_SAMPLES, 'packed all-token'),
+                       (1, PADDED, 'padded final-token')):
+    ax = axes[ax]
+    for model, L in (('pythia-1b-deduped', 16), ('pythia-6.9b-deduped', 32),
+                     ('OLMo-2-0425-1B', 16), ('OLMo-2-1124-7B', 32)):
+        res, steps = _lib.load_results(cfg, model)
+        leaves = [f'blk{k}.attn.in' for k in range(L)] + ['before_final_norm']
+        fin = res[steps[-1]]
+        rank = [fin.get(lf, {}).get('acts_centered', {}).get('rankme', np.nan) for lf in leaves]
+        ax.semilogy(np.linspace(0, 1, len(leaves)), rank, marker='o', lw=2,
+                    ls='--' if 'pythia' in model else '-', label=get_model_label(model))
+    ax.set(xlabel='relative depth (last point = before_final_norm)', title=title)
+axes[0].set_ylabel('stream RankMe (centered, log)')
+axes[0].legend(fontsize=8, loc='lower left')
+ylims = [ax.get_ylim() for ax in axes]                  # same range, ticks kept on both
+for ax in axes:
+    ax.set_ylim(min(l[0] for l in ylims), max(l[1] for l in ylims))
+fig.suptitle('Compression valley at the final checkpoint: packed vs padded final-token (dashed = pythia)')
+plt.tight_layout(); plt.show()
+caption('Answer: the valley survives the geometry change; the output recovery does not — '
+        'and both effects are pythia-specific. Pythia (dashed), packed: the familiar crash '
+        'right after blk3\'s write enters (RankMe ~848 → 1.7 at 1b) with a monotone late '
+        'recovery to ~194/260 at the pre-final-norm stream. Pythia, padded final-token: the '
+        'same cliff at the same depth (468 → 11 at 1b; 854 → 260 → 68 at 6.9b), a shallower '
+        'valley floor (tens, not ~2), a partial mid-stack recovery — and then the '
+        'pre-final-norm stream itself drops to SINGLE DIGITS (8.7 at 1b, 7.6 at 6.9b): in '
+        'last-token geometry the output stream is head-crushed in a way the packed view '
+        'never shows. OLMo-2 (solid): no valley in EITHER geometry, and no output crush '
+        'either — the padded profile is just the packed profile at ~70–80% level '
+        '(before_final_norm 366/662 padded vs 447/657 packed). Two caveats: the padded runs '
+        'have N/d ≈ 8 (16,384 rows over d=2048), so absolute levels carry finite-sample '
+        'distortion in the tail (sample-count study, §E), and packed vs padded are '
+        'different measured objects (all-token vs last-token covariance) — shapes are '
+        'comparable, levels are not.')
+
+# %% [markdown]
+# ## E. How much of the spectrum is sample count? (packed vs padded, output leaves)
+# **Question.** Padded runs estimate a d=2048 covariance from 16,384 rows (N/d ≈ 8); packed
+# runs use 262k tokens. How much of the measured spectrum — especially its tail, and RankMe —
+# depends on the sample count rather than the model? Data: fresh oversized final-checkpoint
+# collections (2x the standard budgets; configs/sample_count_*.yaml), eigenspectra on nested
+# random subsets bracketing the standard budgets (oneoff_scripts/sample_count_spectra.py).
+
+# %%
+# Data + constants for §E (no plots here).
+SC = torch.load('data/results/sample_count_spectra.pt', weights_only=True)
+NS_SC = {'packed': (16_384, 32_768, 65_536, 131_072, 262_144),
+         'padded': (1_024, 2_048, 4_096, 8_192, 16_384, 32_768)}
+STD_N = {'packed': 262_144, 'padded': 16_384}
+
+# %%
+fig, axes = plt.subplots(2, 2, figsize=(13, 9))
+for i, geom in enumerate(('packed', 'padded')):
+    for j, leaf in enumerate(('before_final_norm', 'after_final_norm')):
+        ax = axes[i, j]
+        ns = NS_SC[geom]
+        for k, n in enumerate(ns):
+            lam = SC[f'{geom}.{leaf}.{n}'].numpy()
+            lam = lam[lam > 0]
+            p = lam / lam.sum()
+            rm = np.exp(-(p * np.log(p)).sum())
+            ax.loglog(np.arange(1, len(lam) + 1), lam,
+                      lw=2.2 if n == STD_N[geom] else 1.2,
+                      color=plt.get_cmap('plasma')(k / (len(ns) - 1)),
+                      label=f'n={n:,} (RankMe {rm:.1f})' + (' ← standard' if n == STD_N[geom] else ''))
+        ax.set(title=f'{geom} · {leaf}', xlabel='eigenvalue rank', ylabel='eigenvalue')
+        ax.legend(fontsize=7, loc='lower left')
+for row in axes:                                        # same range per row, ticks kept on both
+    ylims = [ax.get_ylim() for ax in row]
+    for ax in row:
+        ax.set_ylim(min(l[0] for l in ylims), max(l[1] for l in ylims))
+fig.suptitle('Centered eigenspectra vs sample count — pythia-1b, final checkpoint (thick = standard budget)')
+plt.tight_layout(); plt.show()
+caption('Answer: geometry- and leaf-dependent. Packed (top row): the spectrum and RankMe '
+        'are essentially sample-count-invariant from 16k rows up (before_final_norm RankMe '
+        '194→196 across 16k→262k; after_final_norm 262→269) — the packed budgets are '
+        'comfortably in the asymptotic regime, and only the extreme tail lifts with n. '
+        'Padded before_final_norm (bottom left): the head is so dominant that RankMe is '
+        'stable and single-digit at EVERY n (7.1@1k → 8.6@32k) — the last-token head-crush '
+        'is a property of the representation, not of the sample count. Padded '
+        'after_final_norm (bottom right): here sample count matters — RankMe climbs 63 → '
+        '101 from n=1k to the standard 16,384 and gains only ~2 more by 32k, with the '
+        'growth coming from the tail filling in. Practical reading: our standard padded '
+        'budget sits at the start of the plateau, so trends at fixed N are safe, RankMe '
+        'levels at the padded POST-norm leaf are mildly conservative (a few percent below '
+        'asymptotic), and any comparison of padded tail-band LEVELS across different '
+        'sample counts is invalid. One count is missing by construction: the packed '
+        'collection keeps 511 positions per 512-token window, so the 524k subset was '
+        'skipped (523,264 rows collected).')

@@ -709,8 +709,8 @@ def plot_group(
     if title is not None: plt.title(title)
     plt.xlabel(XVAR_LABELS[xvar], fontsize=14)
     plt.ylabel(YVAR_LABELS.get(yvarname, yvarname) + (' (rel.)' if normalize else ''), fontsize=14)
-    plt.xlim(10e7, 10**12.7)
-    # print([float(np.log10(lim)) for lim in plt.xlim()])
+    # x autoscales to the data: a fixed token range cut off early pythia
+    # checkpoints (~2e6 tokens) and half of nanochat entirely
     legend_or_colorbar(legend_max)
     plt.show()
 
@@ -790,7 +790,7 @@ def plot_layer_contribution(model, sources, xvar='tokens', yvar='trace', title=N
     else:                                                       # signed: positives up, negatives down
         stack(np.clip(frac, 0, None)); stack(np.clip(frac, None, 0))
         plt.axhline(0, color='0.3', lw=0.8)
-    plt.xscale('log'); plt.xlim(10e7, 10**12.7)
+    plt.xscale('log')
     if title: plt.title(title)
     plt.xlabel(XVAR_LABELS[xvar], fontsize=14)
     plt.ylabel('Share of residual energy' if normalize else YVAR_LABELS.get(yvar, yvar), fontsize=14)
@@ -855,7 +855,7 @@ def plot_wo_topk(source, model, yvar, k=3):
         j, jsteps = get_ys(source, model, ('', 'joint_ablation'), yvar)
         plt.plot(np.asarray(XVAR_FNS['tokens'](model, jsteps))[1:], np.asarray(j)[1:], lw=3,
                  color='tab:red', label=f'joint − top-{k} ({lbl})')
-    plt.xscale('log'); plt.xlim(10e7, 10**12.7)
+    plt.xscale('log')
     plt.xlabel(XVAR_LABELS['tokens'], fontsize=14); plt.ylabel(YVAR_LABELS.get(yvar, yvar), fontsize=14)
     plt.legend(); plt.title(f'{yvar}: normal vs without top-{k} writes')
     plt.show()

@@ -1,0 +1,30 @@
+output_dir: data/inferences/sample_count_padded
+# Raw final-checkpoint acts at the two output leaves, padded last-token, oversized sample
+# budget (32,768 = 2x the usual 16,384) for nested subsampling around the standard budget.
+# Data settings mirror block_representations_samples_padded.
+# Consumed by oneoff_scripts/sample_count_spectra.py -> showcase_appendix §E.
+
+model_name: "EleutherAI/pythia-1b-deduped"
+
+batch_size: 64
+num_samples: 32_768
+
+dataset_name: native
+text_shuffle_seed: 42
+seq_len: 512
+max_length: 512
+min_length: 32
+checkpoints: "final"
+packing: padded
+token_selection: last
+activation_dtype: bf16
+
+hooks:
+  - before_final_norm
+  - after_final_norm
+
+max_layers_per_pass: 0
+collect_format: acts
+storage_format: acts
+compute_metrics: False
+keep_cached: True

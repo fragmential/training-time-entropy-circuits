@@ -18,7 +18,7 @@ analysis/showcase_appendix.ipynb.
 | swap_run_findings.md | evidence | dataset-swap control: full multi-metric verdict table |
 | toy_model_report.md | evidence (RQ3) | toy reproduction + residual/knob variants, H3.x verdicts |
 | toy_fig4_addendum.md | evidence (RQ3) | the fourth init condition; covariance-collapse mechanism; lag; transience proof sketch |
-| toy_multilayer.md | evidence (RQ3) | why multi-layer toys lacked the phases + the fix: dS/dt = −Cov_p(g, log p), print conditions (timing/kick/transmission), full ablation table |
+| toy_multilayer.md | evidence (RQ3) | why multi-layer toys lacked the phases + the fix: dS/dt = −Cov_p(g, log p), print conditions (timing/kick/transmission), full ablation table; every ablation plotted in analysis/toy_multilayer.ipynb |
 | sink_literature.md | literature | Sun et al / spike-sparse-sink / sinks-valleys summaries, claims tagged per paper w/ file:line; our position |
 | rank_ledger_notes.md, ledger_symbols.md | methods | the ledger derivation and symbol glossary |
 | ablations.md | evidence | robustness/ablation table (what was checked, how) |
@@ -38,7 +38,8 @@ analysis/showcase_appendix.ipynb.
 | OLMo-2's norm package selects the mechanism; nanochat (QK-norm only) shows write-norm is the operative lever (H1.4) | final_report §0.3; sink_literature "norm placement" | showcase §6 arch grid |
 | Dataset-swap: mechanism follows model, not data | swap_run_findings.md | showcase_appendix A |
 | Toy compression needs the paper's unstated init; decline is a fading covariance event | toy_fig4_addendum.md (mechanism; transience proof sketch in its appendix) | showcase §6 + appendix B (B5 = MSE-starvation check) + appendix C (depth × centering) |
-| The phase curve passes through deep stacks (residual AND identity-init plain) iff event-after-saturation + near-identity transmission | toy_multilayer.md | showcase §6 "multi-layer resolution" |
+| The phase curve passes through deep stacks (residual AND identity-init plain) iff event-after-saturation + near-identity transmission | toy_multilayer.md | showcase §6 "multi-layer resolution" + analysis/toy_multilayer.ipynb (all ablations) |
+| Padded last-token OUTPUT stream head-crushed to single-digit RankMe in pythia (vs ~194 packed; OLMo unaffected); padded post-norm RankMe also sample-count-sensitive below ~8k rows | dig_findings padded section; final_report §2.1 | showcase_appendix D + E |
 | Valleys emerge AT the RankMe peak, with the rogue collapse; OLMo-2 has none | dig_findings "compression valleys" | showcase §8 |
 | RQ2 (ALL of it): ⚠️ UNDER REVISION — documented aggregates mixed acts+grads; verdicts suspect, parked | final_report §4 banner; plan.md item 1 | figures not to be trusted until redo |
 | Vocab-entropy: old flat final layer was a softcap-omission artifact | vocab_entropy.ipynb header | vocab_entropy figures |
