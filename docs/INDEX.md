@@ -1,45 +1,45 @@
 # Docs index — where everything lives
 
-Three layers: **report** (headline results), **plan** (forward-looking, the only such doc),
-**topic docs** (detailed evidence; the thesis' appendix material). Figures: every headline
-finding has a showcase figure (analysis/showcase.ipynb); appendix-grade figures live in
-analysis/showcase_appendix.ipynb.
+Four layers, one job each:
+
+- **registry** (research_questions.md) — every question and hypothesis, one-line verdict,
+  pointer to the evidence. Start here to find anything.
+
+- **synthesis** (final_report.md) — the whole story in one file, current belief only;
+  superseded readings live in its corrections-record appendix.
+
+- **plan** (plan.md) — the only forward-looking doc.
+
+- **topic docs** — detailed evidence and methods; the thesis' appendix material.
+
+Figures: every headline finding has a showcase figure (analysis/showcase.ipynb, organised
+Question → Finding → evidence per section); appendix-grade figures in
+analysis/showcase_appendix.ipynb; every multi-layer toy ablation in
+analysis/toy_multilayer.ipynb.
 
 ## The documents
 
 | doc | kind | contents |
 |---|---|---|
-| final_report.md | report | executive summary; RQ1/2/3 results + hypothesis scoreboard; caveats; open questions; appendix (side findings) |
+| research_questions.md | registry | RQ1/RQ1b/RQ2/RQ3 + hypotheses, verdicts, pointers |
+| final_report.md | synthesis | executive summary; RQ1/RQ3 results; RQ2 parked status; caveats; open questions; corrections record |
 | plan.md | plan | in-flight jobs, ranked next steps, deferred decisions |
-| research_questions.md | registry | RQ1–RQ3 + hypotheses with decision criteria and status |
-| dig_findings.md | evidence (RQ1) | the samples-sweep findings log: head/bulk, rogue identification (sink slots), interventions, valleys, metric→finding table |
-| rq2_methods.md | methods+evidence (RQ2) | populations, excess-mass, split-half design and numbers |
-| splithalf_note.md | methods (RQ2) | split-half estimator details |
-| swap_run_findings.md | evidence | dataset-swap control: full multi-metric verdict table |
-| toy_model_report.md | evidence (RQ3) | toy reproduction + residual/knob variants, H3.x verdicts |
-| toy_fig4_addendum.md | evidence (RQ3) | the fourth init condition; covariance-collapse mechanism; lag; transience proof sketch |
-| toy_multilayer.md | evidence (RQ3) | why multi-layer toys lacked the phases + the fix: dS/dt = −Cov_p(g, log p), print conditions (timing/kick/transmission), full ablation table; every ablation plotted in analysis/toy_multilayer.ipynb |
-| sink_literature.md | literature | Sun et al / spike-sparse-sink / sinks-valleys summaries, claims tagged per paper w/ file:line; our position |
-| rank_ledger_notes.md, ledger_symbols.md | methods | the ledger derivation and symbol glossary |
+| dig_findings.md | evidence (RQ1) | the samples-sweep evidence: head/bulk, sink-write identification (two slots), interventions, valleys, dataset-swap controls, metric→finding table |
+| sink_literature.md | literature | sink-paper summaries mapped to our results (+ the original deposit-test negative, filed there; figure: showcase_appendix §F) |
 | ablations.md | evidence | robustness/ablation table (what was checked, how) |
-| next_run_additions.md | plan (annex) | metric additions/fixes for the next collection sweep |
-| architecture.md, values_prompt.md | meta | codebase architecture; code-style values |
+| toy.md | evidence (RQ3) | the whole toy arc: single-layer reproduction + controls (§2), fourth condition / kick / lag / transience (§3), depth pattern conditions + ablation table (§4), decomposition signature (§5), architecture knobs (§6) |
+| ledger.md | methods | the decomposition: derivation, symbols, term meanings, exactness caveats, alignment-metric taxonomy |
+| rq2.md | methods (RQ2) | geneig/excess-mass methods, split-half estimator (v1 flaw + v2 + contamination audit), population inventory — the redo's blueprint |
+| collection/ | archive-adjacent | ops/process docs kept out of the main flow: architecture.md (codebase), model_architectures.txt, next_run_additions.md (next-sweep metric additions), values_prompt.md (code-values charter) |
+| archive/ | archive | pre-RQ-era scratch (profiling, old TODOs) |
 
-## The major findings (finding → doc section → figure)
+## The notebooks
 
-| finding | doc | figure |
-|---|---|---|
-| Li et al phases reproduce (both families, both data modes) | final_report §2.1 | showcase §1 |
-| Compression is a head event; the deep spectrum keeps expanding | dig_findings "head phenomenon" | showcase §2 |
-| Ledger split: Pythia quality-carried, OLMo-2 interference-carried | dig_findings headline; final_report §2.2 | showcase §3 |
-| The rogue write is a sink direction (two slots: window start + first newline) | dig_findings "rogue direction identified" | showcase §4 |
-| Rogue direction is not inert at the output; its per-occurrence content is read at the next position (H1.5) | dig_findings "interventions" | — (text) |
-| OLMo-2: distributed aligned late writes carry the interference | final_report §2.2 | showcase §5 |
-| OLMo-2's norm package selects the mechanism; nanochat (QK-norm only) shows write-norm is the operative lever (H1.4) | final_report §0.3; sink_literature "norm placement" | showcase §6 arch grid |
-| Dataset-swap: mechanism follows model, not data | swap_run_findings.md | showcase_appendix A |
-| Toy compression needs the paper's unstated init; decline is a fading covariance event | toy_fig4_addendum.md (mechanism; transience proof sketch in its appendix) | showcase §6 + appendix B (B5 = MSE-starvation check) + appendix C (depth × centering) |
-| The phase curve passes through deep stacks (residual AND identity-init plain) iff event-after-saturation + near-identity transmission | toy_multilayer.md | showcase §6 "multi-layer resolution" + analysis/toy_multilayer.ipynb (all ablations) |
-| Padded last-token OUTPUT stream head-crushed to single-digit RankMe in pythia (vs ~194 packed; OLMo unaffected); padded post-norm RankMe also sample-count-sensitive below ~8k rows | dig_findings padded section; final_report §2.1 | showcase_appendix D + E |
-| Valleys emerge AT the RankMe peak, with the rogue collapse; OLMo-2 has none | dig_findings "compression valleys" | showcase §8 |
-| RQ2 (ALL of it): ⚠️ UNDER REVISION — documented aggregates mixed acts+grads; verdicts suspect, parked | final_report §4 banner; plan.md item 1 | figures not to be trusted until redo |
-| Vocab-entropy: old flat final layer was a softcap-omission artifact | vocab_entropy.ipynb header | vocab_entropy figures |
+| notebook | contents |
+|---|---|
+| showcase.ipynb | the headline figures: §1 reproduction, §2 spectral locality, §3 the decomposition, §4 Pythia's sink write, §5 OLMo-2's aligned interference, §6 the minimal model (6.1 single-layer, 6.2 depth conditions, 6.3 decomposition signature, 6.4 architecture knobs), §7 RQ2 stub (parked), §8 side findings + compression valleys |
+| showcase_appendix.ipynb | §A dataset swap, §B single-layer toy edge cases, §C per-depth uncentered-vs-centered (pattern runs + the 32-class artifact), §D valleys packed vs padded, §E sample-count validity, §F sink-variance deposit test |
+| toy_multilayer.ipynb | every experiment behind toy.md §4 (the depth ablations) |
+| experiments.ipynb / experiments_padded.ipynb | full per-model grids (Exp 4.x) |
+| rq2_results.ipynb | RQ2 machinery (parked with RQ2) |
+| vocab_entropy.ipynb | entropy-lens staging |

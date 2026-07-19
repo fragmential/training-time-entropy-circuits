@@ -16,7 +16,7 @@
 # %% [markdown]
 # # Multi-layer toy classifiers: when does the phase pattern survive depth?
 #
-# This notebook shows every experiment behind [docs/toy_multilayer.md](../docs/toy_multilayer.md).
+# This notebook shows every experiment behind [docs/toy.md](../docs/toy.md) §4.
 # The question it answers: Li et al's single-layer toy classifier shows the three-phase RankMe
 # trajectory, and so do real multi-layer LLMs, but our first multi-layer toys did not. What
 # exactly decides whether a deep toy shows the pattern?
@@ -356,7 +356,7 @@ panels([{'title': 'B0 on T-skew, FI-constructed (run to 3000 steps)',
 caption('The single-layer baseline on Li et al\'s task. Top: the phase pattern (dip, '
         'expansion, peak, compression, slow recovery). Bottom: the rare pair co-travels at '
         'cos ≈ 1 and separates at the vertical line; the compression phase begins there. '
-        'The recovery afterwards is the transience result from toy_fig4_addendum.md.')
+        'The recovery afterwards is the transience result from toy.md §3.')
 
 # %% [markdown]
 # ## 2. The 32-class task shows no phase pattern at any depth
@@ -405,7 +405,7 @@ caption('Left: the 32-class task at depths 0 to 6. No curve shows the phase patt
 # collapse happens while the frequent classes are being fit, the recovery while the mid
 # and rare classes are being fit.
 #
-# By the visibility argument (toy_fig4_addendum §B3), a separation that happens before
+# By the visibility argument (toy.md §3.2; appendix §B1), a separation that happens before
 # the curve is saturated leaves no visible mark.
 
 # %%
@@ -604,5 +604,5 @@ caption('Same task, same network, same initialisation geometry; only δ differs.
 #   run.
 #
 # - No normalization layers appear anywhere in this notebook; the normalization experiments
-#   live in the architecture-knob grid (toy_model_report.md), which predates the conditions
+#   live in the architecture-knob grid (toy.md §6), which predates the conditions
 #   established here and is marked for a rerun.

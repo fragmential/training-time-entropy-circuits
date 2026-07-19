@@ -7,11 +7,12 @@ in-memory cross-covariances), and cross-population generalized eigenanalysis. Mo
 Pythia (14m–12b), OLMo-2 (1B, 7B), nanochat-d12 (worktree), plus a toy classifier platform.
 
 ## Research state (read these before assuming anything)
-- `docs/final_report.md` — the synthesis: headline results, hypothesis scoreboard, in-flight work.
-- `docs/research_questions.md` — RQ1–RQ3 + hypotheses with decision criteria and status.
-- `docs/dig_findings.md` (RQ1 evidence), `docs/rq2_methods.md` + `docs/splithalf_note.md`
-  (RQ2 methods), `docs/rank_ledger_notes.md` / `docs/ledger_symbols.md` (the ledger),
-  `docs/toy_model_report.md` (RQ3), `docs/values_prompt.md` (code style values).
+- `docs/INDEX.md` — the doc map. `docs/final_report.md` — the synthesis (current belief only;
+  corrections record in its appendix). `docs/research_questions.md` — the question registry
+  (RQ + verdict + pointer).
+- `docs/dig_findings.md` (RQ1 evidence + controls), `docs/toy.md` (RQ3), `docs/ledger.md`
+  (the decomposition), `docs/rq2.md` (RQ2 methods), `docs/collection/values_prompt.md`
+  (code style values; ops/process docs live in `docs/collection/`).
 
 ## Project structure
 

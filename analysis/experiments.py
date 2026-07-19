@@ -536,7 +536,7 @@ for model in filter_model_names:
 # ### Rank ledger (Exp 4.2)
 
 # %%
-# Exact per-block ledger of the residual's rank entropy (docs/rank_ledger_notes.md):
+# Exact per-block ledger of the residual's rank entropy (docs/ledger.md):
 # ΔS_k = χ_k (overlap) + quality_k (spectral quality of the writes) + interference_k (pure
 # cross-covariance effect); Σ_k ΔS_k telescopes to log RankMe(final) − log RankMe(emb).
 def _ledger_grid(model):

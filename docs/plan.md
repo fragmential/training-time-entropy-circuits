@@ -2,7 +2,8 @@
 
 The only forward-looking doc: in-flight work, ranked next steps, deferred decisions.
 Results NEVER live here — they go to final_report.md (headline) and the topic docs
-(evidence). Collection-specific additions for the next sweep: next_run_additions.md.
+(evidence). Collection-specific additions for the next sweep:
+collection/next_run_additions.md.
 
 ## In flight (SLURM, Jul 13)
 
@@ -10,12 +11,38 @@ Results NEVER live here — they go to final_report.md (headline) and the topic 
 
 ## Next (ranked)
 
-0. pythia-6.9b RQ2 collection (SCRAPPED for now, Jul 13 — user call; OLMo-7B data suffices):
+1. The padded-pythia puzzle (added Jul 19, user): pythia-1b's padded last-token pre-norm
+   stream RankMe is SINGLE-DIGIT at every sample count (showcase_appendix §E: 7.1–8.6 —
+   a representation property, not an estimator artifact), and how sink-direction variance
+   reaches padded last tokens is only partially accounted for (mid-stack residue ~3.6%,
+   quantitative match unchecked — final_report §6). Sub-items:
+   (a) a PADDED dataset-swap leg — the existing swap control is packed-only, so a
+   dataset-side explanation of the padded collapse is currently unruled;
+   (b) the quantitative residue accounting (does ~3.6% mid-stack residue explain the
+   padded last-token measurement?);
+   (c) settle whether the padded head-crush is the same object as the packed head event
+   or a last-token-geometry phenomenon of its own.
+2. Separation-clean H2.1 follow-ups (after the redo).
+3. Rerun the architecture-knob grid under the constructed-timing setup (the current grid
+   runs on the no-pattern 32-class task — its trajectory-shape readings are void, only the
+   suppression and carrier attributions stand; toy.md §6 scope note). Add a QK-norm cell
+   in the same rerun (the sink literature says QK-norm is the STRONGER spike-suppressing
+   lever; the old grid only tested write-norm).
+4. Toy: add an attention-like ingredient (token-addressed mixing) to test whether anything
+   produces OLMo's interference mode — the missing half of the architecture-knob result.
+5. Drift re-derivation under the gap-corrected rate (`cka_drift_rate`; settle per-dex vs
+   per-gtok normalization): the raw-CKA "two reorganization events" claim is
+   checkpoint-spacing-confounded and a first corrected look contradicts it (pythia peaks
+   mid-training, OLMo-1B rises late) — flagged in final_report corrections record.
+6. Deferred pending infgrams (other session): TriviaQA distributional-memorization —
+   memorization-peak vs spectral-event alignment, checkpoint-wise head-ablation cost, a
+   behaviorally-grounded memorized population for RQ2.
+7. pythia-6.9b RQ2 collection (SCRAPPED for now, Jul 13 — user call; OLMo-7B data suffices):
    all 11 configs OOM'd at the standard 180G host-RAM share (173G used vs OLMo-7B's 107G —
    smells like a pythia-specific pipeline problem, e.g. checkpoint loading holding duplicate
    copies). Before any rerun: diagnose the footprint on the standard share (RSS logging),
    fix it, THEN collect. Job design + resource choices need user sign-off.
-1. RQ2 REDO (PARKED by user, Jul 13): the documented excess-mass aggregates mixed acts and
+8. RQ2 REDO (PARKED by user, Jul 13): the documented excess-mass aggregates mixed acts and
    grads quantities; acts-only inverts the quotes/memorized ordering (memorized 926 > null
    338 > quotes 274, padded, pythia-1b) and weakens math (1.8x vs claimed 2.4x). Re-derive
    every H2.2 verdict with acts and grads SEPARATE; re-check split-half for the same
@@ -29,18 +56,7 @@ Results NEVER live here — they go to final_report.md (headline) and the topic 
    cross-population ranking requires a shared-geometry collection (e.g. add a math
    padded/last arm; note packing short populations adds separator tokens = sink slots).
    final_report SS4 carries a do-not-cite banner.
-2. Separation-clean H2.1 follow-ups (after the redo).
-2. QK-norm in the toy grid (the sink literature says it is the STRONGER spike-suppressing
-   lever; our grid only tested write-norm).
-3. Toy: add an attention-like ingredient (token-addressed mixing) to test whether anything
-   produces OLMo's interference mode — the missing half of the architecture-knob result.
-4. Drift re-derivation under the gap-corrected rate (`cka_drift_rate`; settle per-dex vs
-   per-gtok normalization): the raw-CKA "two reorganization events" claim is
-   checkpoint-spacing-confounded and a first corrected look contradicts it (pythia peaks
-   mid-training, OLMo-1B rises late) — flagged ⚠️ in final_report appendix, Jul 13.
-5. Deferred pending infgrams (other session): TriviaQA distributional-memorization —
-   memorization-peak vs spectral-event alignment, checkpoint-wise head-ablation cost, a
-   behaviorally-grounded memorized population for RQ2.
+
 
 ## Done (moved to the report/topic docs; kept here briefly for continuity)
 
@@ -53,6 +69,6 @@ Results NEVER live here — they go to final_report.md (headline) and the topic 
   multi_plain spec updated to lr 0.02 and figure regenerated.
 - RQ2 large-model collections: OLMo-7B configs collected (metrics passes parked with the
   RQ2 redo, item 1); pythia-6.9b scrapped (item 0).
-- Dataset-swap control → final_report §2 + swap_run_findings.md.
-- Toy write-norm grid → final_report §0.3/§3 + toy_model_report.md.
+- Dataset-swap control → final_report §2 + dig_findings "Controls: the dataset swap".
+- Toy write-norm grid → final_report §0.3/§3 + toy.md §6.
 - Rogue-write interventions (the old "next #1") → H1.5 triptych, dig_findings.

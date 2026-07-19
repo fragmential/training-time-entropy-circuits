@@ -18,7 +18,8 @@ from toy.train import VARIANTS
 
 RESULTS = "data/results"
 FIGURES = "toy/figures"
-PHASE_STYLES = (("warmup", ":"), ("entropy-seeking", "-"), ("compression-seeking", "--"))
+PHASE_STYLES = (("warmup", ":"), ("entropy-seeking", "-"), ("compression-seeking", "--"),
+                ("recovery", "-"))
 CLASS_COLORS = ("magenta", "orange", "royalblue", "seagreen", "orchid", "goldenrod", "steelblue", "olive")
 CLASS_MARKERS = ("^", "o", "s", "D", "v", "P", "X", "*")   # Li et al: blue=square, green=diamond
 LEDGER_TERMS = ("delta_s", "chi", "quality", "interference")
@@ -39,13 +40,23 @@ def _rankme(res: dict[int, dict], node: str = "before_final_norm") -> tuple[np.n
     return steps, np.array([res[s][node]["acts_uncentered"]["rankme"] for s in steps])
 
 
-def _phase_bounds(rm: np.ndarray) -> tuple[int, int]:
-    """(dip, peak) indices splitting warmup / entropy-seeking / compression-seeking."""
-    peak = int(np.argmax(rm))
-    return int(np.argmin(rm[:peak + 1])), peak
+def _phase_bounds(rm: np.ndarray, eps: float = 5e-4) -> tuple[int, int, int]:
+    """(dip, peak, trough): the compression segment is the largest post-warmup DRAWDOWN
+    (running max minus curve, computed after the warmup dip) — horizon-independent, unlike
+    a global argmax, which lands on the window edge whenever the transient recovers.
+    Drawdown < eps -> no compression segment (peak = trough = end)."""
+    g = int(np.argmax(rm))
+    dip = int(np.argmin(rm[:g + 1]))
+    seg = rm[dip:]
+    dd = np.maximum.accumulate(seg) - seg
+    if dd.max() < eps:
+        return dip, len(rm) - 1, len(rm) - 1
+    trough = dip + int(np.argmax(dd))
+    peak = dip + int(np.argmax(rm[dip:trough + 1]))
+    return dip, peak, trough
 
 
-def _plot_phased(ax: Axes, path: np.ndarray, bounds: tuple[int, int], color: str,
+def _plot_phased(ax: Axes, path: np.ndarray, bounds: tuple[int, int, int], color: str,
                  marker: str = "o") -> None:
     """One 2D trajectory split into the three phase segments (paper line styles)."""
     for lo, hi, (_, style) in zip((0, *bounds), (*bounds, len(path) - 1), PHASE_STYLES):

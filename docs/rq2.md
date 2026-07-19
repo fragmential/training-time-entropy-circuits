@@ -3,6 +3,11 @@
 What was actually computed for the RQ2 experiments, step by step, with every formula on its
 own line. Goal: readable in a few minutes, trivially translatable to code.
 
+**Status note (Jul 13):** RQ2's excess-mass *verdicts* are parked — the documented
+aggregates mixed acts and grads quantities (final_report §4; redo: plan.md item 1). The
+methods here remain valid and are the redo's blueprint; H2.1's refutation (§3) stands
+independently of the contamination.
+
 ---
 
 ## 1. The tool: the generalized eigenvalue problem
@@ -105,17 +110,13 @@ excess_mass = sum(log(lam[lam > 1]))   # total over-expression
 n_excess    = (lam > 2).sum()          # count of clearly over-expressed directions
 ```
 
-averaged over the 33 hookpoints (× acts/grads).
+per hookpoint, PER QUANTITY (acts and grads reported separately — the redo constraint).
 
 **Step 5 — calibrate against a null.** Even two independent samples OF THE SAME population
 give λ ≠ 1 everywhere, purely from sampling noise. So the entire pipeline (steps 1–4) is
 also run with T replaced by a *second, independent sample of G* (different shuffle seed,
 same size). That result is the noise floor. A task "has structure beyond G" only if its
 excess is clearly above the G-vs-G number — not above 1.
-
-Result example: math web text scored excess_mass ≈ 148 against a null of ≈ 61 → real
-structure. The verbatim-memorized strings scored ≈ 1.3× the null → almost nothing beyond
-lexical novelty.
 
 **Step 6 — locate the excess in G's spectrum.** A precision note first, because it's easy to
 get confused here. Generalized eigenvectors are genuinely NEW directions — they live in
@@ -139,8 +140,6 @@ $$\text{tail\_centroid} = \sum_j j \cdot p_j$$
 structure lives: small = G's head, large = G's tail. (Deliberate choice: the *raw-space*
 generalized eigenvector would carry an extra $1/\lambda_{G,j}$ weighting that mechanically
 skews every profile toward the tail — the whitened profile is the non-tautological version.)
-H2.2 predicted the tail; the measured centroids matched the null's (mid-spectrum), so that
-part was not confirmed.
 
 **Not run:** the additive variant ("rotate $\Sigma_T$ onto $V_G$, subtract $\Lambda_G$,
 resort"). Only this multiplicative/whitening version was implemented.
@@ -160,30 +159,25 @@ an explicit partition for the memorized set), plus FOUR independent samples of G
 **Step 2 — excess directions per half, each against its own G.** Run Experiment A's geneig
 for ($T_a$ vs $G_1$) and ($T_b$ vs $G_2$), keeping the top-k eigenvectors this time.
 
-**Step 3 — compare in RAW space.** Two pitfalls this experiment exposed, both load-bearing:
-
-- Whitened coordinates are whitener-specific: a direction's coordinates under $G_1$-whitening
-  and $G_2$-whitening differ (eigenbases of two noisy estimates rotate arbitrarily inside
-  near-degenerate eigenvalue regions). Comparing whitened coordinate vectors across whiteners
-  collapses everything to chance spuriously. So: un-whiten each direction back to activation
-  space, $v = V_G \Lambda_G^{-1/2} u$, orthonormalize the k of them (QR), and compare the two
-  k-dimensional subspaces:
+**Step 3 — compare in RAW space.** Un-whiten each direction back to activation space,
+$v = V_G \Lambda_G^{-1/2} u$, orthonormalize the k of them (QR), and compare the two
+k-dimensional subspaces:
 
 $$\text{overlap} = \frac{\lVert Q_a^\top Q_b \rVert_F^2}{k} \in [0, 1]$$
 
-- With a SHARED whitener the null is hugely inflated (0.43–0.60 measured): both comparisons
-  inherit the same reference-estimation error, so the top "excess" directions of ANY two
-  samples contain the same ruler-dents. Independent whiteners per side remove this.
+Both steps are load-bearing pitfalls, documented in §6 (the v1 estimator that skipped them
+had a null of 0.43–0.60 instead of chance).
 
 **Step 4 — null.** Same pipeline with the halves replaced by two more independent G samples:
-($G_3$ vs $G_1$) × ($G_4$ vs $G_2$). Measured: 0.005–0.10 ≈ chance (k/d) — confirming the
-shared-ruler diagnosis.
+($G_3$ vs $G_1$) × ($G_4$ vs $G_2$). Measured: 0.005–0.10 ≈ chance (k/d).
 
 **Step 5 — read.** Shared mechanism → high overlap; independent per-item storage → ≈ null.
 Measured (k=8/32): math 0.68–0.83 (both families), quotes 0.53–0.62, memorized 0.45–0.51
-(pythia strings) and 0.52 (OLMo Merullo set, 325-seq halves), null ≤ 0.10. The strong "no shared memorization direction" prediction is refuted (memorized
-halves share ~half their excess subspace — plausibly the lexical geometry of high-entropy
-strings), but the graded ordering math > quotes > memorized holds in every measurable cell.
+(pythia strings) and 0.52 (OLMo Merullo set, 325-seq halves), null ≤ 0.10. The strong "no
+shared memorization direction" prediction is refuted (memorized halves share ~half their
+excess subspace — plausibly the lexical geometry of high-entropy strings), but the graded
+ordering math > quotes > memorized holds in every measurable cell. (Re-check for the
+acts/grads conflation before reuse — final_report §4.)
 
 ---
 
@@ -224,13 +218,17 @@ whitened matrices ≈ identity, trivially proportional); every real task falls b
 furthest (answers 103 < memorized 183 < quotes 291 < ceiling 634; pythia padded). Honest
 reading: the scalar conflates "amount of genuine excess" with "acts-excess vs grads-excess
 mismatch", so it is best read as gradient-side corroboration of H2.2's ordering, not a clean
-coupling verdict. H2.1 is refuted in both variants. **The separation-clean design — run**: raw-space overlap between the top-k excess-acts and
+coupling verdict.
+
+**The separation-clean design — run**: raw-space overlap between the top-k excess-acts and
 excess-grads subspaces per population (section 2b machinery across quantities). Result:
 **≈ chance for every population, both models, both k** (max: OLMo math-web 0.049 vs null
-0.022 at k=32 — a weak ~2× at best; everything else ≤ ~2× chance). The task's excess
-activation geometry and excess gradient geometry are essentially unrelated subspaces. H2.1 is
-therefore refuted in all three variants — and the scalar variants' signals are now clearly
-attributable to their confounds (population conditioning; excess amount). Figures: analysis/rq2_results.ipynb (last section).
+0.022 at k=32 — a weak ~2× at best). The task's excess activation geometry and excess
+gradient geometry are essentially unrelated subspaces.
+
+**H2.1 is therefore refuted in all three variants** — and the scalar variants' signals are
+attributable to their confounds (population conditioning; excess amount). Figures:
+analysis/rq2_results.ipynb (last section).
 
 ---
 
@@ -241,6 +239,8 @@ at T's OWN principal directions instead of optimized over all directions (the ge
 generalizes it — T's PCs can misalign with where the ratio is extreme). Implemented as a
 comparison cell in analysis/rq2_results.ipynb; useful as a cross-check of whether the excess
 is variance-dominant in T.
+
+---
 
 ## 5. Population inventory (what was actually collected)
 
@@ -254,4 +254,35 @@ is variance-dominant in T.
 | memorized packed twin | same | packed all-token | ~1M tokens | matched-geometry pair for the OLMo set |
 | memorized OLMo | Merullo et al olmo2_1b_mem set (reference repo) | packed all-token | 650 seqs ≈ 73k tokens | noisiest population; padded/last impossible (N < d) |
 
-Models: pythia-1b-deduped + OLMo-2-0425-1B, final checkpoint, hooks blk*.attn.in / blk*.mlp.up.in / before_final_norm with `:both` (grads via next-token CE), storage cov_svd.
+Models: pythia-1b-deduped + OLMo-2-0425-1B, final checkpoint, hooks blk*.attn.in /
+blk*.mlp.up.in / before_final_norm with `:both` (grads via next-token CE), storage cov_svd.
+
+---
+
+## 6. Split-half estimator history: v1 (flawed) vs v2, and the contamination audit
+
+**v1 (flawed):** one shared reference $G$ for both halves, overlap of whitened top-k
+eigenvector matrices directly. Problem: both sides divide by the **same noisy estimate**
+$\hat\Sigma_G$; its estimation error creates λ > 1 directions for *any* sample, so even two
+independent general-text samples "agree" (null 0.43–0.60 instead of ~0.005). The ruler's
+dents dominate the agreement.
+
+**v2 (current, §2b):** independent whiteners per side + comparison in raw activation space
+via un-whitening $v = V_G \Lambda_G^{-1/2} u$. Both changes necessary: independent
+whiteners remove the shared ruler error (null → chance); un-whitening is required because
+whitened coordinates are meaningless across two different whiteners — without it even
+identical physical directions compare as random.
+
+**Does the v1 flaw contaminate the other experiments?** Mostly no, one caveat:
+
+- **excess_mass / n(λ>2)** (Experiment A): unaffected in conclusion — scalars from a single
+  whitening whose null was measured with the *same* shared ruler, so the inflation cancels
+  in the task-vs-null comparison (absolute values are ruler-inflated; differences vs null
+  are what was read).
+
+- **tail_centroid**: conclusion (task ≈ null → no tail localization) stands for the same
+  reason, with a power caveat: ruler-error directions inside the top-8 dilute the centroid
+  toward the null's — a true weak tail preference could be partially masked. The v2
+  machinery is the right way to re-measure if it matters.
+
+- **H2.1**: no shared-whitener issue — it never compares two whitenings.

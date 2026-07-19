@@ -16,7 +16,7 @@
 # %%
 # RQ2 results: depth-resolved excess structure, tail locality, and acts<->grads coupling.
 # Single-checkpoint data -> depth profiles (x = block), not training curves.
-# Methods: docs/rq2_methods.md; numbers: docs/final_report.md §4.
+# Methods: docs/rq2.md; numbers: docs/final_report.md §4.
 import os, sys, importlib
 if os.path.basename(os.getcwd()) == "analysis":
     os.chdir("..")
@@ -144,7 +144,7 @@ for model in MODELS:
 # ### Split-half coherence by depth (the sharp H2.2 test)
 # overlap(k) between the two halves' top-k excess-over-G subspaces, RAW space, each half
 # whitened by an INDEPENDENT G sample (v1's shared whitener inflated the null to 0.4-0.6;
-# see docs/splithalf_note.md). Dashed = null (two further independent G pairs).
+# see docs/rq2.md §6). Dashed = null (two further independent G pairs).
 # Precomputed by the rq2_splithalf_save script -> data/results/rq2_splithalf.npy.
 
 # %%

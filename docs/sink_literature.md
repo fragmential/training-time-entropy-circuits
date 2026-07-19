@@ -117,6 +117,12 @@ sneak into the last-token sample.
 
 ## (d) Verdict + the deposit experiment
 
+*NB: unlike sections a–c, this section reports an ORIGINAL experimental result of ours, not
+literature; it is cross-referenced from dig_findings.md. The question it serves is the LIVE
+padded puzzle (why pythia's padded last-token stream keeps sink variance and single-digit
+RankMe — plan.md item 2): it rules out one transport route. Visual form:
+analysis/showcase_appendix.ipynb §F, recomputed from the stored block_rogue_id run.*
+
 **Literature verdict: not settled.** MA documents an attention-mediated *constant* deposit
 into all positions; CV asserts near-zero value states; neither addresses variance transport,
 Pythia specifically, or what survives to the final stream. So we ran the experiment.
@@ -150,13 +156,14 @@ after newlines when the spike's variance is destroyed) is consumed and re-expres
 directions, not parked in bulk residuals along v₁. Two consequences: (i) CV's "no-op /
 near-zero value" reading and MA's constant-bias reading are both compatible with our final
 stream — but our padded last-token rogue variance is **not attention deposit along v₁**.
-The tempting "direct slot inclusion" explanation (13.9% of padded last tokens are
-newline-bearing) was CHECKED and is DEAD (Jul 13): only 5/2,331 of those trailing newlines
-are their document's FIRST newline, so under the first-newline refinement they are
-bulk-ordinary, not slots. The padded last-token persistence is therefore currently
-unexplained — see dig_findings. (ii) The deposit measurement is post-cancellation: a
-mid-stack deposit that the step-down blocks remove alongside the slots is not excluded
-(the block_rogue_id_midstack run targets exactly this).
+The "direct slot inclusion" explanation was checked and is DEAD (only 5/2,331 padded
+newline-bearing last tokens are their document's FIRST newline — dig_findings). (ii) The
+deposit measurement is post-cancellation, and the `block_rogue_id_midstack` depth profile
+(dig_findings "Sink-slot follow-ups") shows what it misses: ordinary tokens DO carry v₁
+content mid-stack (~27% of centered row norm at blk4, decaying to ~3.6% at the final
+stream), while the slot spike rides ~99%-along-v₁ through blk12 and is scrubbed late — so a
+small final-stream residue at arbitrary tokens is the expected baseline, no attention
+deposit or slot inclusion needed.
 
 ## What this means for us / open questions
 
@@ -169,16 +176,20 @@ mid-stack deposit that the step-down blocks remove alongside the slots is not ex
    variance that is *read* by the next position (our H1.5 +1.15) yet leaves **no v₁-aligned
    residue** in bulk final residuals (deposit test). The read is transient/rotated, not a
    parked component — a datum none of the three papers has.
-3. **Last-token rogue variance is an open puzzle**: NOT v₁ deposit at the final stream
-   (measured), and NOT slot inclusion (the 13.9% newline-bearing last tokens are almost
-   never first newlines — 5/2,331). Remaining candidates: re-expressed next-position
-   readout (H1.5's +1.15, rotated off v₁), a mid-stack deposit later removed, or the
-   original "attenuated presence" claim over-reading other last-token structure.
-4. Open: (i) mid-stack deposit profile — rerun block_rogue_id with blk{7,11,15}.attn.in to
-   see whether attention deposits v₁ mid-stack and the step-down blocks remove it (SSS's
-   step-up/step-down framing predicts the slots are cancelled; it says nothing about bulk);
-   (ii) the `<|endoftext|>`-prepend twin experiment (does an explicit resting token absorb
-   the first-newline slot — dig_findings); (iii) which heads do the H1.5 reading (SSS
-   predicts short-range sink heads; our head-gradient compression finding may be its
-   shadow); (iv) whether OLMo-2's QK-norm or its write-norm does the work — SSS says QK-norm
-   is the stronger lever, our toy only tested write-norm.
+3. **Last-token rogue variance — narrowed, not closed**: NOT window-modulated attention
+   deposit at the final stream (deposit test), and NOT slot inclusion (5/2,331 —
+   dig_findings). The mid-stack depth profile supplies the positive partial account: every
+   ordinary token carries rogue-direction content mid-stack (~27% of centered row norm at
+   blk4) and keeps a ~3.6% residue at the final stream, so an attenuated presence at padded
+   last tokens is the expected baseline. Still open: whether that residue quantitatively
+   accounts for the padded last-token measurement.
+4. DONE (Jul 13, dig_findings "Sink-slot follow-ups"): (i) the mid-stack depth profile
+   (`block_rogue_id_midstack`) — slots ride ~99%-along-v₁ through blk12, halved at blk15,
+   ~0.2 at before_final_norm; bulk ~27% at blk4 decaying to ~3.6% (see item 3);
+   (ii) the `<|endoftext|>`-prepend twin — an explicit resting token does NOT absorb the
+   first-newline slot (2178 vs 2132): both slots are structural window properties.
+5. Still open: (i) which heads do the H1.5 reading (SSS predicts short-range sink heads;
+   our head-gradient compression finding may be its shadow); (ii) whether OLMo-2's QK-norm
+   or its write-norm does the work — nanochat shows QK-norm alone does not suppress in our
+   setting (section b), SSS never tested QK-norm alone at 7B, and write-norm alone
+   attenuates (SSS 3818→520) vs abolishes (our toy 6/6).

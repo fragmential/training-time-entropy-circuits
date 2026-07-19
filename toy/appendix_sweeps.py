@@ -1,8 +1,8 @@
-"""Edge-case sweeps behind docs/toy_fig4_addendum.md, regenerable in ~2 min CPU:
+"""Edge-case sweeps behind docs/toy.md §3, regenerable in ~2 min CPU:
 delta (fork timing window), rx (rare-pair offset -> decline-onset lag), init homotopy
 (masked vs printed kick), long horizon (transience). Single-layer dynamics only (depth 0),
 run with a local dup-free GD loop identical to toy/train.py's; saves one dict to
-data/results/toy/appendix_sweeps.pt for analysis/showcase_toy_appendix.py."""
+data/results/toy/appendix_sweeps.pt for analysis/showcase_appendix.py."""
 
 import os
 
@@ -54,9 +54,10 @@ def _init(delta: float = 1e-3, rx: float = 0.0, iid_mix: float = 0.0, seed: int 
 
 def mse_skew_check(steps: int = 1000, lr: float = 0.3, init: float = 0.3,
                    seed: int = 0) -> dict:
-    """Is mse_skew's small RankMe dip a rare-class fork (the CE mechanism) or does MSE starve
-    the rare classes (Li et al's supplementary claim)? Tracks per-class MSE, the rare weight
-    columns, and cos(w2, w3) along the exact mse_skew spec's trajectory."""
+    """Is mse_skew's small RankMe dip a rare-class fork (the CE mechanism)? It cannot be:
+    bottlenecked MSE's global optimum abandons the rare classes (rank-2 truncation of the
+    targets — docs/toy.md §2). Tracks per-class MSE, the rare weight columns, and
+    cos(w2, w3) along the exact mse_skew spec's trajectory."""
     torch.manual_seed(seed)
     dup = 3                                              # the mse_skew spec's replication
     theta = (init * torch.randn(sum(SKEW), 2)).repeat_interleave(dup, 0).requires_grad_()
@@ -84,8 +85,11 @@ def mse_skew_check(steps: int = 1000, lr: float = 0.3, init: float = 0.3,
 
 def main(out_path: str = "data/results/toy/appendix_sweeps.pt") -> None:
     sweeps: dict = {
-        "delta": {f"{d:g}/s{s}": run(*_init(delta=d, seed=s))
-                  for d in (1e-1, 1e-2, 1e-3, 1e-4, 1e-5) for s in (0, 1, 2)},
+        # δ = 0.316 first: a rare pair already separated at init. Half-decade log grid;
+        # 1000 steps so the smallest δ forks within the horizon.
+        "delta": {f"{d:g}/s{s}": run(*_init(delta=d, seed=s), steps=1000)
+                  for d in (0.316, 1e-1, 0.0316, 1e-2, 0.00316, 1e-3)
+                  for s in range(10)},
         "rx": {f"{rx:g}": run(*_init(rx=rx)) for rx in (0.0, -0.1, -0.25, -0.5)},
         "homotopy": {f"{a:g}": run(*_init(iid_mix=a)) for a in (0.0, 0.25, 0.5, 1.0)},
         "long": {"canonical": run(*_init(), steps=3000)},
