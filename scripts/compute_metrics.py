@@ -629,6 +629,79 @@ def _ablation_contribution(node: Node) -> dict | None:
     return {"rankme_ablated": ablated, "delta_rankme": rankme_metrics(lr.clamp(min=0))["rankme"] - ablated}
 
 
+def _auto_groups(L: int) -> list[list[int]]:
+    """Every block singly, the four L/4 chunks, and the middle half."""
+    q = L // 4
+    return ([[k] for k in range(L)]
+            + [list(range(i, i + q)) for i in range(0, L, q)]
+            + [list(range(q, 3 * q))])
+
+
+def _loo(node: Node, loo_groups: "list[list[int]] | str") -> dict | None:
+    """Leave-one-out final entropy per block group: centered spectrum of
+    (r − Σ_{k∈G} attn_k − Σ_{k∈G} mlp_k) via sample-space subtraction — one covariance
+    per group. `loo_groups` = list of block-index lists, or "auto" (see _auto_groups).
+
+    Returns per group ("blk3", "blk0-3"):
+        entropy, rankme:               of the ablated final spectrum
+        delta_entropy, delta_rankme:   unablated − ablated
+    """
+    r = node.get("before_final_norm.acts")
+    views = _block_out_views(node)
+    if not isinstance(r, View) or not views or not _comps(r.samples, r.mean, r.eigvals_centered):
+        return None
+    by_blk: dict[int, list[View]] = {}
+    for p, v in views:
+        if not (mm := _BLOCK_OUT_RE.search(p)) or v.samples is None or v.mean is None:
+            return None
+        by_blk.setdefault(int(mm.group(1)), []).append(v)
+    groups = _auto_groups(max(by_blk) + 1) if isinstance(loo_groups, str) else loo_groups
+    base = rankme_metrics(_t(r.eigvals_centered).clamp(min=0))
+    cov = prefer_gpu(lambda X, m: X.T @ X / X.shape[0] - torch.outer(m, m))
+    out = {}
+    for g in groups:
+        X, mu = _t(r.samples).float(), _t(r.mean).float()
+        for v in (v for k in g for v in by_blk.get(k, ())):
+            X = X - _t(v.samples).float()
+            mu = mu - _t(v.mean).float()
+        rm = rankme_metrics(eigvalsh_descending(cov(X, mu)))
+        out[f"blk{g[0]}" if len(g) == 1 else f"blk{g[0]}-{g[-1]}"] = {
+            "entropy": rm["matrix_entropy"], "rankme": rm["rankme"],
+            "delta_entropy": base["matrix_entropy"] - rm["matrix_entropy"],
+            "delta_rankme": base["rankme"] - rm["rankme"]}
+    return out
+
+
+def _loo_mean(node: Node, loo_groups: "list[list[int]] | str") -> dict | None:
+    """Mean-ablation leave-one-out: like _loo but subtracts each write's *fluctuation*
+    (samples − mean) instead of the full write, so the write's mean contribution stays in
+    the final stream and only its variable part is removed. Since E[write − mean] = 0, the
+    ablated mean is unchanged (mu = r.mean). Same groups and return schema as _loo."""
+    r = node.get("before_final_norm.acts")
+    views = _block_out_views(node)
+    if not isinstance(r, View) or not views or not _comps(r.samples, r.mean, r.eigvals_centered):
+        return None
+    by_blk: dict[int, list[View]] = {}
+    for p, v in views:
+        if not (mm := _BLOCK_OUT_RE.search(p)) or v.samples is None or v.mean is None:
+            return None
+        by_blk.setdefault(int(mm.group(1)), []).append(v)
+    groups = _auto_groups(max(by_blk) + 1) if isinstance(loo_groups, str) else loo_groups
+    base = rankme_metrics(_t(r.eigvals_centered).clamp(min=0))
+    cov = prefer_gpu(lambda X, m: X.T @ X / X.shape[0] - torch.outer(m, m))
+    out = {}
+    for g in groups:
+        X, mu = _t(r.samples).float(), _t(r.mean).float()
+        for v in (v for k in g for v in by_blk.get(k, ())):
+            X = X - (_t(v.samples).float() - _t(v.mean).float())   # fluctuation only; mu unchanged
+        rm = rankme_metrics(eigvalsh_descending(cov(X, mu)))
+        out[f"blk{g[0]}" if len(g) == 1 else f"blk{g[0]}-{g[-1]}"] = {
+            "entropy": rm["matrix_entropy"], "rankme": rm["rankme"],
+            "delta_entropy": base["matrix_entropy"] - rm["matrix_entropy"],
+            "delta_rankme": base["rankme"] - rm["rankme"]}
+    return out
+
+
 def _eigendirection_attribution(node: Node) -> dict | None:
     """Per-direction share v_iᵀ R_k v_i of how block k feeds each final eigendirection —
     the diagonal of R_k rotated into Σ_r's centered eigenbasis. Sums over k to λ_i of Σ_r.
@@ -853,6 +926,8 @@ METRICS = [
     _Metric("mean_migration",          {"node": ""}, _mean_migration,          node_re=r"blk\d+\.(attn|mlp)\.out$"),
     _Metric("overlap_chi",             {"node": ""}, _overlap_chi,             node_re=r"^$"),
     _Metric("block_block_coupling",    {"node": ""}, _block_block_coupling,    node_re=r"^$"),
+    _Metric("loo",                     {"node": ""}, _loo,                     node_re=r"^$", external="loo_groups"),
+    _Metric("loo_mean",                {"node": ""}, _loo_mean,                node_re=r"^$", external="loo_groups"),
 ]
 
 
@@ -897,10 +972,12 @@ def _quantity_metrics(q: Quantity, fv: View, path: str) -> dict:
     return out
 
 
-def get_metrics(node: Node, results: dict | None = None, ctx: dict[str, Node] | None = None) -> dict:
+def get_metrics(node: Node, results: dict | None = None, ctx: dict | None = None) -> dict:
     """Recursively walk the hook tree; each node writes its own flat result entry.
-    `ctx` carries external operands (e.g. "prev" = previous checkpoint's root Node)."""
+    `ctx` carries external operands (e.g. "prev" = previous checkpoint's root Node,
+    "loo_groups" = block groups for the loo metric) and "skip" = metric names to skip."""
     results = {} if results is None else results
+    skip = (ctx or {}).get("skip") or ()
     for child in node.children():
         get_metrics(child, results, ctx)
     out = {}
@@ -909,6 +986,8 @@ def get_metrics(node: Node, results: dict | None = None, ctx: dict[str, Node] | 
         if isinstance(fv, View):
             out.update(_quantity_metrics(q, fv, node.path))
     for m in METRICS:
+        if m.name in skip:
+            continue
         args = {k: node.get(rel) for k, rel in m.operands.items()}
         if m.external:
             args[m.external] = (ctx or {}).get(m.external)
@@ -922,7 +1001,7 @@ def get_metrics(node: Node, results: dict | None = None, ctx: dict[str, Node] | 
 
 
 def compute_metrics_for_checkpoint(accessor: DataAccessor, verbose: bool = False,
-                                   ctx: dict[str, Node] | None = None) -> dict:
+                                   ctx: dict | None = None) -> dict:
     import time
     if verbose:
         decomp_profiler.enable()
@@ -1020,6 +1099,8 @@ def main(
     data_root: str = "data/inferences",
     output_root: str = "data/results",
     ref: str | None = None,
+    loo_groups: "list[list[int]] | str | None" = None,
+    metrics_skip: "list[str] | None" = None,
 ):
     """Compute spectral metrics from collected data.
 
@@ -1034,6 +1115,9 @@ def main(
         derive: If True (default), derive B and post-norm metrics when possible.
         ref: External reference .pt file (or step-file directory, matched by step) for
              gen_vs_ref — generalized eigenvalues of every leaf against the same leaf there.
+        loo_groups: Block groups for the loo metric (list of block-index lists, or "auto");
+             needs samples, so only meaningful where step files carry them.
+        metrics_skip: Metric names get_metrics should skip.
     """
 
     data_root, config_directory = _resolve_data_root(data_root, config_directory)
@@ -1089,8 +1173,13 @@ def main(
     def work(payload):
         step, (data, config, weights) = payload
         rpath = ref_files.get(step, None if ref_files else ref)
-        ctx = {"ref": DataAccessor(rpath).v} if rpath else None
-        metrics = compute_metrics_for_checkpoint(DataAccessor(data, config=config, weights=weights), ctx=ctx)
+        ctx: dict = {"ref": DataAccessor(rpath).v} if rpath else {}
+        if loo_groups:
+            ctx["loo_groups"] = loo_groups
+        if metrics_skip:
+            ctx["skip"] = metrics_skip
+        metrics = compute_metrics_for_checkpoint(DataAccessor(data, config=config, weights=weights),
+                                                 ctx=ctx or None)
         with save_lock:
             save_step_metrics(results_path, step, metrics)   # saves every step
         print(f"  Step {step}: {len(metrics)} hook points "

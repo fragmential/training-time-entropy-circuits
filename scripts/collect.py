@@ -61,6 +61,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from utils.model_registry import (
     get_model_config,
     get_checkpoint_schedule,
+    get_block_boundary_hooks,
     load_model,
     load_tokenizer,
     get_num_layers,
@@ -84,6 +85,29 @@ from utils.data_utils import (
 VECTORIZABLE_FIELDS = {"batch_size", "max_checkpoints", "max_layers_per_pass", "dataset_name",
                        "accumulation_dtype", "activation_dtype", "packed_data_path", "max_tokens",
                        "num_samples", "drift_metrics"}
+
+
+def _blk_tag(g):
+    contiguous = list(g) == list(range(g[0], g[-1] + 1))
+    return (f"blk{g[0]}" if len(g) == 1 else
+            f"blk{g[0]}-{g[-1]}" if contiguous else "blk" + "+".join(map(str, g)))
+
+
+def _zero_output(_mod, _inp, out):
+    """Forward hook ablating a residual write: replaces the module output with zeros
+    (tuple-returning modules, e.g. Pythia attention, keep their non-tensor extras)."""
+    return ((torch.zeros_like(out[0]), *out[1:]) if isinstance(out, tuple)
+            else torch.zeros_like(out))
+
+
+def _mean_output(_mod, _inp, out):
+    """Forward hook mean-ablating a residual write: replaces the module output with its
+    mean over all token positions in the batch (broadcast back), keeping the write's mean
+    contribution but removing its fluctuation. Batch token counts here (~1e4–1e5) make the
+    per-batch mean numerically indistinguishable from the write's global mean."""
+    def _m(t):
+        return t.mean(dim=tuple(range(t.dim() - 1)), keepdim=True).expand_as(t)
+    return (_m(out[0]), *out[1:]) if isinstance(out, tuple) else _m(out)
 
 
 def _resolve_wildcard_dict(d: dict, model_name: str, default=None):
@@ -178,6 +202,17 @@ class CollectConfig:
     # entropy of each residual depth, computed teacher-forced on the collection batches.
     # Saved into the results file under node "vocab_entropy" (requires compute_metrics).
     vocab_entropy: bool = False
+    # Leave-one-out groups for the inline `loo` metric: list of block-index lists, or
+    # "auto" = every block + the four L/4 chunks + the middle half.
+    loo_groups: "list[list[int]] | str | None" = None
+    metrics_skip: "list[str] | None" = None  # metric names get_metrics should skip
+
+    # --- Intervention ---
+    # Interventions: each entry is a block-index list whose residual writes are zeroed
+    # during the forward pass. All interventions run per checkpoint (model loaded once),
+    # each writing to <output_dir>_<blk-tag>/<model>.
+    ablate: "list[list[int]] | None" = None
+    ablate_mode: str = "zero"  # "zero" = write→0; "mean" = write→its batch-token mean
 
     # --- Cache ---
     keep_cached: bool = False  # don't delete HF checkpoints after processing
@@ -194,7 +229,8 @@ class CollectConfig:
     array_id: "int | None" = None
 
     def __post_init__(self):
-        _LIST_FIELDS = {"target_layers", "boundary_token_ids", "cross_basis_refs", "checkpoints", "hooks"}
+        _LIST_FIELDS = {"target_layers", "boundary_token_ids", "cross_basis_refs", "checkpoints", "hooks",
+                        "metrics_skip", "loo_groups", "ablate"}
 
         if not isinstance(self.model_name, list):
             # Single model — validate no vectorized fields are lists
@@ -691,15 +727,14 @@ def main(cfg: CollectConfig):
         schedule = [t for t in schedule if t[0] in wanted]
     print(f"Total checkpoints: {len(schedule)}")
 
-    # Filter to unprocessed checkpoints
+    # Filter to unprocessed checkpoints (ablation runs: done = every intervention's file exists)
+    run_dirs = ([os.path.join(f"{cfg.output_dir}_{_blk_tag(g)}", short_name) for g in cfg.ablate]
+                if cfg.ablate else [output_dir])
     to_process = []
     for step_num, revision, step_model in schedule:
-        out_path = os.path.join(output_dir, f"step{step_num}.pt")
-        if os.path.exists(out_path):
-            continue
-        # Also check for old .npy format (backward compat)
-        npy_path = os.path.join(output_dir, f"step{step_num}.npy")
-        if os.path.exists(npy_path):
+        if all(os.path.exists(os.path.join(d, f"step{step_num}.pt"))
+               or os.path.exists(os.path.join(d, f"step{step_num}.npy"))  # old format, backward compat
+               for d in run_dirs):
             continue
         to_process.append((step_num, revision, step_model))
 
@@ -709,7 +744,10 @@ def main(cfg: CollectConfig):
 
     # Tokenizer
     first_revision = to_process[0][1]
-    tokenizer = load_tokenizer(model_config, revision=first_revision)
+    try:
+        tokenizer = load_tokenizer(model_config, revision=first_revision)
+    except Exception:   # e.g. OLMo early-training revisions live in a different repo
+        tokenizer = load_tokenizer(model_config)
 
     # Load data
     packed_ids = None
@@ -832,71 +870,97 @@ def main(cfg: CollectConfig):
             n_layers = get_num_layers(model, model_config)
             blocks = cfg.target_layers if cfg.target_layers is not None else list(range(n_layers))
 
-            if cfg.sample_labels and cfg.seed is not None:
-                torch.manual_seed(cfg.seed + step_num)
-
-            lens = None
-            if cfg.vocab_entropy:
-                from utils.entropy_lens import EntropyLens
-                lens = EntropyLens(model, model_config)
-
-            t_load += time.time() - _t0; _t0 = time.time()
-            captured = _collect_for_checkpoint(
-                model, model_config, cfg, texts, tokenizer, packed_ids,
-                blocks, device, boundary_token_ids,
-            )
-            entropy_result = lens.close() if lens is not None else None
-
-            # Merge with existing data if continuing a previous run
-            if cfg.continue_from:
-                exist_path = os.path.join(cfg.continue_from, short_name, f"step{step_num}.pt")
-                if os.path.exists(exist_path):
-                    existing_data = torch.load(exist_path, map_location="cpu", weights_only=False)
-                    existing_raw = _reconstruct_captured(existing_data)
-                    captured = _merge_with_existing(existing_raw, captured)
+            t_load += time.time() - _t0
+            # One pass per intervention (cfg.ablate), model + checkpoint loaded once;
+            # a plain run is the single intervention None.
+            for grp in (cfg.ablate or [None]):
+                if grp is None:
+                    run_dir, g_out = cfg.output_dir, output_dir
                 else:
-                    tqdm.write(f"  WARNING: no existing file to merge at {exist_path}")
+                    run_dir = f"{cfg.output_dir}_{_blk_tag(grp)}"
+                    g_out = os.path.join(run_dir, short_name)
+                out_path = os.path.join(g_out, f"step{step_num}.pt")
+                if grp is not None and os.path.exists(out_path):
+                    continue
+                os.makedirs(g_out, exist_ok=True)
+                ablate_hook = _mean_output if cfg.ablate_mode == "mean" else _zero_output
+                handles = [mod.register_forward_hook(ablate_hook)
+                           for b in grp or ()
+                           for leaf, mod, _cap in get_block_boundary_hooks(model, model_config, b)
+                           if leaf.endswith(".out")]
 
-            t_collect += time.time() - _t0; _t0 = time.time()
-            out_path = os.path.join(output_dir, f"step{step_num}.pt")
-            token_filter = {
-                "token_selection": cfg.token_selection,
-                "skip_positions": cfg.skip_positions,
-                "boundary_token_ids": cfg.boundary_token_ids,
-            }
-            if cfg.answer_only:
-                token_filter["answer_only"] = True
-                token_filter["answer_start_key"] = cfg.answer_start_key
-            # For packed runs: record total chunks so future continuations know where to start
-            save_n_chunks = None
-            if cfg.packing == "packed" and packed_ids is not None:
-                save_n_chunks = n_chunks_done + len(packed_ids)
-            run = os.path.basename((cfg.output_dir or "default").rstrip("/"))
-            base_fmt, overrides = _parse_storage_format(cfg.storage_format)
-            acc = DataAccessor(captured, config=model_config,
-                               weights=ModelWeights(model, model_config),
-                               identity=(step_model, revision, run))
-            acc.stamp(token_filter=token_filter, n_chunks=save_n_chunks)
-            acc.save(out_path, format=base_fmt, overrides=overrides)
-            t_save += time.time() - _t0
-            tqdm.write(f"Step {step_num}: {len(captured)} hook points -> {out_path}")
+                if cfg.sample_labels and cfg.seed is not None:
+                    torch.manual_seed(cfg.seed + step_num)
 
-            if cfg.compute_metrics:
+                lens = None
+                if cfg.vocab_entropy:
+                    from utils.entropy_lens import EntropyLens
+                    lens = EntropyLens(model, model_config)
+
                 _t0 = time.time()
-                from scripts.compute_metrics import compute_metrics_for_checkpoint, save_step_metrics
-                ctx = ({"prev": DataAccessor(torch.load(drift_spill, mmap=True, weights_only=False)).v}
-                       if drift_spill and os.path.exists(drift_spill) else {})
-                step_metrics = compute_metrics_for_checkpoint(acc, verbose=cfg.profile_metrics, ctx=ctx)
-                if entropy_result is not None:
-                    step_metrics["vocab_entropy"] = {"entropy_lens": entropy_result}
-                metrics_dir = (cfg.output_dir.replace("inferences", "results", 1)
-                               if cfg.output_dir else "data/results")
-                metrics_path = os.path.join(metrics_dir, f"results_{short_name}.npy")
-                save_step_metrics(metrics_path, step_num, step_metrics)
-                if drift_spill:
-                    torch.save(acc.data, drift_spill)
-                t_metrics += time.time() - _t0
-                tqdm.write(f"  Metrics: {len(step_metrics)} hooks -> {metrics_path}")
+                captured = _collect_for_checkpoint(
+                    model, model_config, cfg, texts, tokenizer, packed_ids,
+                    blocks, device, boundary_token_ids,
+                )
+                entropy_result = lens.close() if lens is not None else None
+                for h in handles:
+                    h.remove()
+
+                # Merge with existing data if continuing a previous run
+                if cfg.continue_from:
+                    exist_path = os.path.join(cfg.continue_from, short_name, f"step{step_num}.pt")
+                    if os.path.exists(exist_path):
+                        existing_data = torch.load(exist_path, map_location="cpu", weights_only=False)
+                        existing_raw = _reconstruct_captured(existing_data)
+                        captured = _merge_with_existing(existing_raw, captured)
+                    else:
+                        tqdm.write(f"  WARNING: no existing file to merge at {exist_path}")
+
+                t_collect += time.time() - _t0; _t0 = time.time()
+                token_filter = {
+                    "token_selection": cfg.token_selection,
+                    "skip_positions": cfg.skip_positions,
+                    "boundary_token_ids": cfg.boundary_token_ids,
+                }
+                if cfg.answer_only:
+                    token_filter["answer_only"] = True
+                    token_filter["answer_start_key"] = cfg.answer_start_key
+                # For packed runs: record total chunks so future continuations know where to start
+                save_n_chunks = None
+                if cfg.packing == "packed" and packed_ids is not None:
+                    save_n_chunks = n_chunks_done + len(packed_ids)
+                run = os.path.basename((run_dir or "default").rstrip("/"))
+                base_fmt, overrides = _parse_storage_format(cfg.storage_format)
+                acc = DataAccessor(captured, config=model_config,
+                                   weights=ModelWeights(model, model_config),
+                                   identity=(step_model, revision, run))
+                acc.stamp(token_filter=token_filter, n_chunks=save_n_chunks)
+                acc.save(out_path, format=base_fmt, overrides=overrides)
+                t_save += time.time() - _t0
+                tqdm.write(f"Step {step_num}: {len(captured)} hook points -> {out_path}")
+
+                if cfg.compute_metrics:
+                    _t0 = time.time()
+                    from scripts.compute_metrics import compute_metrics_for_checkpoint, save_step_metrics
+                    ctx: dict = ({"prev": DataAccessor(torch.load(drift_spill, mmap=True, weights_only=False)).v}
+                                 if drift_spill and os.path.exists(drift_spill) else {})
+                    if cfg.loo_groups:
+                        ctx["loo_groups"] = cfg.loo_groups
+                    if cfg.metrics_skip:
+                        ctx["skip"] = cfg.metrics_skip
+                    step_metrics = compute_metrics_for_checkpoint(acc, verbose=cfg.profile_metrics, ctx=ctx)
+                    if entropy_result is not None:
+                        step_metrics["vocab_entropy"] = {"entropy_lens": entropy_result}
+                    metrics_dir = (run_dir.replace("inferences", "results", 1)
+                                   if run_dir else "data/results")
+                    metrics_path = os.path.join(metrics_dir, f"results_{short_name}.npy")
+                    save_step_metrics(metrics_path, step_num, step_metrics)
+                    if drift_spill:
+                        torch.save(acc.data, drift_spill)
+                    t_metrics += time.time() - _t0
+                    tqdm.write(f"  Metrics: {len(step_metrics)} hooks -> {metrics_path}")
+                del captured, acc   # free this sweep's samples BEFORE the next intervention collects
+                gc.collect()        # accessor graph is cyclic — without this the buffers linger
 
         except Exception as e:
             tqdm.write(f"Skipping step {step_num}: {e}")

@@ -1,0 +1,420 @@
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.50it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:02<00:03,  1.04it/s]Fetching 7 files:  57%|█████▋    | 4/7 [00:03<00:02,  1.02it/s]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  1.90it/s]
+pythia-160m-deduped step0: (50304, 768) top σ=5.738
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:00,  7.47it/s]Fetching 7 files:  29%|██▊       | 2/7 [00:00<00:00,  8.14it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:05,  1.41s/it]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  2.20it/s]
+pythia-160m-deduped step8: (50304, 768) top σ=5.738
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  4.09it/s]Fetching 7 files:  29%|██▊       | 2/7 [00:00<00:00,  6.26it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:05,  1.50s/it]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  2.04it/s]
+pythia-160m-deduped step16: (50304, 768) top σ=5.738
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  4.01it/s]Fetching 7 files:  29%|██▊       | 2/7 [00:00<00:01,  4.45it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:06,  1.51s/it]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  2.00it/s]
+pythia-160m-deduped step32: (50304, 768) top σ=5.737
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:02,  2.98it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:02<00:03,  1.09it/s]Fetching 7 files:  57%|█████▋    | 4/7 [00:03<00:02,  1.08it/s]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  1.99it/s]
+pythia-160m-deduped step64: (50304, 768) top σ=6.262
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.21it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:04,  1.09s/it]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  2.31it/s]
+pythia-160m-deduped step128: (50304, 768) top σ=15.571
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.90it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:02<00:04,  1.00s/it]Fetching 7 files:  57%|█████▋    | 4/7 [00:03<00:02,  1.06it/s]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  1.94it/s]
+pythia-160m-deduped step256: (50304, 768) top σ=32.658
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.93it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:04,  1.16s/it]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  2.19it/s]
+pythia-160m-deduped step512: (50304, 768) top σ=51.754
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:02,  2.83it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:04,  1.15s/it]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  2.18it/s]
+pythia-160m-deduped step1000: (50304, 768) top σ=66.946
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.89it/s]Fetching 7 files:  29%|██▊       | 2/7 [00:00<00:00,  5.28it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:02<00:03,  1.02it/s]Fetching 7 files:  57%|█████▋    | 4/7 [00:03<00:03,  1.05s/it]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  2.01it/s]
+pythia-160m-deduped step2000: (50304, 768) top σ=79.501
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.71it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:02<00:03,  1.27it/s]Fetching 7 files:  57%|█████▋    | 4/7 [00:03<00:02,  1.11it/s]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  2.10it/s]
+pythia-160m-deduped step3000: (50304, 768) top σ=85.488
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.92it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:05,  1.35s/it]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  1.88it/s]
+pythia-160m-deduped step4000: (50304, 768) top σ=89.913
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  4.09it/s]Fetching 7 files:  29%|██▊       | 2/7 [00:00<00:00,  6.21it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:02<00:04,  1.06s/it]Fetching 7 files: 100%|██████████| 7/7 [00:02<00:00,  2.77it/s]
+pythia-160m-deduped step5000: (50304, 768) top σ=93.056
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.98it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:02<00:03,  1.01it/s]Fetching 7 files:  57%|█████▋    | 4/7 [00:03<00:03,  1.03s/it]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  1.81it/s]
+pythia-160m-deduped step6000: (50304, 768) top σ=95.358
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.91it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:05,  1.42s/it]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  1.79it/s]
+pythia-160m-deduped step7000: (50304, 768) top σ=96.850
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  4.00it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:02<00:04,  1.00s/it]Fetching 7 files: 100%|██████████| 7/7 [00:02<00:00,  2.52it/s]
+pythia-160m-deduped step8000: (50304, 768) top σ=97.380
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.95it/s]Fetching 7 files:  29%|██▊       | 2/7 [00:00<00:00,  5.02it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:02<00:05,  1.27s/it]Fetching 7 files:  57%|█████▋    | 4/7 [00:04<00:03,  1.31s/it]Fetching 7 files: 100%|██████████| 7/7 [00:04<00:00,  1.61it/s]
+pythia-160m-deduped step10000: (50304, 768) top σ=98.061
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  4.05it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:05,  1.36s/it]Fetching 7 files:  57%|█████▋    | 4/7 [00:04<00:03,  1.04s/it]Fetching 7 files: 100%|██████████| 7/7 [00:04<00:00,  1.67it/s]
+pythia-160m-deduped step12000: (50304, 768) top σ=98.608
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:02,  2.65it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:04<00:05,  1.44s/it]Fetching 7 files:  57%|█████▋    | 4/7 [00:04<00:03,  1.06s/it]Fetching 7 files: 100%|██████████| 7/7 [00:04<00:00,  1.61it/s]
+pythia-160m-deduped step14000: (50304, 768) top σ=97.874
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  4.07it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:04<00:06,  1.63s/it]Fetching 7 files:  57%|█████▋    | 4/7 [00:04<00:03,  1.21s/it]Fetching 7 files: 100%|██████████| 7/7 [00:04<00:00,  1.43it/s]
+pythia-160m-deduped step18000: (50304, 768) top σ=95.620
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.73it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:04,  1.21s/it]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  2.09it/s]
+pythia-160m-deduped step23000: (50304, 768) top σ=90.179
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  4.20it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:05,  1.35s/it]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  1.89it/s]
+pythia-160m-deduped step30000: (50304, 768) top σ=83.459
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.97it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:02<00:04,  1.02s/it]Fetching 7 files:  57%|█████▋    | 4/7 [00:03<00:02,  1.32it/s]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  2.27it/s]
+pythia-160m-deduped step39000: (50304, 768) top σ=76.365
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.96it/s]Fetching 7 files:  29%|██▊       | 2/7 [00:00<00:00,  5.51it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:05,  1.30s/it]Fetching 7 files:  57%|█████▋    | 4/7 [00:04<00:04,  1.35s/it]Fetching 7 files: 100%|██████████| 7/7 [00:04<00:00,  1.57it/s]
+pythia-160m-deduped step50000: (50304, 768) top σ=70.339
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.93it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:05,  1.30s/it]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  1.94it/s]
+pythia-160m-deduped step65000: (50304, 768) top σ=65.204
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:02,  2.47it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:05<00:07,  1.95s/it]Fetching 7 files: 100%|██████████| 7/7 [00:05<00:00,  1.30it/s]
+pythia-160m-deduped step85000: (50304, 768) top σ=59.709
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.63it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:04,  1.12s/it]Fetching 7 files:  57%|█████▋    | 4/7 [00:03<00:02,  1.11it/s]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  1.94it/s]
+pythia-160m-deduped step110000: (50304, 768) top σ=179.392
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:02,  2.76it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:04,  1.15s/it]Fetching 7 files:  57%|█████▋    | 4/7 [00:05<00:04,  1.58s/it]Fetching 7 files: 100%|██████████| 7/7 [00:05<00:00,  1.25it/s]
+pythia-160m-deduped step143000: (50304, 768) top σ=776.323
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  5.39it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:05<00:07,  1.98s/it]Fetching 7 files: 100%|██████████| 7/7 [00:05<00:00,  1.30it/s]
+pythia-410m-deduped step0: (50304, 1024) top σ=5.063
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:00,  7.93it/s]Fetching 7 files:  29%|██▊       | 2/7 [00:00<00:00,  8.42it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:04<00:07,  1.92s/it]Fetching 7 files: 100%|██████████| 7/7 [00:04<00:00,  1.62it/s]
+pythia-410m-deduped step8: (50304, 1024) top σ=5.063
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  4.21it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:04<00:06,  1.70s/it]Fetching 7 files: 100%|██████████| 7/7 [00:04<00:00,  1.50it/s]
+pythia-410m-deduped step16: (50304, 1024) top σ=5.063
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:00,  8.12it/s]Fetching 7 files:  29%|██▊       | 2/7 [00:00<00:00,  7.14it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:04<00:07,  1.85s/it]Fetching 7 files: 100%|██████████| 7/7 [00:04<00:00,  1.68it/s]
+pythia-410m-deduped step32: (50304, 1024) top σ=5.063
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  4.25it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:04<00:06,  1.63s/it]Fetching 7 files: 100%|██████████| 7/7 [00:04<00:00,  1.56it/s]
+pythia-410m-deduped step64: (50304, 1024) top σ=5.065
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  4.31it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:05<00:07,  1.84s/it]Fetching 7 files: 100%|██████████| 7/7 [00:05<00:00,  1.39it/s]
+pythia-410m-deduped step128: (50304, 1024) top σ=8.937
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:02,  2.13it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:04<00:06,  1.66s/it]Fetching 7 files: 100%|██████████| 7/7 [00:04<00:00,  1.51it/s]
+pythia-410m-deduped step256: (50304, 1024) top σ=23.185
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.02it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:05,  1.41s/it]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  1.80it/s]
+pythia-410m-deduped step512: (50304, 1024) top σ=39.461
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.78it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:05,  1.32s/it]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  1.93it/s]
+pythia-410m-deduped step1000: (50304, 1024) top σ=54.925
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:02,  2.34it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:04,  1.22s/it]Fetching 7 files:  57%|█████▋    | 4/7 [00:03<00:02,  1.12it/s]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  1.89it/s]
+pythia-410m-deduped step2000: (50304, 1024) top σ=67.376
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  4.01it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:04<00:06,  1.51s/it]Fetching 7 files: 100%|██████████| 7/7 [00:04<00:00,  1.65it/s]
+pythia-410m-deduped step3000: (50304, 1024) top σ=73.734
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.82it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:05,  1.29s/it]Fetching 7 files:  57%|█████▋    | 4/7 [00:05<00:04,  1.38s/it]Fetching 7 files: 100%|██████████| 7/7 [00:05<00:00,  1.37it/s]
+pythia-410m-deduped step4000: (50304, 1024) top σ=77.635
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:02,  2.32it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:05,  1.26s/it]Fetching 7 files:  57%|█████▋    | 4/7 [00:03<00:02,  1.16it/s]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  1.93it/s]
+pythia-410m-deduped step5000: (50304, 1024) top σ=80.591
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  4.14it/s]Fetching 7 files:  29%|██▊       | 2/7 [00:00<00:00,  6.09it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:04<00:08,  2.05s/it]Fetching 7 files: 100%|██████████| 7/7 [00:04<00:00,  1.51it/s]
+pythia-410m-deduped step6000: (50304, 1024) top σ=82.733
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  4.05it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:04<00:06,  1.58s/it]Fetching 7 files: 100%|██████████| 7/7 [00:04<00:00,  1.61it/s]
+pythia-410m-deduped step7000: (50304, 1024) top σ=84.015
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.89it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:05,  1.33s/it]Fetching 7 files:  57%|█████▋    | 4/7 [00:06<00:05,  2.00s/it]Fetching 7 files: 100%|██████████| 7/7 [00:06<00:00,  1.01it/s]
+pythia-410m-deduped step8000: (50304, 1024) top σ=84.979
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.17it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:04<00:06,  1.74s/it]Fetching 7 files: 100%|██████████| 7/7 [00:04<00:00,  1.46it/s]
+pythia-410m-deduped step10000: (50304, 1024) top σ=86.260
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.47it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:04<00:05,  1.48s/it]Fetching 7 files: 100%|██████████| 7/7 [00:04<00:00,  1.72it/s]
+pythia-410m-deduped step12000: (50304, 1024) top σ=87.076
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.21it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:09<00:13,  3.35s/it]Fetching 7 files: 100%|██████████| 7/7 [00:09<00:00,  1.31s/it]
+pythia-410m-deduped step14000: (50304, 1024) top σ=87.325
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.05it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:05,  1.37s/it]Fetching 7 files:  57%|█████▋    | 4/7 [00:04<00:03,  1.31s/it]Fetching 7 files: 100%|██████████| 7/7 [00:04<00:00,  1.40it/s]
+pythia-410m-deduped step18000: (50304, 1024) top σ=87.118
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  3.54it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:04<00:06,  1.56s/it]Fetching 7 files:  57%|█████▋    | 4/7 [00:05<00:04,  1.36s/it]Fetching 7 files: 100%|██████████| 7/7 [00:05<00:00,  1.32it/s]
+pythia-410m-deduped step23000: (50304, 1024) top σ=85.941
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:00,  6.50it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:05,  1.40s/it]Fetching 7 files:  57%|█████▋    | 4/7 [00:04<00:03,  1.01s/it]Fetching 7 files: 100%|██████████| 7/7 [00:04<00:00,  1.70it/s]
+pythia-410m-deduped step30000: (50304, 1024) top σ=83.425
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  5.26it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:05,  1.32s/it]Fetching 7 files:  57%|█████▋    | 4/7 [00:04<00:03,  1.15s/it]Fetching 7 files: 100%|██████████| 7/7 [00:04<00:00,  1.58it/s]
+pythia-410m-deduped step39000: (50304, 1024) top σ=79.391
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:00,  6.00it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:05,  1.33s/it]Fetching 7 files:  57%|█████▋    | 4/7 [00:04<00:03,  1.09s/it]Fetching 7 files: 100%|██████████| 7/7 [00:04<00:00,  1.63it/s]
+pythia-410m-deduped step50000: (50304, 1024) top σ=73.452
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  5.49it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:04,  1.13s/it]Fetching 7 files:  57%|█████▋    | 4/7 [00:03<00:02,  1.02it/s]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  1.84it/s]
+pythia-410m-deduped step65000: (50304, 1024) top σ=66.585
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  5.40it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:05,  1.41s/it]Fetching 7 files:  57%|█████▋    | 4/7 [00:04<00:03,  1.02s/it]Fetching 7 files: 100%|██████████| 7/7 [00:04<00:00,  1.69it/s]
+pythia-410m-deduped step85000: (50304, 1024) top σ=61.804
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:00,  6.96it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:03<00:04,  1.12s/it]Fetching 7 files:  57%|█████▋    | 4/7 [00:03<00:02,  1.03it/s]Fetching 7 files: 100%|██████████| 7/7 [00:03<00:00,  1.86it/s]
+pythia-410m-deduped step110000: (50304, 1024) top σ=59.440
+Fetching 7 files:   0%|          | 0/7 [00:00<?, ?it/s]Fetching 7 files:  14%|█▍        | 1/7 [00:00<00:01,  5.11it/s]Fetching 7 files:  29%|██▊       | 2/7 [00:00<00:00,  6.88it/s]Fetching 7 files:  43%|████▎     | 3/7 [00:04<00:07,  1.98s/it]Fetching 7 files:  57%|█████▋    | 4/7 [00:04<00:04,  1.38s/it]Fetching 7 files: 100%|██████████| 7/7 [00:04<00:00,  1.42it/s]
+pythia-410m-deduped step143000: (50304, 1024) top σ=55.785
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:02,  4.06it/s]Fetching 10 files:  50%|█████     | 5/10 [00:11<00:11,  2.34s/it]Fetching 10 files:  60%|██████    | 6/10 [00:16<00:11,  3.00s/it]Fetching 10 files: 100%|██████████| 10/10 [00:16<00:00,  1.62s/it]
+pythia-1b-deduped step0: (50304, 2048) top σ=3.767
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:03,  2.58it/s]Fetching 10 files:  50%|█████     | 5/10 [00:13<00:14,  2.86s/it]Fetching 10 files: 100%|██████████| 10/10 [00:13<00:00,  1.35s/it]
+pythia-1b-deduped step8: (50304, 2048) top σ=3.767
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:02,  4.24it/s]Fetching 10 files:  50%|█████     | 5/10 [00:16<00:17,  3.57s/it]Fetching 10 files:  60%|██████    | 6/10 [00:27<00:21,  5.31s/it]Fetching 10 files: 100%|██████████| 10/10 [00:27<00:00,  2.79s/it]
+pythia-1b-deduped step16: (50304, 2048) top σ=3.767
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:01,  4.50it/s]Fetching 10 files:  40%|████      | 4/10 [00:00<00:00, 10.60it/s]Fetching 10 files:  40%|████      | 4/10 [00:12<00:00, 10.60it/s]Fetching 10 files:  50%|█████     | 5/10 [00:18<00:25,  5.07s/it]Fetching 10 files: 100%|██████████| 10/10 [00:18<00:00,  1.84s/it]
+pythia-1b-deduped step32: (50304, 2048) top σ=3.767
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:02,  3.58it/s]Fetching 10 files:  50%|█████     | 5/10 [00:15<00:15,  3.20s/it]Fetching 10 files: 100%|██████████| 10/10 [00:15<00:00,  1.51s/it]
+pythia-1b-deduped step64: (50304, 2048) top σ=3.926
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:02,  4.33it/s]Fetching 10 files:  20%|██        | 2/10 [00:00<00:01,  6.17it/s]Fetching 10 files:  50%|█████     | 5/10 [00:17<00:20,  4.16s/it]Fetching 10 files: 100%|██████████| 10/10 [00:17<00:00,  1.76s/it]
+pythia-1b-deduped step128: (50304, 2048) top σ=9.084
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:02,  3.10it/s]Fetching 10 files:  50%|█████     | 5/10 [00:16<00:17,  3.57s/it]Fetching 10 files: 100%|██████████| 10/10 [00:16<00:00,  1.69s/it]
+pythia-1b-deduped step256: (50304, 2048) top σ=18.879
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:02,  4.03it/s]Fetching 10 files:  50%|█████     | 5/10 [00:13<00:14,  2.95s/it]Fetching 10 files:  60%|██████    | 6/10 [00:14<00:09,  2.35s/it]Fetching 10 files: 100%|██████████| 10/10 [00:14<00:00,  1.43s/it]
+pythia-1b-deduped step512: (50304, 2048) top σ=31.929
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:02,  3.87it/s]Fetching 10 files:  50%|█████     | 5/10 [00:10<00:10,  2.13s/it]Fetching 10 files:  60%|██████    | 6/10 [00:12<00:08,  2.19s/it]Fetching 10 files: 100%|██████████| 10/10 [00:12<00:00,  1.25s/it]
+pythia-1b-deduped step1000: (50304, 2048) top σ=45.225
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:01,  5.98it/s]Fetching 10 files:  50%|█████     | 5/10 [00:09<00:10,  2.05s/it]Fetching 10 files:  60%|██████    | 6/10 [00:27<00:22,  5.67s/it]Fetching 10 files: 100%|██████████| 10/10 [00:27<00:00,  2.73s/it]
+pythia-1b-deduped step2000: (50304, 2048) top σ=51.249
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:01,  7.62it/s]Fetching 10 files:  50%|█████     | 5/10 [00:13<00:14,  2.82s/it]Fetching 10 files: 100%|██████████| 10/10 [00:13<00:00,  1.33s/it]
+pythia-1b-deduped step3000: (50304, 2048) top σ=55.133
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:01,  6.87it/s]Fetching 10 files:  50%|█████     | 5/10 [00:07<00:08,  1.66s/it]Fetching 10 files:  60%|██████    | 6/10 [00:24<00:20,  5.20s/it]Fetching 10 files: 100%|██████████| 10/10 [00:24<00:00,  2.47s/it]
+pythia-1b-deduped step4000: (50304, 2048) top σ=58.097
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:01,  7.63it/s]Fetching 10 files:  50%|█████     | 5/10 [00:12<00:13,  2.70s/it]Fetching 10 files: 100%|██████████| 10/10 [00:12<00:00,  1.27s/it]
+pythia-1b-deduped step5000: (50304, 2048) top σ=60.706
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:01,  7.86it/s]Fetching 10 files:  50%|█████     | 5/10 [00:07<00:07,  1.54s/it]Fetching 10 files:  60%|██████    | 6/10 [00:23<00:20,  5.08s/it]Fetching 10 files: 100%|██████████| 10/10 [00:23<00:00,  2.40s/it]
+pythia-1b-deduped step6000: (50304, 2048) top σ=62.571
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:01,  7.12it/s]Fetching 10 files:  50%|█████     | 5/10 [00:14<00:15,  3.03s/it]Fetching 10 files: 100%|██████████| 10/10 [00:14<00:00,  1.43s/it]
+pythia-1b-deduped step7000: (50304, 2048) top σ=64.609
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:01,  7.71it/s]Fetching 10 files:  50%|█████     | 5/10 [00:10<00:10,  2.20s/it]Fetching 10 files:  60%|██████    | 6/10 [00:25<00:20,  5.14s/it]Fetching 10 files: 100%|██████████| 10/10 [00:25<00:00,  2.52s/it]
+pythia-1b-deduped step8000: (50304, 2048) top σ=66.346
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:01,  7.30it/s]Fetching 10 files:  50%|█████     | 5/10 [00:12<00:13,  2.70s/it]Fetching 10 files:  60%|██████    | 6/10 [00:31<00:26,  6.53s/it]Fetching 10 files: 100%|██████████| 10/10 [00:31<00:00,  3.18s/it]
+pythia-1b-deduped step10000: (50304, 2048) top σ=68.573
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:02,  3.78it/s]Fetching 10 files:  50%|█████     | 5/10 [00:12<00:13,  2.71s/it]Fetching 10 files:  60%|██████    | 6/10 [00:25<00:20,  5.12s/it]Fetching 10 files: 100%|██████████| 10/10 [00:25<00:00,  2.59s/it]
+pythia-1b-deduped step12000: (50304, 2048) top σ=70.674
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:01,  7.05it/s]Fetching 10 files:  50%|█████     | 5/10 [00:07<00:08,  1.69s/it]Fetching 10 files:  60%|██████    | 6/10 [00:26<00:22,  5.64s/it]Fetching 10 files: 100%|██████████| 10/10 [00:26<00:00,  2.66s/it]
+pythia-1b-deduped step14000: (50304, 2048) top σ=72.260
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:01,  6.98it/s]Fetching 10 files:  50%|█████     | 5/10 [00:12<00:12,  2.60s/it]Fetching 10 files:  60%|██████    | 6/10 [00:24<00:19,  4.87s/it]Fetching 10 files: 100%|██████████| 10/10 [00:24<00:00,  2.46s/it]
+pythia-1b-deduped step18000: (50304, 2048) top σ=74.415
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:01,  7.88it/s]Fetching 10 files:  50%|█████     | 5/10 [00:13<00:14,  2.89s/it]Fetching 10 files: 100%|██████████| 10/10 [00:13<00:00,  1.36s/it]
+pythia-1b-deduped step23000: (50304, 2048) top σ=74.986
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:01,  7.97it/s]Fetching 10 files:  50%|█████     | 5/10 [00:06<00:06,  1.37s/it]Fetching 10 files:  60%|██████    | 6/10 [00:11<00:08,  2.17s/it]Fetching 10 files: 100%|██████████| 10/10 [00:11<00:00,  1.13s/it]
+pythia-1b-deduped step30000: (50304, 2048) top σ=75.155
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:01,  7.23it/s]Fetching 10 files:  50%|█████     | 5/10 [00:05<00:06,  1.25s/it]Fetching 10 files:  60%|██████    | 6/10 [00:12<00:10,  2.59s/it]Fetching 10 files: 100%|██████████| 10/10 [00:12<00:00,  1.29s/it]
+pythia-1b-deduped step39000: (50304, 2048) top σ=73.827
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:01,  7.91it/s]Fetching 10 files:  50%|█████     | 5/10 [00:04<00:04,  1.02it/s]Fetching 10 files:  60%|██████    | 6/10 [00:12<00:10,  2.56s/it]Fetching 10 files: 100%|██████████| 10/10 [00:12<00:00,  1.24s/it]
+pythia-1b-deduped step50000: (50304, 2048) top σ=71.053
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:02,  4.45it/s]Fetching 10 files:  50%|█████     | 5/10 [00:06<00:06,  1.38s/it]Fetching 10 files:  60%|██████    | 6/10 [00:12<00:09,  2.35s/it]Fetching 10 files: 100%|██████████| 10/10 [00:12<00:00,  1.21s/it]
+pythia-1b-deduped step65000: (50304, 2048) top σ=67.253
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:01,  7.41it/s]Fetching 10 files:  50%|█████     | 5/10 [00:06<00:06,  1.31s/it]Fetching 10 files:  60%|██████    | 6/10 [00:26<00:22,  5.66s/it]Fetching 10 files: 100%|██████████| 10/10 [00:26<00:00,  2.62s/it]
+pythia-1b-deduped step85000: (50304, 2048) top σ=64.626
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:01,  6.64it/s]Fetching 10 files:  50%|█████     | 5/10 [00:12<00:13,  2.73s/it]Fetching 10 files:  60%|██████    | 6/10 [00:14<00:09,  2.43s/it]Fetching 10 files: 100%|██████████| 10/10 [00:14<00:00,  1.43s/it]
+pythia-1b-deduped step110000: (50304, 2048) top σ=63.996
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files:  10%|█         | 1/10 [00:00<00:01,  5.29it/s]Fetching 10 files:  20%|██        | 2/10 [00:00<00:01,  5.43it/s]Fetching 10 files:  50%|█████     | 5/10 [00:05<00:06,  1.24s/it]Fetching 10 files:  60%|██████    | 6/10 [00:11<00:10,  2.62s/it]Fetching 10 files: 100%|██████████| 10/10 [00:11<00:00,  1.20s/it]
+pythia-1b-deduped step143000: (50304, 2048) top σ=64.370
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:01,  3.88it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:10<00:19,  3.95s/it]Fetching 8 files: 100%|██████████| 8/8 [00:10<00:00,  1.34s/it]
+pythia-6.9b-deduped step0: (50432, 4096) top σ=5.772
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:01,  4.95it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:09<00:17,  3.51s/it]Fetching 8 files: 100%|██████████| 8/8 [00:09<00:00,  1.19s/it]
+pythia-6.9b-deduped step8: (50432, 4096) top σ=5.772
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:02,  2.66it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:09<00:17,  3.47s/it]Fetching 8 files: 100%|██████████| 8/8 [00:09<00:00,  1.19s/it]
+pythia-6.9b-deduped step16: (50432, 4096) top σ=5.772
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:01,  5.51it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:08<00:16,  3.26s/it]Fetching 8 files: 100%|██████████| 8/8 [00:08<00:00,  1.11s/it]
+pythia-6.9b-deduped step32: (50432, 4096) top σ=5.772
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:01,  5.99it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:09<00:17,  3.51s/it]Fetching 8 files: 100%|██████████| 8/8 [00:09<00:00,  1.19s/it]
+pythia-6.9b-deduped step64: (50432, 4096) top σ=5.771
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:01,  5.75it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:12<00:23,  4.76s/it]Fetching 8 files: 100%|██████████| 8/8 [00:12<00:00,  1.61s/it]
+pythia-6.9b-deduped step128: (50432, 4096) top σ=5.771
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:01,  4.34it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:09<00:16,  3.34s/it]Fetching 8 files: 100%|██████████| 8/8 [00:09<00:00,  1.14s/it]
+pythia-6.9b-deduped step256: (50432, 4096) top σ=7.069
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:01,  4.95it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:08<00:16,  3.30s/it]Fetching 8 files: 100%|██████████| 8/8 [00:08<00:00,  1.12s/it]
+pythia-6.9b-deduped step512: (50432, 4096) top σ=10.239
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:01,  5.07it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:08<00:15,  3.13s/it]Fetching 8 files: 100%|██████████| 8/8 [00:08<00:00,  1.06s/it]
+pythia-6.9b-deduped step1000: (50432, 4096) top σ=14.660
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:01,  4.81it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:09<00:17,  3.53s/it]Fetching 8 files: 100%|██████████| 8/8 [00:09<00:00,  1.20s/it]
+pythia-6.9b-deduped step2000: (50432, 4096) top σ=19.267
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:01,  6.38it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:10<00:19,  3.81s/it]Fetching 8 files: 100%|██████████| 8/8 [00:10<00:00,  1.29s/it]
+pythia-6.9b-deduped step3000: (50432, 4096) top σ=21.039
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:00,  8.14it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:08<00:15,  3.09s/it]Fetching 8 files: 100%|██████████| 8/8 [00:08<00:00,  1.05s/it]
+pythia-6.9b-deduped step4000: (50432, 4096) top σ=21.446
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:00,  7.93it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:08<00:14,  2.99s/it]Fetching 8 files: 100%|██████████| 8/8 [00:08<00:00,  1.01s/it]
+pythia-6.9b-deduped step5000: (50432, 4096) top σ=22.038
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:00,  7.50it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:08<00:15,  3.12s/it]Fetching 8 files: 100%|██████████| 8/8 [00:08<00:00,  1.06s/it]
+pythia-6.9b-deduped step6000: (50432, 4096) top σ=23.859
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:00,  7.08it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:13<00:25,  5.16s/it]Fetching 8 files: 100%|██████████| 8/8 [00:13<00:00,  1.75s/it]
+pythia-6.9b-deduped step7000: (50432, 4096) top σ=25.502
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:01,  6.36it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:12<00:22,  4.54s/it]Fetching 8 files: 100%|██████████| 8/8 [00:12<00:00,  1.54s/it]
+pythia-6.9b-deduped step8000: (50432, 4096) top σ=27.026
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:01,  5.96it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:09<00:18,  3.66s/it]Fetching 8 files: 100%|██████████| 8/8 [00:09<00:00,  1.24s/it]
+pythia-6.9b-deduped step10000: (50432, 4096) top σ=29.965
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:01,  6.28it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:10<00:19,  3.84s/it]Fetching 8 files: 100%|██████████| 8/8 [00:10<00:00,  1.30s/it]
+pythia-6.9b-deduped step12000: (50432, 4096) top σ=32.380
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:00,  7.04it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:14<00:26,  5.27s/it]Fetching 8 files: 100%|██████████| 8/8 [00:14<00:00,  1.78s/it]
+pythia-6.9b-deduped step14000: (50432, 4096) top σ=34.972
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:01,  6.95it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:10<00:19,  3.98s/it]Fetching 8 files: 100%|██████████| 8/8 [00:10<00:00,  1.35s/it]
+pythia-6.9b-deduped step18000: (50432, 4096) top σ=39.312
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:00,  7.73it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:12<00:23,  4.72s/it]Fetching 8 files: 100%|██████████| 8/8 [00:12<00:00,  1.60s/it]
+pythia-6.9b-deduped step23000: (50432, 4096) top σ=42.986
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:00,  7.93it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:11<00:21,  4.23s/it]Fetching 8 files: 100%|██████████| 8/8 [00:11<00:00,  1.43s/it]
+pythia-6.9b-deduped step30000: (50432, 4096) top σ=47.316
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:00,  7.27it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:10<00:19,  3.87s/it]Fetching 8 files: 100%|██████████| 8/8 [00:10<00:00,  1.31s/it]
+pythia-6.9b-deduped step39000: (50432, 4096) top σ=51.470
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:00,  7.06it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:10<00:18,  3.75s/it]Fetching 8 files: 100%|██████████| 8/8 [00:10<00:00,  1.27s/it]
+pythia-6.9b-deduped step50000: (50432, 4096) top σ=54.972
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:00,  7.75it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:10<00:19,  4.00s/it]Fetching 8 files: 100%|██████████| 8/8 [00:10<00:00,  1.35s/it]
+pythia-6.9b-deduped step65000: (50432, 4096) top σ=57.559
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:00,  7.45it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:12<00:23,  4.73s/it]Fetching 8 files: 100%|██████████| 8/8 [00:12<00:00,  1.60s/it]
+pythia-6.9b-deduped step85000: (50432, 4096) top σ=59.009
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:00,  7.07it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:10<00:19,  3.96s/it]Fetching 8 files: 100%|██████████| 8/8 [00:10<00:00,  1.34s/it]
+pythia-6.9b-deduped step110000: (50432, 4096) top σ=60.128
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  12%|█▎        | 1/8 [00:00<00:01,  6.71it/s]Fetching 8 files:  38%|███▊      | 3/8 [00:10<00:19,  3.80s/it]Fetching 8 files: 100%|██████████| 8/8 [00:10<00:00,  1.29s/it]
+pythia-6.9b-deduped step143000: (50432, 4096) top σ=61.294
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:   9%|▉         | 1/11 [00:00<00:02,  4.99it/s]Fetching 11 files:  45%|████▌     | 5/11 [00:04<00:05,  1.00it/s]Fetching 11 files: 100%|██████████| 11/11 [00:04<00:00,  2.32it/s]
+OLMo-2-0425-1B step0: (100352, 2048) top σ=7.139
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:   9%|▉         | 1/11 [00:00<00:03,  3.19it/s]Fetching 11 files:  45%|████▌     | 5/11 [00:07<00:09,  1.64s/it]Fetching 11 files: 100%|██████████| 11/11 [00:07<00:00,  1.41it/s]
+OLMo-2-0425-1B step300: (100352, 2048) top σ=30.237
+Fetching 12 files:   0%|          | 0/12 [00:00<?, ?it/s]Fetching 12 files:   8%|▊         | 1/12 [00:00<00:02,  4.23it/s]Fetching 12 files:  50%|█████     | 6/12 [00:06<00:06,  1.11s/it]Fetching 12 files: 100%|██████████| 12/12 [00:06<00:00,  1.87it/s]
+OLMo-2-0425-1B step1000: (100352, 2048) top σ=84.867
+Fetching 12 files:   0%|          | 0/12 [00:00<?, ?it/s]Fetching 12 files:   8%|▊         | 1/12 [00:00<00:01,  7.40it/s]Fetching 12 files:  25%|██▌       | 3/12 [00:00<00:00, 13.01it/s]Fetching 12 files:  50%|█████     | 6/12 [00:06<00:07,  1.24s/it]Fetching 12 files: 100%|██████████| 12/12 [00:06<00:00,  1.94it/s]
+OLMo-2-0425-1B step2000: (100352, 2048) top σ=119.184
+Fetching 12 files:   0%|          | 0/12 [00:00<?, ?it/s]Fetching 12 files:   8%|▊         | 1/12 [00:00<00:01,  7.29it/s]Fetching 12 files:  50%|█████     | 6/12 [00:05<00:05,  1.02it/s]Fetching 12 files: 100%|██████████| 12/12 [00:05<00:00,  2.13it/s]
+OLMo-2-0425-1B step3000: (100352, 2048) top σ=147.795
+Fetching 12 files:   0%|          | 0/12 [00:00<?, ?it/s]Fetching 12 files:   8%|▊         | 1/12 [00:00<00:01,  7.43it/s]Fetching 12 files:  50%|█████     | 6/12 [00:05<00:05,  1.06it/s]Fetching 12 files: 100%|██████████| 12/12 [00:05<00:00,  2.22it/s]
+OLMo-2-0425-1B step4000: (100352, 2048) top σ=176.715
+Fetching 12 files:   0%|          | 0/12 [00:00<?, ?it/s]Fetching 12 files:   8%|▊         | 1/12 [00:00<00:01,  7.56it/s]Fetching 12 files:  50%|█████     | 6/12 [00:06<00:06,  1.08s/it]Fetching 12 files: 100%|██████████| 12/12 [00:06<00:00,  1.95it/s]
+OLMo-2-0425-1B step5000: (100352, 2048) top σ=201.139
+Fetching 12 files:   0%|          | 0/12 [00:00<?, ?it/s]Fetching 12 files:   8%|▊         | 1/12 [00:00<00:02,  4.99it/s]Fetching 12 files:  50%|█████     | 6/12 [00:06<00:06,  1.16s/it]Fetching 12 files: 100%|██████████| 12/12 [00:06<00:00,  1.80it/s]
+OLMo-2-0425-1B step6000: (100352, 2048) top σ=220.201
+Fetching 12 files:   0%|          | 0/12 [00:00<?, ?it/s]Fetching 12 files:   8%|▊         | 1/12 [00:00<00:01,  7.05it/s]Fetching 12 files:  50%|█████     | 6/12 [00:06<00:07,  1.20s/it]Fetching 12 files: 100%|██████████| 12/12 [00:06<00:00,  1.74it/s]
+OLMo-2-0425-1B step7000: (100352, 2048) top σ=235.878
+Fetching 12 files:   0%|          | 0/12 [00:00<?, ?it/s]Fetching 12 files:   8%|▊         | 1/12 [00:00<00:01,  6.84it/s]Fetching 12 files:  50%|█████     | 6/12 [00:06<00:06,  1.10s/it]Fetching 12 files: 100%|██████████| 12/12 [00:06<00:00,  1.90it/s]
+OLMo-2-0425-1B step8000: (100352, 2048) top σ=249.021
+Fetching 12 files:   0%|          | 0/12 [00:00<?, ?it/s]Fetching 12 files:   8%|▊         | 1/12 [00:00<00:01,  7.39it/s]Fetching 12 files:  50%|█████     | 6/12 [00:06<00:07,  1.17s/it]Fetching 12 files: 100%|██████████| 12/12 [00:06<00:00,  1.79it/s]
+OLMo-2-0425-1B step9000: (100352, 2048) top σ=260.117
+Fetching 12 files:   0%|          | 0/12 [00:00<?, ?it/s]Fetching 12 files:   8%|▊         | 1/12 [00:00<00:01,  6.65it/s]Fetching 12 files:  50%|█████     | 6/12 [00:06<00:06,  1.06s/it]Fetching 12 files: 100%|██████████| 12/12 [00:06<00:00,  1.97it/s]
+OLMo-2-0425-1B step10000: (100352, 2048) top σ=269.720
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:   9%|▉         | 1/11 [00:00<00:01,  7.42it/s]Fetching 11 files:  45%|████▌     | 5/11 [00:06<00:08,  1.34s/it]Fetching 11 files: 100%|██████████| 11/11 [00:06<00:00,  1.73it/s]
+OLMo-2-0425-1B step20000: (100352, 2048) top σ=320.056
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:   9%|▉         | 1/11 [00:00<00:01,  7.06it/s]Fetching 11 files:  27%|██▋       | 3/11 [00:00<00:00, 12.63it/s]Fetching 11 files:  45%|████▌     | 5/11 [00:05<00:09,  1.51s/it]Fetching 11 files: 100%|██████████| 11/11 [00:05<00:00,  1.84it/s]
+OLMo-2-0425-1B step30000: (100352, 2048) top σ=338.348
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:   9%|▉         | 1/11 [00:00<00:01,  6.83it/s]Fetching 11 files:  27%|██▋       | 3/11 [00:00<00:00, 12.28it/s]Fetching 11 files:  45%|████▌     | 5/11 [00:07<00:11,  1.86s/it]Fetching 11 files: 100%|██████████| 11/11 [00:07<00:00,  1.49it/s]
+OLMo-2-0425-1B step40000: (100352, 2048) top σ=342.720
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:   9%|▉         | 1/11 [00:00<00:01,  6.75it/s]Fetching 11 files:  45%|████▌     | 5/11 [00:08<00:10,  1.76s/it]Fetching 11 files: 100%|██████████| 11/11 [00:08<00:00,  1.32it/s]
+OLMo-2-0425-1B step50000: (100352, 2048) top σ=338.986
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:   9%|▉         | 1/11 [00:00<00:01,  7.39it/s]Fetching 11 files:  45%|████▌     | 5/11 [00:06<00:07,  1.30s/it]Fetching 11 files: 100%|██████████| 11/11 [00:06<00:00,  1.78it/s]
+OLMo-2-0425-1B step60000: (100352, 2048) top σ=327.133
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:   9%|▉         | 1/11 [00:00<00:02,  4.04it/s]Fetching 11 files:  45%|████▌     | 5/11 [00:06<00:07,  1.30s/it]Fetching 11 files: 100%|██████████| 11/11 [00:06<00:00,  1.78it/s]
+OLMo-2-0425-1B step70000: (100352, 2048) top σ=315.737
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:   9%|▉         | 1/11 [00:00<00:02,  4.22it/s]Fetching 11 files:  18%|█▊        | 2/11 [00:00<00:01,  6.33it/s]Fetching 11 files:  45%|████▌     | 5/11 [00:06<00:08,  1.41s/it]Fetching 11 files: 100%|██████████| 11/11 [00:06<00:00,  1.81it/s]
+OLMo-2-0425-1B step80000: (100352, 2048) top σ=305.256
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:   9%|▉         | 1/11 [00:00<00:02,  3.80it/s]Fetching 11 files:  45%|████▌     | 5/11 [00:05<00:06,  1.10s/it]Fetching 11 files: 100%|██████████| 11/11 [00:05<00:00,  2.09it/s]
+OLMo-2-0425-1B step100000: (100352, 2048) top σ=295.472
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:   9%|▉         | 1/11 [00:00<00:02,  4.12it/s]Fetching 11 files:  45%|████▌     | 5/11 [01:02<01:19, 13.24s/it]Fetching 11 files: 100%|██████████| 11/11 [01:02<00:00,  5.66s/it]
+OLMo-2-0425-1B step130000: (100352, 2048) top σ=283.930
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:   9%|▉         | 1/11 [00:00<00:02,  3.94it/s]Fetching 11 files:  18%|█▊        | 2/11 [00:00<00:01,  5.34it/s]Fetching 11 files:  45%|████▌     | 5/11 [00:07<00:11,  1.85s/it]Fetching 11 files: 100%|██████████| 11/11 [00:07<00:00,  1.38it/s]
+OLMo-2-0425-1B step170000: (100352, 2048) top σ=273.906
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:   9%|▉         | 1/11 [00:00<00:01,  6.98it/s]Fetching 11 files:  45%|████▌     | 5/11 [00:06<00:08,  1.47s/it]Fetching 11 files: 100%|██████████| 11/11 [00:06<00:00,  1.59it/s]
+OLMo-2-0425-1B step220000: (100352, 2048) top σ=258.433
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:   9%|▉         | 1/11 [00:00<00:01,  7.40it/s]Fetching 11 files:  45%|████▌     | 5/11 [00:13<00:17,  2.87s/it]Fetching 11 files: 100%|██████████| 11/11 [00:13<00:00,  1.23s/it]
+OLMo-2-0425-1B step280000: (100352, 2048) top σ=262.234
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:   9%|▉         | 1/11 [00:00<00:02,  4.41it/s]Fetching 11 files:  45%|████▌     | 5/11 [00:08<00:10,  1.82s/it]Fetching 11 files: 100%|██████████| 11/11 [00:08<00:00,  1.27it/s]
+OLMo-2-0425-1B step370000: (100352, 2048) top σ=272.212
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:   9%|▉         | 1/11 [00:00<00:03,  2.59it/s]Fetching 11 files:  45%|████▌     | 5/11 [00:08<00:10,  1.69s/it]Fetching 11 files: 100%|██████████| 11/11 [00:08<00:00,  1.37it/s]
+OLMo-2-0425-1B step430000: (100352, 2048) top σ=283.286
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:   9%|▉         | 1/11 [00:00<00:01,  7.54it/s]Fetching 11 files:  45%|████▌     | 5/11 [00:05<00:07,  1.23s/it]Fetching 11 files:  55%|█████▍    | 6/11 [00:06<00:05,  1.02s/it]Fetching 11 files: 100%|██████████| 11/11 [00:06<00:00,  1.79it/s]
+OLMo-2-0425-1B step490000: (100352, 2048) top σ=286.949
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:   9%|▉         | 1/11 [00:00<00:02,  4.29it/s]Fetching 11 files:  45%|████▌     | 5/11 [00:06<00:08,  1.35s/it]Fetching 11 files: 100%|██████████| 11/11 [00:06<00:00,  1.72it/s]
+OLMo-2-0425-1B step640000: (100352, 2048) top σ=273.507
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:   9%|▉         | 1/11 [00:00<00:01,  7.05it/s]Fetching 11 files:  45%|████▌     | 5/11 [00:05<00:07,  1.18s/it]Fetching 11 files: 100%|██████████| 11/11 [00:05<00:00,  1.97it/s]
+OLMo-2-0425-1B step840000: (100352, 2048) top σ=280.408
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:   9%|▉         | 1/11 [00:00<00:01,  6.57it/s]Fetching 11 files:  45%|████▌     | 5/11 [00:09<00:12,  2.02s/it]Fetching 11 files: 100%|██████████| 11/11 [00:09<00:00,  1.15it/s]
+OLMo-2-0425-1B step1100000: (100352, 2048) top σ=273.906
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:   9%|▉         | 1/11 [00:00<00:01,  5.40it/s]Fetching 11 files:  45%|████▌     | 5/11 [00:06<00:08,  1.35s/it]Fetching 11 files: 100%|██████████| 11/11 [00:06<00:00,  1.72it/s]
+OLMo-2-0425-1B step1440000: (100352, 2048) top σ=282.176
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:   9%|▉         | 1/11 [00:00<00:01,  7.26it/s]Fetching 11 files:  45%|████▌     | 5/11 [00:06<00:08,  1.39s/it]Fetching 11 files: 100%|██████████| 11/11 [00:06<00:00,  1.67it/s]
+OLMo-2-0425-1B step1900000: (100352, 2048) top σ=250.710
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:03,  4.67it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:12<00:22,  2.22s/it]Fetching 16 files:  44%|████▍     | 7/16 [00:13<00:16,  1.85s/it]Fetching 16 files:  56%|█████▋    | 9/16 [00:14<00:09,  1.37s/it]Fetching 16 files: 100%|██████████| 16/16 [00:14<00:00,  1.13it/s]
+OLMo-2-1124-7B step150: (100352, 4096) top σ=26.832
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:02,  7.48it/s]Fetching 16 files:  19%|█▉        | 3/16 [00:00<00:01, 11.39it/s]Fetching 16 files:  19%|█▉        | 3/16 [00:17<00:01, 11.39it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:19<00:40,  4.02s/it]Fetching 16 files: 100%|██████████| 16/16 [00:19<00:00,  1.24s/it]
+OLMo-2-1124-7B step600: (100352, 4096) top σ=61.687
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:01,  7.97it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:14<00:25,  2.60s/it]Fetching 16 files:  44%|████▍     | 7/16 [00:16<00:21,  2.43s/it]Fetching 16 files: 100%|██████████| 16/16 [00:16<00:00,  1.04s/it]
+OLMo-2-1124-7B step700: (100352, 4096) top σ=68.703
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:01,  7.82it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:18<00:31,  3.19s/it]Fetching 16 files:  50%|█████     | 8/16 [00:19<00:18,  2.37s/it]Fetching 16 files: 100%|██████████| 16/16 [00:19<00:00,  1.23s/it]
+OLMo-2-1124-7B step850: (100352, 4096) top σ=77.677
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:02,  6.51it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:16<00:28,  2.84s/it]Fetching 16 files: 100%|██████████| 16/16 [00:16<00:00,  1.02s/it]
+OLMo-2-1124-7B step900: (100352, 4096) top σ=80.474
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:02,  7.20it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:16<00:29,  2.93s/it]Fetching 16 files:  44%|████▍     | 7/16 [00:17<00:21,  2.43s/it]Fetching 16 files:  69%|██████▉   | 11/16 [00:18<00:06,  1.33s/it]Fetching 16 files: 100%|██████████| 16/16 [00:18<00:00,  1.17s/it]
+OLMo-2-1124-7B step1000: (100352, 4096) top σ=86.037
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:02,  7.08it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:13<00:23,  2.33s/it]Fetching 16 files:  44%|████▍     | 7/16 [00:13<00:17,  1.98s/it]Fetching 16 files:  62%|██████▎   | 10/16 [00:14<00:06,  1.12s/it]Fetching 16 files: 100%|██████████| 16/16 [00:14<00:00,  1.12it/s]
+OLMo-2-1124-7B step2000: (100352, 4096) top σ=139.723
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:05,  2.93it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:15<00:26,  2.64s/it]Fetching 16 files:  50%|█████     | 8/16 [00:17<00:16,  2.11s/it]Fetching 16 files:  69%|██████▉   | 11/16 [00:17<00:06,  1.32s/it]Fetching 16 files: 100%|██████████| 16/16 [00:17<00:00,  1.12s/it]
+OLMo-2-1124-7B step2150: (100352, 4096) top σ=146.938
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:02,  6.83it/s]Fetching 16 files:  19%|█▉        | 3/16 [00:00<00:00, 13.17it/s]Fetching 16 files:  19%|█▉        | 3/16 [00:14<00:00, 13.17it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:15<00:30,  3.07s/it]Fetching 16 files:  50%|█████     | 8/16 [00:15<00:16,  2.03s/it]Fetching 16 files: 100%|██████████| 16/16 [00:15<00:00,  1.03it/s]
+OLMo-2-1124-7B step3000: (100352, 4096) top σ=180.833
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:04,  3.74it/s]Fetching 16 files:  19%|█▉        | 3/16 [00:00<00:01,  7.57it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:16<00:34,  3.43s/it]Fetching 16 files: 100%|██████████| 16/16 [00:16<00:00,  1.06s/it]
+OLMo-2-1124-7B step4000: (100352, 4096) top σ=212.184
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:04,  3.57it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:00<00:00, 14.78it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:11<00:00, 14.78it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:13<00:31,  3.18s/it]Fetching 16 files:  56%|█████▋    | 9/16 [00:16<00:14,  2.10s/it]Fetching 16 files:  69%|██████▉   | 11/16 [00:17<00:07,  1.58s/it]Fetching 16 files: 100%|██████████| 16/16 [00:17<00:00,  1.11s/it]
+OLMo-2-1124-7B step5000: (100352, 4096) top σ=238.354
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:04,  3.38it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:00<00:00, 11.50it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:17<00:00, 11.50it/s]Fetching 16 files:  44%|████▍     | 7/16 [00:18<00:30,  3.37s/it]Fetching 16 files: 100%|██████████| 16/16 [00:18<00:00,  1.13s/it]
+OLMo-2-1124-7B step6000: (100352, 4096) top σ=261.109
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:06,  2.16it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:00<00:01,  8.93it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:14<00:01,  8.93it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:17<00:40,  4.08s/it]Fetching 16 files:  50%|█████     | 8/16 [00:22<00:26,  3.31s/it]Fetching 16 files: 100%|██████████| 16/16 [00:22<00:00,  1.38s/it]
+OLMo-2-1124-7B step7000: (100352, 4096) top σ=281.350
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:05,  2.93it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:00<00:00, 11.14it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:17<00:00, 11.14it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:17<00:41,  4.12s/it]Fetching 16 files:  44%|████▍     | 7/16 [00:18<00:28,  3.14s/it]Fetching 16 files:  50%|█████     | 8/16 [00:18<00:19,  2.43s/it]Fetching 16 files:  62%|██████▎   | 10/16 [00:18<00:08,  1.42s/it]Fetching 16 files: 100%|██████████| 16/16 [00:18<00:00,  1.17s/it]
+OLMo-2-1124-7B step8000: (100352, 4096) top σ=299.756
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:08,  1.79it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:15<00:26,  2.66s/it]Fetching 16 files:  50%|█████     | 8/16 [00:15<00:14,  1.87s/it]Fetching 16 files:  56%|█████▋    | 9/16 [00:18<00:13,  1.93s/it]Fetching 16 files: 100%|██████████| 16/16 [00:18<00:00,  1.13s/it]
+OLMo-2-1124-7B step9000: (100352, 4096) top σ=316.320
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:04,  3.23it/s]Fetching 16 files:  12%|█▎        | 2/16 [00:00<00:02,  5.27it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:00<00:01,  9.01it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:14<00:36,  3.67s/it]Fetching 16 files:  44%|████▍     | 7/16 [00:17<00:29,  3.29s/it]Fetching 16 files:  50%|█████     | 8/16 [00:19<00:24,  3.04s/it]Fetching 16 files: 100%|██████████| 16/16 [00:19<00:00,  1.21s/it]
+OLMo-2-1124-7B step10000: (100352, 4096) top σ=331.441
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:05,  2.67it/s]Fetching 16 files:  19%|█▉        | 3/16 [00:00<00:01,  7.36it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:00<00:01,  7.69it/s]Fetching 16 files:  44%|████▍     | 7/16 [00:16<00:29,  3.33s/it]Fetching 16 files: 100%|██████████| 16/16 [00:16<00:00,  1.01s/it]
+OLMo-2-1124-7B step20000: (100352, 4096) top σ=426.785
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:06,  2.22it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:00<00:01,  7.89it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:15<00:35,  3.59s/it]Fetching 16 files:  44%|████▍     | 7/16 [00:16<00:26,  2.96s/it]Fetching 16 files: 100%|██████████| 16/16 [00:16<00:00,  1.05s/it]
+OLMo-2-1124-7B step30000: (100352, 4096) top σ=466.980
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:06,  2.27it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:00<00:01,  8.06it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:13<00:30,  3.06s/it]Fetching 16 files:  44%|████▍     | 7/16 [00:35<01:09,  7.69s/it]Fetching 16 files: 100%|██████████| 16/16 [00:35<00:00,  2.19s/it]
+OLMo-2-1124-7B step40000: (100352, 4096) top σ=483.509
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:06,  2.47it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:00<00:01, 10.05it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:12<00:01, 10.05it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:18<00:41,  4.18s/it]Fetching 16 files:  44%|████▍     | 7/16 [00:18<00:28,  3.21s/it]Fetching 16 files:  56%|█████▋    | 9/16 [00:20<00:15,  2.21s/it]Fetching 16 files:  62%|██████▎   | 10/16 [00:20<00:10,  1.75s/it]Fetching 16 files: 100%|██████████| 16/16 [00:20<00:00,  1.27s/it]
+OLMo-2-1124-7B step50000: (100352, 4096) top σ=486.754
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:05,  2.73it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:00<00:01, 10.52it/s]Fetching 16 files:  44%|████▍     | 7/16 [00:16<00:27,  3.08s/it]Fetching 16 files:  56%|█████▋    | 9/16 [00:17<00:15,  2.25s/it]Fetching 16 files: 100%|██████████| 16/16 [00:17<00:00,  1.12s/it]
+OLMo-2-1124-7B step60000: (100352, 4096) top σ=481.635
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:04,  3.68it/s]Fetching 16 files:  12%|█▎        | 2/16 [00:00<00:02,  5.61it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:00<00:01,  8.98it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:15<00:37,  3.77s/it]Fetching 16 files:  44%|████▍     | 7/16 [00:17<00:29,  3.31s/it]Fetching 16 files: 100%|██████████| 16/16 [00:17<00:00,  1.07s/it]
+OLMo-2-1124-7B step70000: (100352, 4096) top σ=475.988
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:04,  3.23it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:00<00:01,  9.34it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:17<00:40,  4.08s/it]Fetching 16 files:  56%|█████▋    | 9/16 [00:19<00:15,  2.28s/it]Fetching 16 files: 100%|██████████| 16/16 [00:19<00:00,  1.20s/it]
+OLMo-2-1124-7B step80000: (100352, 4096) top σ=467.738
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:04,  3.12it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:00<00:01,  9.94it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:17<00:01,  9.94it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:18<00:42,  4.26s/it]Fetching 16 files: 100%|██████████| 16/16 [00:18<00:00,  1.16s/it]
+OLMo-2-1124-7B step90000: (100352, 4096) top σ=459.668
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:03,  4.68it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:00<00:00, 13.35it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:14<00:00, 13.35it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:17<00:40,  4.03s/it]Fetching 16 files:  44%|████▍     | 7/16 [00:18<00:29,  3.33s/it]Fetching 16 files: 100%|██████████| 16/16 [00:18<00:00,  1.17s/it]
+OLMo-2-1124-7B step110000: (100352, 4096) top σ=445.685
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:03,  4.33it/s]Fetching 16 files:  19%|█▉        | 3/16 [00:00<00:01, 10.07it/s]Fetching 16 files:  19%|█▉        | 3/16 [00:11<00:01, 10.07it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:14<00:29,  2.91s/it]Fetching 16 files:  44%|████▍     | 7/16 [00:16<00:24,  2.73s/it]Fetching 16 files:  62%|██████▎   | 10/16 [00:17<00:09,  1.57s/it]Fetching 16 files: 100%|██████████| 16/16 [00:17<00:00,  1.10s/it]
+OLMo-2-1124-7B step130000: (100352, 4096) top σ=437.347
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:01,  7.80it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:16<00:29,  2.90s/it]Fetching 16 files: 100%|██████████| 16/16 [00:16<00:00,  1.04s/it]
+OLMo-2-1124-7B step160000: (100352, 4096) top σ=431.587
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:02,  6.48it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:14<00:25,  2.50s/it]Fetching 16 files:  50%|█████     | 8/16 [00:14<00:14,  1.75s/it]Fetching 16 files:  56%|█████▋    | 9/16 [00:17<00:13,  1.86s/it]Fetching 16 files:  62%|██████▎   | 10/16 [00:17<00:09,  1.59s/it]Fetching 16 files: 100%|██████████| 16/16 [00:17<00:00,  1.11s/it]
+OLMo-2-1124-7B step190000: (100352, 4096) top σ=430.759
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:02,  7.18it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:18<00:31,  3.16s/it]Fetching 16 files:  44%|████▍     | 7/16 [00:18<00:23,  2.61s/it]Fetching 16 files:  56%|█████▋    | 9/16 [00:18<00:11,  1.71s/it]Fetching 16 files: 100%|██████████| 16/16 [00:18<00:00,  1.17s/it]
+OLMo-2-1124-7B step210000: (100352, 4096) top σ=438.308
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:02,  5.79it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:16<00:29,  2.93s/it]Fetching 16 files:  56%|█████▋    | 9/16 [00:17<00:12,  1.80s/it]Fetching 16 files: 100%|██████████| 16/16 [00:17<00:00,  1.10s/it]
+OLMo-2-1124-7B step240000: (100352, 4096) top σ=432.409
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:03,  4.68it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:15<00:26,  2.69s/it]Fetching 16 files:  44%|████▍     | 7/16 [00:20<00:27,  3.08s/it]Fetching 16 files: 100%|██████████| 16/16 [00:20<00:00,  1.25s/it]
+OLMo-2-1124-7B step300000: (100352, 4096) top σ=429.178
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:02,  6.21it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:14<00:24,  2.48s/it]Fetching 16 files:  44%|████▍     | 7/16 [00:18<00:25,  2.79s/it]Fetching 16 files: 100%|██████████| 16/16 [00:18<00:00,  1.14s/it]
+OLMo-2-1124-7B step370000: (100352, 4096) top σ=414.301
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:02,  5.20it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:21<00:37,  3.78s/it]Fetching 16 files: 100%|██████████| 16/16 [00:21<00:00,  1.35s/it]
+OLMo-2-1124-7B step460000: (100352, 4096) top σ=407.605
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:04,  3.30it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:00<00:00, 14.34it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:13<00:00, 14.34it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:16<00:37,  3.70s/it]Fetching 16 files:  44%|████▍     | 7/16 [00:18<00:31,  3.45s/it]Fetching 16 files:  62%|██████▎   | 10/16 [00:20<00:11,  2.00s/it]Fetching 16 files: 100%|██████████| 16/16 [00:20<00:00,  1.29s/it]
+OLMo-2-1124-7B step580000: (100352, 4096) top σ=376.698
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:03,  3.92it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:16<00:29,  2.91s/it]Fetching 16 files:  44%|████▍     | 7/16 [00:18<00:24,  2.71s/it]Fetching 16 files: 100%|██████████| 16/16 [00:18<00:00,  1.16s/it]
+OLMo-2-1124-7B step730000: (100352, 4096) top σ=372.250
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [00:00<00:04,  3.63it/s]Fetching 16 files:  12%|█▎        | 2/16 [00:00<00:02,  5.16it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:00<00:00, 11.04it/s]Fetching 16 files:  31%|███▏      | 5/16 [00:14<00:00, 11.04it/s]Fetching 16 files:  38%|███▊      | 6/16 [00:15<00:38,  3.89s/it]Fetching 16 files:  50%|█████     | 8/16 [00:17<00:20,  2.62s/it]Fetching 16 files:  62%|██████▎   | 10/16 [00:18<00:10,  1.81s/it]Fetching 16 files: 100%|██████████| 16/16 [00:18<00:00,  1.14s/it]
+OLMo-2-1124-7B step920000: (100352, 4096) top σ=368.701
+nanochat-d12 step0: (65536, 768) top σ=-0.000
+nanochat-d12 step1: (65536, 768) top σ=20.285
+nanochat-d12 step2: (65536, 768) top σ=33.780
+nanochat-d12 step4: (65536, 768) top σ=58.256
+nanochat-d12 step8: (65536, 768) top σ=85.584
+nanochat-d12 step16: (65536, 768) top σ=107.101
+nanochat-d12 step32: (65536, 768) top σ=126.057
+nanochat-d12 step50: (65536, 768) top σ=137.761
+nanochat-d12 step64: (65536, 768) top σ=143.744
+nanochat-d12 step100: (65536, 768) top σ=159.709
+nanochat-d12 step128: (65536, 768) top σ=170.523
+nanochat-d12 step150: (65536, 768) top σ=179.195
+nanochat-d12 step200: (65536, 768) top σ=195.736
+nanochat-d12 step250: (65536, 768) top σ=210.803
+nanochat-d12 step256: (65536, 768) top σ=212.211
+nanochat-d12 step300: (65536, 768) top σ=224.510
+nanochat-d12 step350: (65536, 768) top σ=236.758
+nanochat-d12 step400: (65536, 768) top σ=247.713
+nanochat-d12 step450: (65536, 768) top σ=257.158
+nanochat-d12 step500: (65536, 768) top σ=265.621
+nanochat-d12 step512: (65536, 768) top σ=267.282
+nanochat-d12 step550: (65536, 768) top σ=273.186
+nanochat-d12 step600: (65536, 768) top σ=279.847
+nanochat-d12 step650: (65536, 768) top σ=285.811
+nanochat-d12 step700: (65536, 768) top σ=291.058
+nanochat-d12 step750: (65536, 768) top σ=295.844
+nanochat-d12 step800: (65536, 768) top σ=299.965
+nanochat-d12 step850: (65536, 768) top σ=303.621
+nanochat-d12 step900: (65536, 768) top σ=306.836
+nanochat-d12 step1000: (65536, 768) top σ=312.250
+nanochat-d12 step1150: (65536, 768) top σ=318.028
+nanochat-d12 step1350: (65536, 768) top σ=322.703
+nanochat-d12 step1600: (65536, 768) top σ=324.688
+nanochat-d12 step1900: (65536, 768) top σ=323.484
+nanochat-d12 step2100: (65536, 768) top σ=321.678
+nanochat-d12 step2350: (65536, 768) top σ=319.058
+nanochat-d12 step2850: (65536, 768) top σ=314.371
+nanochat-d12 step3550: (65536, 768) top σ=310.183
+nanochat-d12 step4450: (65536, 768) top σ=308.618
+nanochat-d12 step5600: (65536, 768) top σ=310.872
+nanochat-d12 step7080: (65536, 768) top σ=330.091
+Traceback (most recent call last):
+  File "/gpfs/home2/dcampregher1/training-time-entropy-circuits/oneoff_scripts/unembedding_alignment.py", line 59, in <module>
+    CLI(main)
+    ~~~^^^^^^
+  File "/gpfs/home2/dcampregher1/training-time-entropy-circuits/.venv/lib/python3.14/site-packages/jsonargparse/_cli.py", line 27, in CLI
+    return auto_cli(*args, _stacklevel=3, **kwargs)
+  File "/gpfs/home2/dcampregher1/training-time-entropy-circuits/.venv/lib/python3.14/site-packages/jsonargparse/_cli.py", line 106, in auto_cli
+    return _run_component(components, init)
+  File "/gpfs/home2/dcampregher1/training-time-entropy-circuits/.venv/lib/python3.14/site-packages/jsonargparse/_cli.py", line 227, in _run_component
+    return component(**cfg)
+  File "/gpfs/home2/dcampregher1/training-time-entropy-circuits/oneoff_scripts/unembedding_alignment.py", line 38, in main
+    d = torch.load(f"{SVD_DIR}/{model}/step{step}.pt", map_location=dev, weights_only=False)
+  File "/gpfs/home2/dcampregher1/training-time-entropy-circuits/.venv/lib/python3.14/site-packages/torch/serialization.py", line 1507, in load
+    with _open_zipfile_reader(opened_file) as opened_zipfile:
+         ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/gpfs/home2/dcampregher1/training-time-entropy-circuits/.venv/lib/python3.14/site-packages/torch/serialization.py", line 780, in __init__
+    super().__init__(torch._C.PyTorchFileReader(name_or_buffer))
+                     ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+RuntimeError: PytorchStreamReader failed reading zip archive: failed finding central directory

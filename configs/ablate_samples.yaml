@@ -1,0 +1,47 @@
+output_dir: data/inferences/ablate_base   # OVERRIDE per intervention: --output_dir data/inferences/ablate_<tag>
+# Layer-ablation sweep base (plan.md item 2b): full samples-mode collection with chosen
+# blocks' residual writes zeroed during the forward pass. Supply per submission:
+#   --ablate "[0,1,2,3]" --output_dir data/inferences/ablate_q1
+# Full metrics (ledger included) on the ablated model; full hook set (.in leaves needed
+# by the ledger). One output_dir per intervention — results are keyed by step only.
+
+model_name:
+  - "allenai/OLMo-2-0425-1B"
+  - "allenai/OLMo-2-1124-7B"
+  - "EleutherAI/pythia-1b-deduped"
+  - "EleutherAI/pythia-6.9b-deduped"
+  - "EleutherAI/pythia-160m-deduped"
+  - "EleutherAI/pythia-410m-deduped"
+  - "nanochat-d12"
+
+#            OL1B    OL7B   Py1b    Py6.9b  Py160m   Py410m  nanochat
+batch_size: [  48,     32,   256,      72,     256,     256,   128]
+max_tokens: [262_144, 81_920, 262_144, 98_304, 262_144, 262_144, 262_144]
+
+packed_data_path:
+  allenai/*: data/mixes/olmo_mix_30M_512.pt
+  EleutherAI/*: data/mixes/pile_30M_512.pt
+  nanochat-d12: data/mixes/fineweb_edu_nanochat_1M_512.pt
+
+seq_len: 512
+min_length: 32
+max_checkpoints: 30
+checkpoint_spacing: log
+packing: packed
+token_selection: all
+activation_dtype: bf16
+
+hooks:
+  - blk*.attn.in
+  - blk*.attn.out
+  - blk*.mlp.in
+  - blk*.mlp.out
+  - before_final_norm
+  - after_final_norm
+
+max_layers_per_pass: 0
+collect_format: acts
+storage_format: eigenvalues
+compute_metrics: True
+drift_metrics: False
+keep_cached: False

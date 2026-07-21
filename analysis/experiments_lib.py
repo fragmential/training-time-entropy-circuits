@@ -769,10 +769,14 @@ def plot_spectrum(
 @griddable
 def plot_layer_contribution(model, sources, xvar='tokens', yvar='trace', title=None,
                             color_palette='gradient', color_kwargs={}, key=True,
-                            normalize=True, sep_lw=0.0, sep_color='white'):
+                            normalize=True, sep_lw=0.0, sep_color='white',
+                            baseline_src=None, remainder_label=None):
     """Depth-stacked contributions over training. normalize=True: 100%-shares (nonneg yvar,
     e.g. uncentered trace = gross energy). normalize=False: raw signed values — positives
-    stack up, negatives down (e.g. the ledger's delta_s, which includes overlap/cross terms)."""
+    stack up, negatives down (e.g. the ledger's delta_s, which includes overlap/cross terms).
+    baseline_src (cfg, hook, label): included in the normalization denominator and drawn as
+    a gray dashed line (e.g. the embedding stream). remainder_label: draw 1 − Σshares as a
+    gray dashed line (for share metrics whose gap to 1 is the embedding, e.g. R_over_r)."""
     palettes = make_color_palettes(base_colors, len(sources), method=color_palette, **color_kwargs)
     W, xs = [], None
     for src in sources:
@@ -780,7 +784,12 @@ def plot_layer_contribution(model, sources, xvar='tokens', yvar='trace', title=N
         if ys is None: continue
         W.append(ys); xs = XVAR_FNS[xvar](model, step_nums)
     W = np.asarray(W, float)
-    frac = W / W.sum(0) if normalize else W
+    base = None
+    if baseline_src is not None:
+        bys, _bsteps = get_ys(baseline_src[0], model, baseline_src[1], yvar)
+        base = np.asarray(bys, float) if bys is not None else None
+    den = W.sum(0) + (base if base is not None else 0.0)
+    frac = W / den if normalize else W
     colors = [palettes[i][0] for i in range(len(W))]            # gradient is model-independent -> [0]
     stack = lambda Y: plt.stackplot(xs, *Y, colors=colors, linewidth=sep_lw,
                                     edgecolor=sep_color if sep_lw else 'none')
@@ -790,6 +799,12 @@ def plot_layer_contribution(model, sources, xvar='tokens', yvar='trace', title=N
     else:                                                       # signed: positives up, negatives down
         stack(np.clip(frac, 0, None)); stack(np.clip(frac, None, 0))
         plt.axhline(0, color='0.3', lw=0.8)
+    if base is not None and normalize:
+        plt.plot(xs, base / den, color='0.25', lw=1.8, ls='--', label=baseline_src[2])
+        plt.legend(fontsize=7, loc='upper right')
+    if remainder_label is not None:
+        plt.plot(xs, 1 - W.sum(0), color='0.25', lw=1.8, ls='--', label=remainder_label)
+        plt.legend(fontsize=7, loc='upper right')
     plt.xscale('log')
     if title: plt.title(title)
     plt.xlabel(XVAR_LABELS[xvar], fontsize=14)

@@ -17,7 +17,9 @@
 # # Showcase appendix
 #
 # Appendix-grade material split out of showcase.ipynb: (A) the dataset-swap control,
-# (B) the toy edge cases behind [docs/toy.md](../docs/toy.md) §3.
+# (B) the toy edge cases behind [docs/toy.md](../docs/toy.md) §3, (C)–(F) supporting digs,
+# (G) leave-one-out and (H) layer-ablation digs for RQ1c (BLIND — descriptive captions
+# only, pending cross-check).
 # Toy data: `data/results/toy/appendix_sweeps.pt`, regenerated in ~2 min by
 # `uv run python -m toy.appendix_sweeps` (single-layer dynamics, canonical clustered init,
 # lr 0.25).
@@ -532,7 +534,7 @@ caption('Packed (top): spectrum and RankMe essentially invariant from 16k rows u
 # not at issue: heads read the spike (H1.5) and every ordinary token carries v₁-content
 # mid-stack (showcase §4). What the padded collapse would need is spike content that
 # survives TO THE MEASUREMENT POINT, window-modulated — that specific route is tested
-# here. What actually carries the last-token collapse remains open (plan.md item 1).
+# here. What actually carries the last-token collapse remains open (plan.md item 3).
 # Visual form of the deposit test recorded in sink_literature §(d).
 
 # %%
@@ -598,3 +600,299 @@ caption('Answer: no. Left: the slot rows\' enormous write is almost entirely gon
         'the correlation is as small as the entering-blk3 control. Scope: projections are '
         'centered, so a constant deposit is invisible by construction — this tests '
         'variance transport only, at two depths (mid-stack profile: showcase §4).')
+
+
+# %% [markdown]
+# ## G. Leave-one-out: final-stream entropy without a group of writes (RQ1c.1) — BLIND
+#
+# The `loo` metric: the centered final-stream spectrum recomputed with a group of writes
+# subtracted from the samples, S(final − Σ writes in group). Groups per model: every
+# block singly (attn+mlp jointly), the four L/4 chunks, the middle half. Data:
+# data/results/loo_samples (all 7 models). Shown: delta_rankme = RankMe(final) −
+# RankMe(final − group).
+#
+# Captions are descriptive only — no interpretation until cross-checked.
+
+# %%
+LOO_MODELS = ['pythia-160m-deduped', 'pythia-410m-deduped', 'pythia-1b-deduped',
+              'pythia-6.9b-deduped', 'OLMo-2-0425-1B', 'OLMo-2-1124-7B', 'nanochat-d12']
+NB = {'pythia-160m-deduped': 12, 'pythia-410m-deduped': 24, 'pythia-1b-deduped': 16,
+      'pythia-6.9b-deduped': 32, 'OLMo-2-0425-1B': 16, 'OLMo-2-1124-7B': 32,
+      'nanochat-d12': 12}
+
+def loo_res(model, key='delta_rankme'):
+    r = np.load(f'data/results/loo_samples/results_{model}.npy', allow_pickle=True).item()
+    steps = sorted(r)
+    return steps, {g: [r[s]['']['loo'][g][key] for s in steps]
+                   for g in r[steps[0]]['']['loo']}
+
+def loo_base(model):
+    r = np.load(f'data/results/loo_samples/results_{model}.npy', allow_pickle=True).item()
+    steps = sorted(r)
+    return steps, [r[s]['before_final_norm']['acts_centered']['rankme'] for s in steps]
+
+
+# %%
+fig, axes = plt.subplots(2, 4, figsize=(19, 8))
+for ax, model in zip(axes.flat, LOO_MODELS):
+    steps, loo = loo_res(model)
+    L = NB[model]
+    for g, ys in loo.items():
+        if '-' in g:
+            continue
+        k = int(g[3:])
+        ax.plot(steps, ys, lw=1.3, color=plt.get_cmap('viridis')(k / (L - 1)))
+    ax.axhline(0, color='gray', lw=0.8)
+    ax.set(xscale='log', xlabel='step', title=model)
+for ax in axes.flat[len(LOO_MODELS):]:
+    ax.axis('off')
+axes[0, 0].set_ylabel('delta RankMe (single blocks)')
+axes[1, 0].set_ylabel('delta RankMe (single blocks)')
+fig.suptitle('Leave-one-out, single blocks: RankMe(final) − RankMe(final − block), light → dark = deeper')
+plt.tight_layout(); plt.show()
+caption('delta_rankme per single-block group over training, per model (colorbar = block '
+        'depth). Descriptive only.')
+
+# %%
+fig, axes = plt.subplots(2, 4, figsize=(19, 8))
+for ax, model in zip(axes.flat, LOO_MODELS):
+    st, base = loo_base(model)
+    ax.plot(st, base, 'k', lw=2.2, label='baseline')
+    steps, loo = loo_res(model, key='rankme')
+    for g in [g for g in loo if '-' in g]:
+        ax.plot(steps, loo[g], lw=1.4, label=f'− {g}')
+    ax.set(xscale='log', xlabel='step', title=model)
+    ax.legend(fontsize=6)
+for ax in axes.flat[len(LOO_MODELS):]:
+    ax.axis('off')
+axes[0, 0].set_ylabel('RankMe (final − group)')
+axes[1, 0].set_ylabel('RankMe (final − group)')
+fig.suptitle('Leave-one-out, block groups (absolute): baseline (black) vs RankMe(final − group)')
+plt.tight_layout(); plt.show()
+caption('Absolute RankMe of the group-subtracted final stream over training, per model: '
+        'black = the unsubtracted final stream, colors = the four quarter-chunks and the '
+        'middle half. Descriptive only.')
+
+fig, axes = plt.subplots(2, 4, figsize=(19, 8))
+for ax, model in zip(axes.flat, LOO_MODELS):
+    steps, loo = loo_res(model, key='delta_entropy')
+    chunks = [g for g in loo if '-' in g]
+    for g in chunks:
+        ax.plot(steps, loo[g], lw=1.6, label=g)
+    ax.axhline(0, color='gray', lw=0.8)
+    ax.set(xscale='log', xlabel='step', title=model)
+    ax.legend(fontsize=6)
+for ax in axes.flat[len(LOO_MODELS):]:
+    ax.axis('off')
+axes[0, 0].set_ylabel('delta S (block groups)')
+axes[1, 0].set_ylabel('delta S (block groups)')
+fig.suptitle('Leave-one-out, block groups: the four L/4 chunks and the middle half (rank entropy S)')
+plt.tight_layout(); plt.show()
+caption('delta_entropy (rank entropy S, unablated − ablated) for the contiguous groups '
+        '(four quarter-chunks + the middle half) over training, per model. Descriptive only.')
+
+# %%
+# Single-WRITE leave-one-out (`ablation_contribution`, covariance-space) from the MAIN
+# packed sweeps — per attn/mlp write separately.
+CFG = lambda m: 'nanochat_samples' if m == 'nanochat-d12' else 'block_representations_samples'
+for sub in ('mlp', 'attn'):
+    fig, axes = plt.subplots(2, 4, figsize=(19, 8))
+    for ax, model in zip(axes.flat, LOO_MODELS):
+        r = np.load(f'data/results/{CFG(model)}/results_{model}.npy', allow_pickle=True).item()
+        steps = sorted(r)
+        L = NB[model]
+        for l in range(L):
+            ys = [r[s].get(f'blk{l}.{sub}.out', {}).get('ablation_contribution', {}).get('delta_rankme')
+                  for s in steps]
+            if ys[0] is None:
+                continue
+            ax.plot(steps, ys, lw=1.2, color=plt.get_cmap('viridis')(l / (L - 1)))
+        ax.axhline(0, color='gray', lw=0.8)
+        ax.set(xscale='log', xlabel='step', title=model)
+    for ax in axes.flat[len(LOO_MODELS):]:
+        ax.axis('off')
+    axes[0, 0].set_ylabel(f'delta RankMe ({sub} writes)')
+    axes[1, 0].set_ylabel(f'delta RankMe ({sub} writes)')
+    fig.suptitle(f'Single-write leave-one-out ({sub}.out), main packed sweeps — light → dark = deeper')
+    plt.tight_layout(); plt.show()
+    caption(f'ablation_contribution delta_rankme per {sub} write over training, per model '
+            f'(colorbar = block depth). Descriptive only.')
+
+# %% [markdown]
+# ## H. Layer ablation: full inference with block writes zeroed (RQ1c.2) — BLIND
+#
+# The ablated runs (data/results/ablate_*): per model the four L/4 quarter-chunks, the
+# middle half, and the pythia carriers (blk3 at 1b; blk4-5 at 6.9b), each a full
+# collection with all metrics on ~38 checkpoints. Baseline = the unablated packed sweep.
+#
+# Captions are descriptive only — no interpretation until cross-checked.
+
+# %%
+QUARTERS = {12: ['blk0-2', 'blk3-5', 'blk6-8', 'blk9-11', 'blk3-8'],
+            16: ['blk0-3', 'blk4-7', 'blk8-11', 'blk12-15', 'blk4-11'],
+            24: ['blk0-5', 'blk6-11', 'blk12-17', 'blk18-23', 'blk6-17'],
+            32: ['blk0-7', 'blk8-15', 'blk16-23', 'blk24-31', 'blk8-23']}
+CARRIER = {'pythia-1b-deduped': 'blk3', 'pythia-6.9b-deduped': 'blk4-5'}
+
+def interventions(model):
+    return QUARTERS[NB[model]] + ([CARRIER[model]] if model in CARRIER else [])
+
+def series(cfg, model, node, fam, key):
+    r = np.load(f'data/results/{cfg}/results_{model}.npy', allow_pickle=True).item()
+    steps = sorted(r)
+    return steps, [r[s][node][fam][key] for s in steps]
+
+# %%
+# Ledger contributions (the showcase §3 stacked panel) per ablated run, next to the baseline.
+def ledger_ax(ax, cfg, model, ttl):
+    r = np.load(f'data/results/{cfg}/results_{model}.npy', allow_pickle=True).item()
+    steps = [s for s in sorted(r) if s > 0]
+    terms = {y: np.array([sum(float(r[s][f'blk{l}']['block_ledger'][y]) for l in range(NB[model]))
+                          for s in steps]) for y in ('chi', 'quality', 'interference')}
+    # refine the grid with sign crossings (interpolated in log-x) so fills close at zero
+    lx = np.log(np.array(steps, float))
+    cross = []
+    for v in terms.values():
+        i = np.nonzero(np.signbit(v[:-1]) != np.signbit(v[1:]))[0]
+        cross.append(lx[i] + v[i] / (v[i] - v[i + 1]) * (lx[i + 1] - lx[i]))
+    grid = np.unique(np.concatenate([lx, *cross]))
+    terms = {k: np.interp(grid, lx, v) for k, v in terms.items()}
+    gx = np.exp(grid)
+    pos, neg = np.zeros(len(gx)), np.zeros(len(gx))
+    for name, c in (('chi', 'tab:green'), ('quality', 'tab:red'), ('interference', 'tab:purple')):
+        up, dn = np.clip(terms[name], 0, None), np.clip(terms[name], None, 0)
+        ax.fill_between(gx, pos, pos + up, label=name, color=c, alpha=0.55, lw=0)
+        ax.fill_between(gx, neg, neg + dn, color=c, alpha=0.55, lw=0)
+        pos, neg = pos + up, neg + dn
+    ax.plot(gx, sum(terms.values()), 'k', lw=2, label='ΔS total')
+    es = [float(r[s]['blk0.attn.in']['acts_centered']['matrix_entropy']) for s in steps]
+    ax.plot(steps, es, color='0.4', ls=':', lw=1.2, label='S(embedding stream)')
+    ax.set(xscale='log', xlabel='step', title=ttl)
+
+for model in LOO_MODELS:
+    fig, axes = plt.subplots(2, 3, figsize=(16, 7), sharex=True, sharey=True)
+    ledger_ax(axes.flat[0], CFG(model), model, 'baseline')
+    for ax, tag in zip(axes.flat[1:], QUARTERS[NB[model]]):
+        try:
+            ledger_ax(ax, f'ablate_{tag}', model, f'− {tag}')
+        except FileNotFoundError:
+            ax.axis('off')
+    axes.flat[0].legend(fontsize=7)
+    axes[0, 0].set_ylabel('rank entropy'); axes[1, 0].set_ylabel('rank entropy')
+    fig.suptitle(f'Ledger contributions under ablation — {model}')
+    plt.tight_layout(); plt.show()
+    caption(f'The decomposition ΔS = χ (green) + quality (red) + interference (purple), '
+            f'summed over blocks, for {model}: top-left the unablated packed sweep, the '
+            f'other five panels the ablated runs (− tag = those blocks\' writes zeroed). '
+            f'Black = ΔS total; dotted gray = the embedding stream\'s own entropy. '
+            f'Descriptive only.')
+
+for model, tag in CARRIER.items():
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4.5), sharex=True, sharey=True)
+    ledger_ax(axes[0], CFG(model), model, 'baseline')
+    ledger_ax(axes[1], f'ablate_{tag}', model, f'− {tag}')
+    axes[0].legend(fontsize=7); axes[0].set_ylabel('rank entropy')
+    fig.suptitle(f'Ledger contributions, {model}: baseline vs carrier ablation')
+    plt.tight_layout(); plt.show()
+    caption(f'The same stacked decomposition for {model}: left the unablated sweep, right '
+            f'the run with {tag}\'s writes zeroed. Descriptive only.')
+
+# %%
+for leaf in ('after_final_norm', 'before_final_norm'):
+    fig, axes = plt.subplots(2, 4, figsize=(19, 8))
+    for ax, model in zip(axes.flat, LOO_MODELS):
+        st, base = series(CFG(model), model, leaf, 'acts_centered', 'rankme')
+        ax.plot(st, base, 'k', lw=2.2, label='baseline')
+        for i, tag in enumerate(interventions(model)):
+            try:
+                st2, ys = series(f'ablate_{tag}', model, leaf, 'acts_centered', 'rankme')
+            except FileNotFoundError:
+                continue
+            ax.plot(st2, ys, lw=1.4, color=plt.get_cmap('tab10')(i), label=f'− {tag}')
+        ax.set(xscale='log', xlabel='step', title=model)
+        ax.legend(fontsize=6)
+    for ax in axes.flat[len(LOO_MODELS):]:
+        ax.axis('off')
+    axes[0, 0].set_ylabel(f'{leaf} RankMe (centered)')
+    axes[1, 0].set_ylabel(f'{leaf} RankMe (centered)')
+    fig.suptitle(f'{leaf} RankMe under ablation: baseline (black) vs each intervention')
+    plt.tight_layout(); plt.show()
+    caption(f'{leaf} centered RankMe over training: black = the unablated packed '
+            f'sweep, colors = each ablated run (− tag = those blocks\' writes zeroed). '
+            f'Descriptive only.')
+
+    fig, axes = plt.subplots(2, 4, figsize=(19, 8))
+    for ax, model in zip(axes.flat, LOO_MODELS):
+        st, base = series(CFG(model), model, leaf, 'acts_centered', 'matrix_entropy')
+        bmap = dict(zip(st, base))
+        for i, tag in enumerate(interventions(model)):
+            try:
+                st2, ys = series(f'ablate_{tag}', model, leaf, 'acts_centered', 'matrix_entropy')
+            except FileNotFoundError:
+                continue
+            pts = [(s, bmap[s] - y) for s, y in zip(st2, ys) if s in bmap]
+            ax.plot(*zip(*pts), lw=1.4, color=plt.get_cmap('tab10')(i), label=f'− {tag}')
+        ax.axhline(0, color='gray', lw=0.8)
+        ax.set(xscale='log', xlabel='step', title=model)
+        ax.legend(fontsize=6)
+    for ax in axes.flat[len(LOO_MODELS):]:
+        ax.axis('off')
+    axes[0, 0].set_ylabel('delta S (baseline − ablated)')
+    axes[1, 0].set_ylabel('delta S (baseline − ablated)')
+    fig.suptitle(f'{leaf} rank entropy S under ablation, as deltas: baseline − each ablated run')
+    plt.tight_layout(); plt.show()
+    caption(f'The same runs as deltas at {leaf}, in rank entropy S: baseline S minus ablated S '
+            f'at matching checkpoints, one line per intervention. Positive = the ablated run '
+            f'sits below the baseline. Descriptive only.')
+
+# %%
+def summed_term(cfg, model, term):
+    r = np.load(f'data/results/{cfg}/results_{model}.npy', allow_pickle=True).item()
+    steps = sorted(r)
+    return steps, [sum(float(r[s][f'blk{l}']['block_ledger'][term]) for l in range(NB[model]))
+                   for s in steps]
+
+for term in ('quality', 'interference', 'chi'):
+    fig, axes = plt.subplots(2, 4, figsize=(19, 8))
+    for ax, model in zip(axes.flat, LOO_MODELS):
+        st, base = summed_term(CFG(model), model, term)
+        ax.plot(st, base, 'k', lw=2.2, label='baseline')
+        for i, tag in enumerate(interventions(model)):
+            try:
+                st2, ys = summed_term(f'ablate_{tag}', model, term)
+            except FileNotFoundError:
+                continue
+            ax.plot(st2, ys, lw=1.4, color=plt.get_cmap('tab10')(i), label=f'− {tag}')
+        ax.axhline(0, color='gray', lw=0.8)
+        ax.set(xscale='log', xlabel='step', title=model)
+        ax.legend(fontsize=6)
+    for ax in axes.flat[len(LOO_MODELS):]:
+        ax.axis('off')
+    axes[0, 0].set_ylabel(f'Σ {term}')
+    axes[1, 0].set_ylabel(f'Σ {term}')
+    fig.suptitle(f'Σ {term} (over blocks) under ablation: baseline vs each intervention')
+    plt.tight_layout(); plt.show()
+    caption(f'The summed {term} decomposition term over training: black = baseline, '
+            f'colors = each ablated run. Descriptive only.')
+
+# %%
+# Per-block quality and total delta_s under the carrier ablations, next to the baseline.
+for term in ('quality', 'delta_s'):
+    for model, tag in CARRIER.items():
+        fig, axes = plt.subplots(1, 2, figsize=(13, 4.5), sharey=True)
+        for ax, cfg, ttl in ((axes[0], CFG(model), 'baseline'),
+                             (axes[1], f'ablate_{tag}', f'− {tag}')):
+            r = np.load(f'data/results/{cfg}/results_{model}.npy', allow_pickle=True).item()
+            steps = sorted(r)
+            L = NB[model]
+            for l in range(L):
+                ys = [float(r[s][f'blk{l}']['block_ledger'][term]) for s in steps]
+                ax.plot(steps, ys, lw=1.3, color=plt.get_cmap('viridis')(l / (L - 1)))
+            ax.axhline(0, color='gray', lw=0.8)
+            ax.set(xscale='log', xlabel='step', title=ttl)
+        axes[0].set_ylabel(f'per-block {term}')
+        fig.suptitle(f'Per-block {term}, {model}: baseline vs carrier ablation')
+        plt.tight_layout(); plt.show()
+        caption(f'Per-block {term} term over training for {model} (colorbar = block depth): '
+                f'left the unablated sweep, right the run with {tag}\'s writes zeroed. '
+                f'Descriptive only.')

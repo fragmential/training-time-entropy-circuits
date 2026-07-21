@@ -29,6 +29,7 @@ MODELS=(
     "EleutherAI/pythia-12b-deduped"
     "allenai/OLMo-2-0425-1B"
     "allenai/OLMo-2-1124-7B"
+    "nanochat-d12"
 )
 
 # Override model list from CLI: --models "pythia-14m pythia-70m" (exact short-name match)

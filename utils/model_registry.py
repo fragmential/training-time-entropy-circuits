@@ -754,7 +754,10 @@ class ModelWeights(WeightProvider):
         return m.weight.detach().float(), (b.detach().float() if b is not None else None)
 
     def norm(self) -> NormFn:
-        return get_final_layernorm(self._model, self._config).float()
+        # copy first: nn.Module.float() casts parameters IN PLACE, which would corrupt
+        # the live half-precision model for any later forward pass (ablation loops).
+        import copy
+        return copy.deepcopy(get_final_layernorm(self._model, self._config)).float()
 
 
 def load_inference(path: str, derive: bool = True) -> "tuple[dict, ModelConfig | None, WeightProvider | None]":

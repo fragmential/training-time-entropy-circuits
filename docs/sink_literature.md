@@ -120,7 +120,7 @@ sneak into the last-token sample.
 *NB: unlike sections a–c, this section reports an ORIGINAL experimental result of ours, not
 literature; it is cross-referenced from dig_findings.md. The question it serves is the LIVE
 padded puzzle (why pythia's padded last-token stream keeps sink variance and single-digit
-RankMe — plan.md item 2): it rules out one transport route. Visual form:
+RankMe — plan.md item 3): it rules out one transport route. Visual form:
 analysis/showcase_appendix.ipynb §F, recomputed from the stored block_rogue_id run.*
 
 **Literature verdict: not settled.** MA documents an attention-mediated *constant* deposit

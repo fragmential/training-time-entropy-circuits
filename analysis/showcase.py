@@ -255,32 +255,40 @@ def ledger_stack(model):
         plt.fill_between(gx, neg, neg + dn, color=c, alpha=0.55, lw=0)
         pos, neg = pos + up, neg + dn
     plt.plot(gx, sum(terms.values()), 'k', lw=2.5, label='ΔS total')
+    es, esteps = _lib.get_ys(cfg, model, ('blk0.attn.in', 'acts_centered'), 'matrix_entropy')
+    if es is not None:
+        exs = np.asarray(_lib.get_xs_tokens(model, esteps), float)
+        ek = exs > 0
+        plt.plot(exs[ek], np.asarray(es, float)[ek], color='0.4', ls=':', lw=1.5,
+                 label='S(embedding stream)')
     plt.xscale('log'); plt.xlabel('tokens'); plt.ylabel('rank entropy')
-    plt.legend(); plt.title(f'Ledger contributions — {get_model_label(model)}'); plt.show()
+    plt.legend(fontsize=8); plt.title(f'Ledger contributions — {get_model_label(model)}'); plt.show()
     caption(f'The decomposition summed over blocks, {get_model_label(model)}: ΔS = χ (green) '
             f'+ quality (red) + interference (purple); black = the total, the '
             f'depth-differential log RankMe (stack output entropy MINUS input entropy per '
             f'checkpoint — negative means output below input, not negative entropy). '
-            f'Positive parts stack up from zero, negative down. The 7-model split and its '
-            f'edge cases: section header.')
+            f'Positive parts stack up from zero, negative down. Dotted gray = the embedding '
+            f'stream\'s own entropy, the base of the black difference. The 7-model split '
+            f'and its edge cases: section header.')
 
 for model in LEDGER_MODELS:
     ledger_stack(model)
 
 # %% [markdown]
 # ### Layer decomposition of the quality term
-# The "locus" row of the ledger claim, shown rather than asserted: one line per block's own
+# The "carrying blocks" row of the ledger claim, shown rather than asserted: one line per block's own
 # quality contribution over training. Numbers table: dig_findings "Per-block quality
 # decomposition".
 
 # %%
-def quality_per_block(models):
+def term_per_block(models, term='quality', cfg_fn=None, suptitle=None):
     from matplotlib.cm import ScalarMappable
+    cfg_fn = cfg_fn or cfg_of
     fig, axes = plt.subplots(2, 4, figsize=(19, 8))
     for ax, model in zip(axes.flat, models):
         L = n_blocks[model]
         for l in range(L):
-            ys, steps = _lib.get_ys(cfg_of(model), model, (f'blk{l}', 'block_ledger'), 'quality')
+            ys, steps = _lib.get_ys(cfg_fn(model), model, (f'blk{l}', 'block_ledger'), term)
             xs = np.asarray(_lib.get_xs_tokens(model, steps), float)
             keep = xs > 0
             ax.plot(xs[keep], np.asarray(ys, float)[keep], lw=1.5,
@@ -291,17 +299,45 @@ def quality_per_block(models):
                      ticks=[]).set_label(f'block (0 → {L - 1})', fontsize=8)
     for ax in axes.flat[len(models):]:
         ax.axis('off')
-    axes[0, 0].set_ylabel('per-block quality term')
-    axes[1, 0].set_ylabel('per-block quality term')
-    fig.suptitle('Quality ledger term per block')
+    axes[0, 0].set_ylabel(f'per-block {term} term')
+    axes[1, 0].set_ylabel(f'per-block {term} term')
+    fig.suptitle(suptitle or f'{term} ledger term per block')
     plt.tight_layout(); plt.show()
 
-quality_per_block(LEDGER_MODELS)
+term_per_block(LEDGER_MODELS, 'quality')
 caption('One line per block\'s own quality contribution (colorbar = block index); the §3 '
         'stacks are the sums of these lines. At pythia-1b/6.9b one early block (blk3) '
         'carries essentially the whole collapse; at 410m it is blk5; at 160m and nanochat '
         'it splits between an early and the FINAL block. In OLMo-2 no block dominates. '
         'Full table: dig_findings.')
+
+# %% [markdown]
+# ### Per-block ΔS: is a block's entropy-change sign a fixed property of the block?
+#
+# **Question.** Is a block's add/remove role a fixed property of the block (RQ1c.0)?
+# (These figures also show the depth-disproportionality of the change directly — that is
+# H1.2's question.)
+#
+# **Finding.** Not fixed: comparing packed with padded last-token geometry, pythia's
+# final layers flip from ADDING entropy to REMOVING it. The flip is the evidence for the conditional-final-layers interpretation
+# (final_report §2.3): a layer's entropy effect is conditional on its input and on what
+# the output must become, not an intrinsic role. NB the attribution here is compositional
+# (the exact decomposition), not counterfactual — the counterfactual program is plan.md
+# item 2.
+
+# %%
+term_per_block(LEDGER_MODELS, 'delta_s', suptitle='Per-block ΔS — packed (all-token)')
+caption('Each block\'s total ΔS_k over training (colorbar = block index), packed geometry, '
+        'all 7 models. The §3 stacks are the sums of these lines, term-split; here the net '
+        'per-block change is shown directly.')
+
+# %%
+PADDED_BS = 'block_representations_samples_padded'
+term_per_block(ALL4, 'delta_s', cfg_fn=lambda m: PADDED_BS,
+               suptitle='Per-block ΔS — padded (last-token)')
+caption('The same per-block ΔS_k in padded last-token geometry (the 4 padded models). '
+        'Against the packed figure above: pythia\'s final layers flip sign — the same '
+        'layers add entropy packed and remove it padded (final_report §2.3).')
 
 # %% [markdown]
 # ## 4. Pythia's sink write (repo codename: the rogue write)
@@ -856,7 +892,7 @@ if os.path.exists(p):
 # ordering and weakens math), the ref pairing of the stored gen_vs_ref results is
 # unverified, and several comparisons straddled incompatible geometries (packed all-token
 # vs padded last-token covariances are different measured objects). The contaminated
-# figures that used to render here are removed; the redo plan is docs/plan.md item 1, the
+# figures that used to render here are removed; the redo plan is docs/plan.md item 10, the
 # full diagnosis is final_report §4, and the machinery (methods + notebook) is
 # docs/rq2.md and analysis/rq2_results.ipynb.
 #
@@ -876,7 +912,7 @@ if os.path.exists(p):
 #
 # - **Drift (raw consecutive-checkpoint CKA):** confounded by uneven checkpoint spacing,
 #   and the stored metric additionally subsamples inconsistently at late checkpoints; the
-#   gap-corrected re-derivation is planned (docs/plan.md item 4).
+#   gap-corrected re-derivation is planned (docs/plan.md item 7).
 
 # %%
 # mlp×attn coupling (moved out of §5 — a separate observation from the write-ensemble claim)

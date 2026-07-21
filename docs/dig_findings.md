@@ -42,11 +42,11 @@ the per-block table below).
 | Σ quality over training | −0.5 → **−6.3** | −0.4 → **−5.0** | dips −3.9@6k → **recovers to −1.0** | dips −5.5@10k → **recovers to −1.3** |
 | Σ interference over training | −3.5 → **+2.3** (crosses 0 ≈ RankMe peak) | −4.7 → −0.2 (rising, no cross) | −0.5@6k → **−4.1** (falling) | −0.1@6k → **−5.5** (falling) |
 | compression driver | quality | quality | **interference** | **interference** |
-| locus | blk3 (90% of Δquality) + blk15 | blk3 (~all of Δquality) + blk31 | blk14–15, aligned (+0.32) | late blocks 29–31, aligned (+0.39) |
+| carrying blocks | blk3 (90% of Δquality) + blk15 | blk3 (~all of Δquality) + blk31 | blk14–15, aligned (+0.32) | late blocks 29–31, aligned (+0.39) |
 
 ### Per-block quality decomposition (primary packed run, final checkpoint — Jul 17 readout)
 
-The layer-resolved quality ledger term, quantifying "locus" above (previously the exact
+The layer-resolved quality ledger term, quantifying "carrying blocks" above (previously the exact
 numbers lived only in the swap appendix). Sum = the Σquality row; per-block shares can
 exceed 100% where other blocks are net positive.
 
@@ -62,11 +62,11 @@ exceed 100% where other blocks are net positive.
 
 Two findings this table settles (superseding the earlier "blk3 at all scales" reading):
 
-- The quality LOCUS is scale-dependent within the pythia family, not "the same absolute
+- WHICH BLOCK carries the quality collapse is scale-dependent within the pythia family, not "the same absolute
   block index 3": blk3 dominates at 1b/6.9b, blk5 at 410m, and at 160m (and nanochat-d12)
   the collapse splits between an early block and the FINAL block. The confirmed part of the
   nanochat prediction is the carrier TERM (quality, Σ −6.56, interference crossing zero),
-  not a blk3 locus.
+  not blk3 specifically.
 
 - pythia-160m's signature is MIXED, not cleanly quality-carried: Σinterference ends at
   −2.93 alongside Σquality −3.89 and never crosses zero — the clean pythia signature
@@ -82,7 +82,7 @@ Figure: showcase §3 per-block quality panel (7 models).
 **Answer:** yes — the family split is consistent at both scales of both families.
 
 - No rogue write (all write RankMe 1150–1420; late blocks ~350 at worst),
-  interference-driven, late-locus with mutually aligned final writes, and the same late
+  interference-driven, carried by the late blocks with mutually aligned final writes, and the same late
   re-entropy rise (S_final 5.75@320k → 6.08@1.8M).
 
 - Drift metrics add: mean CKA-drift starts at **0.12** (vs pythia-1b's mildest-point 0.82 —
@@ -105,7 +105,7 @@ Figure: showcase §3 per-block quality panel (7 models).
 write that collapses to rank ≈ 1–2 exactly at the RankMe peak, then grows in energy for
 the rest of training.
 
-**Status:** confirmed at 1b and 6.9b; the locus of that write is scale-dependent (per-block
+**Status:** confirmed at 1b and 6.9b; which block carries it is scale-dependent (per-block
 table above).
 
 - In BOTH pythia models, blk3.mlp's write starts healthy (RankMe ≈ 470 / 830, trace ≈ 0.27×
@@ -119,7 +119,7 @@ table above).
 > 22.6× at 1b / 3.7× at 6.9b by the final checkpoint (from ≈ 0.27× at init). Every other
 > mention of this number in the repo should point here.
 
-- Locus across the family (corrected picture): blk3 dominates at both 1b and 6.9b — the
+- The carrying block across the family (corrected picture): blk3 dominates at both 1b and 6.9b — the
   same absolute block index at 16 vs 32 blocks — but the per-block quality table shows the
   invariant does NOT extend down-family: the dominant block is blk5 at 410m, and at 160m
   (and nanochat-d12) the collapse splits between an early block and the final block. The
@@ -171,7 +171,7 @@ interference.
   revision holds for **Pythia** — the hypothesis needs a family split, which is itself the
   finding: *the ledger term that carries compression is architecture-dependent.*
 
-- **H1.2:** original (late-layer locus) holds for OLMo; refuted for Pythia (blk3 early +
+- **H1.2:** original (carried by the late layers) holds for OLMo; refuted for Pythia (blk3 early +
   final-block cancellation). Head-of-spectrum targeting confirmed for Pythia's last write.
 
 - **H1.3:** Pythia's last write behaves toy-like (head-mass → 0.92); OLMo's less so (0.63,
@@ -220,6 +220,13 @@ RankMe of the final-stream centered spectrum with the top-$k$ directions removed
 
 ## Padded-vs-packed (last-token geometry; all four twins complete, 16,384 rows)
 
+- **Final-layer ΔS sign flip (user observation, Jul 19 — the evidence for the
+  conditional-final-layers interpretation, final_report §2.3):** in packed geometry pythia's
+  final layers' ledger ΔS_k ADD entropy; in padded last-token geometry the same layers
+  REMOVE it (layer-contribution ledger stacks, experiments vs experiments_padded). Same
+  layers, opposite roles, keyed to the measured position: the per-layer terms are
+  conditional on the output's needs, not layer-intrinsic.
+
 **Question:** do the family stories survive the change from packed all-token to padded
 last-token geometry?
 
@@ -244,7 +251,7 @@ last-token geometry?
 
 - **OLMo padded twins: geometry-robust replicas of their packed stories.** Both scales:
   quality recovers (1B −3.8 → −0.5; 7B −6.0 → −1.0) while interference falls (→ −5.3 /
-  −6.5), locus in the last 2–3 blocks with mutually *aligned* writes (+0.33 / +0.37), no
+  −6.5), carried by the last 2–3 blocks with mutually *aligned* writes (+0.33 / +0.37), no
   rogue write (all write RankMe ≳ 900 except late ~200–280), same late re-entropy rise, and
   OLMo-1B's drift double-dip (0.128 bottom → 0.947 → second dip ~0.84 at the RankMe peak;
   same checkpoint-spacing caveat as the drift note above).
@@ -521,7 +528,7 @@ reproduce this doc's numbers exactly.
 |---|---|---|---|---|---|---|
 | 1 | Compression driver: Σquality trajectory | −0.54 → min **−6.34** (final −6.34) | −0.48 → min **−6.35** (final −6.34) | dip −3.96@5k → recovers to **−0.95** | dip −4.05@5k → recovers to **−1.07** | **MODEL** |
 | 1 | Σinterference trajectory | −3.48 → **+2.33** (crosses 0) | −3.54 → **+2.49** (crosses 0) | → **−4.16** (falling) | → **−4.36** (falling) | **MODEL** |
-| 1 | Quality locus | blk3 carries it (−6.26 of −6.34) | blk3 carries it (−6.25 of −6.34) | diffuse (worst −0.31) | diffuse (worst −0.40) | **MODEL** |
+| 1 | Quality carrying block | blk3 carries it (−6.26 of −6.34) | blk3 carries it (−6.25 of −6.34) | diffuse (worst −0.31) | diffuse (worst −0.40) | **MODEL** |
 | 2 | Rogue write: min final write RankMe | blk3: **1.2** | blk3: **1.2** | blk14: 352 (no block < 100) | blk14: 284 (no block < 100) | **MODEL** |
 | 2 | Rogue trace ratio (write/stream, final) | blk3: **22.6×** | blk3: **24.4×** | max 0.50 (blk14) | max 0.50 (blk14) | **MODEL** |
 | 2 | Collapse timing | 46→2.5 over 2k→5k (RankMe peak) | 46→2.4 over 2k→5k (RankMe peak) | — | — | **MODEL** |

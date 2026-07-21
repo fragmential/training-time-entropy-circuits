@@ -65,9 +65,9 @@ forbids an outsized token-activated write by construction. The evidence chain:
   sequential wiring, no write-norm → it shows the complete Pythia signature
   (quality-carried, Σquality −0.07 → −6.43, Σχ stable ~2.8, interference crossing zero;
   rank-collapsed early-mid writes blk3.mlp RankMe 2.7 / blk4 RankMe 1.7; blk10 rank
-  restoration; blk11 head-mass 0.95). Locus note: nanochat's largest single quality
+  restoration; blk11 head-mass 0.95). Note: nanochat's largest single quality
   contributor is the FINAL block (blk11: −2.74 of −6.56, 42%; blk3+blk4 53% together) —
-  the confirmed prediction is the carrier TERM, not a blk3 locus.
+  the confirmed prediction is the carrier TERM, not blk3 specifically.
 
 Robust negative: interference never becomes the carrier under any toy knob (24 runs,
 8 cells), and parallel-vs-sequential wiring selects nothing — OLMo's own mode needs an
@@ -89,13 +89,13 @@ ways. [showcase §8; dig_findings "Compression valleys"]
 
 ### Hypothesis scoreboard
 
-Details: research_questions.md (registry) and §2.3.
+Details: research_questions.md (registry).
 
 | hypothesis | verdict |
 |---|---|
 | H1.0 independent-vs-emergent | **emergent** in both families (never per-write phase turnover), by different routes |
 | H1.1 transition = χ→I dominance flip | **refuted as stated**; replaced: compression = concentration terms (quality in Pythia/nanochat, interference in OLMo-2), χ stable everywhere |
-| H1.2 late-layer locus | **holds for OLMo-2, refuted for Pythia** (early sink write + late cancellation) |
+| H1.2 carried by the late layers | **holds for OLMo-2, refuted for Pythia** (early sink write + late cancellation) |
 | H1.3 toy-like last write | **holds for Pythia** (head-mass 0.26→0.92), weaker for OLMo-2 (0.63, falling) |
 | H1.4 write-norm selects the mode | **CONFIRMED, all 3 deciders** (toy suppression; data swap; nanochat prediction) |
 | H1.5 sink direction inert at output | **REFUTED**; reconciled with Sun et al via the intervention triptych (zero +1.04 / global-mean +0.74 / token-conditional +0.43): their bias account holds at newline positions (+0.09), but the within-class spike variance is READ BY THE NEXT POSITION (+1.15) — a functional role their constant-bias account does not describe. LayerNorm perturbation remains a recorded confound. Details: dig_findings "interventions" |
@@ -181,7 +181,28 @@ everywhere). A rank-one write and several mutually-aligned writes are the same g
 landing in different decomposition bins; the family difference is *where the concentration
 lives*, not whether the law holds.
 
-### 2.3 Relation to Li et al (what is theirs, what is new)
+### 2.3 Leading interpretation: conditional final layers
+
+**Claim (leading interpretation; not yet counterfactually tested — registry: RQ1c, with
+the planned deciders as its sub-questions).** The final layers'
+entropy contributions are not fixed roles: a layer's effect is conditional on the stream
+it receives and on what the output must become. The final layers do whatever is needed to
+move the representation into a space suitable for being unembedded — one that conforms to
+the expected output entropy. The per-layer decomposition terms describe this behaviour
+exactly, but "this layer removes entropy" must be read as conditional, not intrinsic.
+
+**Evidence:** comparing per-block ΔS between packed all-token and padded last-token
+geometry, pythia's final layers switch from ADDING entropy to REMOVING it — the same
+layers, opposite direction, depending on the measured position (showcase §3 per-block ΔS
+pair; dig_findings padded-vs-packed). This directly weakens any reading of those layers
+as adding or removing entropy for its own sake.
+
+**Where this points:** the compression story is an attribute of the final-layer
+bottleneck representation. Properties of the unembedding itself may hint at what its
+input (the final stream) must look like — as appears to be the case in the toy model.
+Hence the unembedding program (plan.md item 1) and the counterfactual program (item 2).
+
+### 2.4 Relation to Li et al (what is theirs, what is new)### 2.4 Relation to Li et al (what is theirs, what is new)
 
 Theirs: the phase phenomenology; compression = "anisotropic concentration"; the toy showing
 selection bias pushes information into dominant directions. New here: (i) the phases

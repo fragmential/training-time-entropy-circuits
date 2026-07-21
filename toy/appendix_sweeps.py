@@ -91,7 +91,8 @@ def main(out_path: str = "data/results/toy/appendix_sweeps.pt") -> None:
                   for d in (0.316, 1e-1, 0.0316, 1e-2, 0.00316, 1e-3)
                   for s in range(10)},
         "rx": {f"{rx:g}": run(*_init(rx=rx)) for rx in (0.0, -0.1, -0.25, -0.5)},
-        "homotopy": {f"{a:g}": run(*_init(iid_mix=a)) for a in (0.0, 0.25, 0.5, 1.0)},
+        "homotopy": {f"{a:g}/s{s}": run(*_init(iid_mix=a, seed=s))
+                     for a in (0.0, 0.5, 0.75, 0.875, 1.0) for s in range(3)},
         "long": {"canonical": run(*_init(), steps=3000)},
         "mse_skew": {f"s{s}": mse_skew_check(seed=s) for s in (0, 1, 2)},
     }

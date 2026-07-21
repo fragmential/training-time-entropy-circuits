@@ -4,7 +4,7 @@ What was actually computed for the RQ2 experiments, step by step, with every for
 own line. Goal: readable in a few minutes, trivially translatable to code.
 
 **Status note (Jul 13):** RQ2's excess-mass *verdicts* are parked — the documented
-aggregates mixed acts and grads quantities (final_report §4; redo: plan.md item 1). The
+aggregates mixed acts and grads quantities (final_report §4; redo: plan.md item 10). The
 methods here remain valid and are the redo's blueprint; H2.1's refutation (§3) stands
 independently of the contamination.
 

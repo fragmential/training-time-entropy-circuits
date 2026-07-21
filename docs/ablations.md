@@ -52,7 +52,7 @@ guards, what was done, the outcome, and where the evidence lives. Companion to
   compression robust 4/5 jitter seeds under the paper's constructed init (the earlier ~25%
   seed-dependence was an iid-init artifact — toy.md §3).
 - **Third architecture (DONE)**: nanochat-d12 shows the full Pythia signature —
-  quality-carried compression, locus split between the early and final blocks — so QK-norm
+  quality-carried compression, carried by a split between the early and final blocks — so QK-norm
   without write-norm does not prevent the mechanism (H1.4 out-of-family confirmation).
 - **Negative controls (toy)**: uniform labels / no bottleneck / MSE ×2 all remove compression,
   as the paper claims; H3.3 representativeness guard (max w_k) checked for every variant.

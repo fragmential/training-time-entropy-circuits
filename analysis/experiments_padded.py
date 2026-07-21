@@ -147,12 +147,29 @@ grid_show()
 # (tr Cov(c_k, r) / tr Σ_r — coupling to the rest of the stream included; the gap to 1.0 is
 # the embedding stream's share). Signed by definition, positive in practice: r contains c_k,
 # so a write must be cancelled by more than its own energy to go negative.
+MODELS_LC = filter_model_names
+NB_BS = n_blocks_bs
+CFG_BS = lambda m: BLOCK_SAMPLES
+
 _rr_srcs = lambda model: [(BLOCK_SAMPLES, (f'blk{l}.{s}.out', 'block_residual_coupling'), f'{s} {l}')
                           for l in range(n_blocks_bs[model]) for s in ('attn', 'mlp')]
 grid_start(ncols=2, title='Layer contribution — share of final-stream energy (R over r)')
 for model in filter_model_names:
     plot_layer_contribution(model, _rr_srcs(model), yvar='R_over_r', normalize=False,
-                            title=get_model_label(model))
+                            title=get_model_label(model), remainder_label='embedding (residual)')
+grid_show()
+
+# %%
+# Share of residual energy from just the traces (previously missing in the padded twin):
+# uncentered write traces normalized over writes + the embedding stream; gray dashed = the
+# embedding's share.
+_tr_srcs = lambda model: [(BLOCK_SAMPLES, (f'blk{l}.{s}.out', 'acts_uncentered'), f'{s} {l}')
+                          for l in range(n_blocks_bs[model]) for s in ('attn', 'mlp')]
+grid_start(ncols=2, title='Layer contribution — share of residual energy (trace)')
+for model in filter_model_names:
+    plot_layer_contribution(model, _tr_srcs(model), yvar='trace', normalize=True,
+                            title=get_model_label(model),
+                            baseline_src=(BLOCK_SAMPLES, ('blk0.attn.in', 'acts_uncentered'), 'embedding'))
 grid_show()
 
 # %%
@@ -166,6 +183,86 @@ for model in filter_model_names:
     plot_layer_contribution(model, _ledger_srcs(model), yvar='delta_s', normalize=False,
                             title=get_model_label(model))
 grid_show()
+
+# %% [markdown]
+# #### Ledger contribution stacks (showcase implementation — sign-crossing fills)
+# Dotted gray = the embedding stream's own entropy S_emb(t). NB vs the packed twin:
+# pythia's final layers' ΔS flips sign here (final_report §2.3, conditional final layers).
+
+# %%
+def ledger_stack(model):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    cfg = CFG_BS(model)
+    terms = {y: np.sum([_lib.get_ys(cfg, model, (f'blk{l}', 'block_ledger'), y)[0]
+                        for l in range(NB_BS[model])], axis=0)
+             for y in ('chi', 'quality', 'interference')}
+    xs = np.asarray(_lib.get_xs_tokens(
+        model, _lib.get_ys(cfg, model, ('blk0', 'block_ledger'), 'chi')[1]), float)
+    keep = xs > 0
+    xs, terms = xs[keep], {k: np.asarray(v, float)[keep] for k, v in terms.items()}
+    # refine the grid with sign crossings so fills pinch to zero instead of twisting
+    lx = np.log(xs)
+    cross = []
+    for v in terms.values():
+        i = np.nonzero(np.signbit(v[:-1]) != np.signbit(v[1:]))[0]
+        cross.append(lx[i] + v[i] / (v[i] - v[i + 1]) * (lx[i + 1] - lx[i]))
+    grid = np.unique(np.concatenate([lx, *cross]))
+    terms = {k: np.interp(grid, lx, v) for k, v in terms.items()}
+    gx = np.exp(grid)
+    plt.figure(figsize=(8, 4))
+    pos, neg = np.zeros(len(gx)), np.zeros(len(gx))
+    for name, c in (('chi', 'tab:green'), ('quality', 'tab:red'), ('interference', 'tab:purple')):
+        up, dn = np.clip(terms[name], 0, None), np.clip(terms[name], None, 0)
+        plt.fill_between(gx, pos, pos + up, label=name, color=c, alpha=0.55, lw=0)
+        plt.fill_between(gx, neg, neg + dn, color=c, alpha=0.55, lw=0)
+        pos, neg = pos + up, neg + dn
+    plt.plot(gx, sum(terms.values()), 'k', lw=2.5, label='ΔS total')
+    es, esteps = _lib.get_ys(cfg, model, ('blk0.attn.in', 'acts_centered'), 'matrix_entropy')
+    if es is not None:
+        exs = np.asarray(_lib.get_xs_tokens(model, esteps), float)
+        ek = exs > 0
+        plt.plot(exs[ek], np.asarray(es, float)[ek], color='0.4', ls=':', lw=1.5,
+                 label='S(embedding stream)')
+    plt.xscale('log'); plt.xlabel('tokens'); plt.ylabel('rank entropy')
+    plt.legend(fontsize=8); plt.title(f'Ledger contributions — {get_model_label(model)}')
+    plt.show()
+
+for model in MODELS_LC:
+    ledger_stack(model)
+
+# %% [markdown]
+# #### Per-block ledger terms over training (showcase formatting): ΔS, quality, overlap
+
+# %%
+def term_per_block(models, term):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from matplotlib.cm import ScalarMappable
+    fig, axes = plt.subplots(2, 4, figsize=(19, 8))
+    for ax, model in zip(axes.flat, models):
+        L = NB_BS[model]
+        for l in range(L):
+            ys, steps = _lib.get_ys(CFG_BS(model), model, (f'blk{l}', 'block_ledger'), term)
+            xs = np.asarray(_lib.get_xs_tokens(model, steps), float)
+            keep = xs > 0
+            ax.plot(xs[keep], np.asarray(ys, float)[keep], lw=1.5,
+                    color=plt.get_cmap('viridis')(l / (L - 1)))
+        ax.axhline(0, color='gray', lw=0.8)
+        ax.set(xscale='log', xlabel='tokens', title=get_model_label(model))
+        plt.colorbar(ScalarMappable(cmap='viridis'), ax=ax, pad=0.01,
+                     ticks=[]).set_label(f'block (0 → {L - 1})', fontsize=8)
+    for ax in axes.flat[len(models):]:
+        ax.axis('off')
+    axes[0, 0].set_ylabel(f'per-block {term}')
+    axes[1, 0].set_ylabel(f'per-block {term}')
+    fig.suptitle(f'{term} ledger term per block')
+    plt.tight_layout(); plt.show()
+
+import numpy as np
+import matplotlib.pyplot as plt
+for _term in ('delta_s', 'quality', 'chi'):
+    term_per_block(MODELS_LC, _term)
 
 
 # %% [markdown]
