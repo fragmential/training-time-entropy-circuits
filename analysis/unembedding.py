@@ -6,7 +6,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.19.4
+#       jupytext_version: 1.19.5
 #   kernelspec:
 #     display_name: Python 3
 #     language: python
@@ -497,3 +497,81 @@ else:
         plt.tight_layout(); plt.show()
         caption(f'share_k per checkpoint at {leaf}, one panel per model, k = 1…512 '
                 f'(light → dark); dotted = chance k/d. Descriptive only.')
+
+# %% [markdown]
+# ### CKA alignment: stream covariance vs corrected head Grams
+#
+# From data/results/unembedding_cka.pt (oneoff_scripts/unembedding_cka.py): the k-free
+# statistic s = tr(Σc·G) / (‖Σc‖·‖G‖) per checkpoint, leaf, and head correction
+# (docs/cka_alignment.md). Σc is the centered stream covariance from the final_stream_svd
+# files; G = W̃ᵀW̃. Shaded bands = the rotated-W controls (min–max over 3 seeds) for
+# standard and freq_centered — the spectrum-matched chance floor; the quantity to read is
+# the gap to the matching solid line, not the absolute level.
+
+# %%
+CKA_PATH = 'data/results/unembedding_cka.pt'
+if not os.path.exists(CKA_PATH):
+    print('unembedding_cka.pt not present yet — job pending')
+else:
+    CK = torch.load(CKA_PATH, weights_only=False)
+    CKEYS = ('standard', 'freq_centered', 'mean_deflated', 'freq_mean')
+    CCOLORS = ('tab:blue', 'tab:orange', 'tab:green', 'tab:purple')
+    for leaf in ('before_final_norm', 'after_final_norm'):
+        fig, axes = plt.subplots(2, 4, figsize=(19, 8))
+        for ax, (model, by) in zip(axes.flat, CK.items()):
+            steps = sorted(by)
+            xs = np.asarray(_lib.get_xs_tokens(model, steps), float)
+            keep = xs > 0
+            for v, c in zip(CKEYS, CCOLORS):
+                ys = np.asarray([by[s][leaf][v] for s in steps])
+                ax.plot(xs[keep], ys[keep], lw=1.6, color=c, label=v)
+            for v, c in (('standard', 'tab:blue'), ('freq_centered', 'tab:orange')):
+                rot = np.asarray([[by[s][leaf][f'{v}_rot{r}'] for r in (0, 1, 2)] for s in steps])
+                ax.fill_between(xs[keep], rot[keep].min(1), rot[keep].max(1), color=c,
+                                alpha=0.25, lw=0, label=f'{v} rotated')
+            ax.set(xscale='log', xlabel='tokens', title=model)
+            ax.legend(fontsize=6)
+        for ax in axes.flat[len(CK):]:
+            ax.axis('off')
+        axes[0, 0].set_ylabel(r'CKA$(\Sigma_c, \tilde{W}^\top\tilde{W})$')
+        axes[1, 0].set_ylabel(r'CKA$(\Sigma_c, \tilde{W}^\top\tilde{W})$')
+        fig.suptitle(f'Stream ↔ unembedding CKA over training — {leaf}')
+        plt.tight_layout(); plt.show()
+        caption(f'CKA between the centered stream covariance at {leaf} and the head Gram '
+                f'under each correction (solid lines), with the rotated-W controls as '
+                f'shaded min–max bands (3 seeds) for standard and freq_centered. One '
+                f'panel per model, tokens on the x-axis. Descriptive only.')
+
+# %%
+# The identical figures on the padded (last-token) stream set — Σc from
+# final_stream_svd_padded via unembedding_cka.py --stream_dir; no nanochat (no padded data).
+CKA_PATH_P = 'data/results/unembedding_cka_padded.pt'
+if not os.path.exists(CKA_PATH_P):
+    print('unembedding_cka_padded.pt not present yet — job pending')
+else:
+    CKP = torch.load(CKA_PATH_P, weights_only=False)
+    for leaf in ('before_final_norm', 'after_final_norm'):
+        fig, axes = plt.subplots(2, 4, figsize=(19, 8))
+        for ax, (model, by) in zip(axes.flat, CKP.items()):
+            steps = sorted(by)
+            xs = np.asarray(_lib.get_xs_tokens(model, steps), float)
+            keep = xs > 0
+            for v, c in zip(CKEYS, CCOLORS):
+                ys = np.asarray([by[s][leaf][v] for s in steps])
+                ax.plot(xs[keep], ys[keep], lw=1.6, color=c, label=v)
+            for v, c in (('standard', 'tab:blue'), ('freq_centered', 'tab:orange')):
+                rot = np.asarray([[by[s][leaf][f'{v}_rot{r}'] for r in (0, 1, 2)] for s in steps])
+                ax.fill_between(xs[keep], rot[keep].min(1), rot[keep].max(1), color=c,
+                                alpha=0.25, lw=0, label=f'{v} rotated')
+            ax.set(xscale='log', xlabel='tokens', title=model)
+            ax.legend(fontsize=6)
+        for ax in axes.flat[len(CKP):]:
+            ax.axis('off')
+        axes[0, 0].set_ylabel(r'CKA$(\Sigma_c, \tilde{W}^\top\tilde{W})$')
+        axes[1, 0].set_ylabel(r'CKA$(\Sigma_c, \tilde{W}^\top\tilde{W})$')
+        fig.suptitle(f'Stream ↔ unembedding CKA over training — {leaf} (padded, last token)')
+        plt.tight_layout(); plt.show()
+        caption(f'The identical statistic on the padded last-token stream set at {leaf}: '
+                f'CKA between the centered stream covariance and the head Gram per '
+                f'correction, rotated-W controls shaded. No nanochat (no padded data). '
+                f'Descriptive only.')

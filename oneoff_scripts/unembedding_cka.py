@@ -51,6 +51,7 @@ def _cka(Sc: torch.Tensor, G: torch.Tensor) -> float:
 
 
 def main(out_path: str = "data/results/unembedding_cka.pt",
+         stream_dir: str = STREAM_DIR, vh_dir: str = VH_FREQ_DIR,
          max_checkpoints: int = 20, spacing: str = "log") -> None:
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     out = torch.load(out_path, weights_only=False) if os.path.exists(out_path) else {}
@@ -58,13 +59,15 @@ def main(out_path: str = "data/results/unembedding_cka.pt",
         config = get_model_config(name)
         head = _fam(config).head
         short = name.split("/")[-1]
+        if not os.path.isdir(os.path.join(stream_dir, short)):
+            continue                                     # e.g. nanochat in the padded set
         done = out.setdefault(short, {})
-        os.makedirs(os.path.join(VH_FREQ_DIR, short), exist_ok=True)
+        os.makedirs(os.path.join(vh_dir, short), exist_ok=True)
         for step, revision, repo in get_checkpoint_schedule(config, max_checkpoints, spacing):
-            vh_path = os.path.join(VH_FREQ_DIR, short, f"step{step}.pt")
+            vh_path = os.path.join(vh_dir, short, f"step{step}.pt")
             if step in done and os.path.exists(vh_path):
                 continue
-            sp = f"{STREAM_DIR}/{short}/step{step}.pt"
+            sp = f"{stream_dir}/{short}/step{step}.pt"
             try:                                        # fsvd files may be mid-rewrite; retry later
                 if not zipfile.is_zipfile(sp):
                     continue
@@ -85,7 +88,8 @@ def main(out_path: str = "data/results/unembedding_cka.pt",
                 continue                                # picked up by a later rerun
             m = w.T @ _freq(config.family, w.shape[0], dev)
             wf = w - m[None, :]
-            torch.save(torch.linalg.svd(wf, full_matrices=False)[2].cpu(), vh_path)
+            if not os.path.exists(vh_path):              # head is stream-independent; save once
+                torch.save(torch.linalg.svd(wf, full_matrices=False)[2].cpu(), vh_path)
             d = w.shape[1]
             Qs = []
             for s in ROT_SEEDS:
