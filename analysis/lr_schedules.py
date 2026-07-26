@@ -1,0 +1,159 @@
+# ---
+# jupyter:
+#   jupytext:
+#     formats: ipynb,py:percent
+#     text_representation:
+#       extension: .py
+#       format_name: percent
+#       format_version: '1.3'
+#       jupytext_version: 1.19.5
+#   kernelspec:
+#     display_name: representation-geometry
+#     language: python
+#     name: python3
+# ---
+
+# %% [markdown]
+# # Learning-rate schedules of the model families
+# Reconstructed (not measured) LR-vs-tokens curves for the three families, log-scale token axis.
+# Sources:
+# - **Pythia** (paper Table 1 + GPT-NeoX configs): per-size peak LR, linear warmup over 1% of the
+#   143 000 steps (2 097 152 tokens/step ⇒ ~3B warmup tokens), cosine decay to 10% of peak at 300B.
+#   14m/31m are not in the paper table; their GitHub configs use 1.0e-3 like 70m.
+# - **OLMo-2** (official stage-1 YAMLs, allenai/OLMo configs/official-{0425,1124}): linear warmup
+#   from 0 over 8 388 608 000 tokens, cosine to 10% of peak with t_max = 5T, TRUNCATED at stage-1
+#   end (1B: 4T, peak 4.0e-4; 7B: 3.9T, peak 3.0e-4), then the stage-2 mid-training anneal:
+#   linear to 0 over 50B tokens (dashed). The checkpoints we collect are stage-1 revisions.
+# - **nanochat-d12** (fork scripts/base_train.py): NO warmup; constant LR for the first 80% of
+#   iterations then linear warmdown to 0 over the final 20%. Three param groups — Muon matrix
+#   0.02, AdamW embedding 0.2, AdamW unembedding 0.004 — with the AdamW LRs scaled by
+#   (dmodel/768)^-1/2 = 1 at d12. Run length 7080 steps × 524 288 tokens/step ≈ 3.71B tokens.
+
+# %%
+import matplotlib.pyplot as plt
+import numpy as np
+
+# %% [markdown]
+# ### Pythia — cosine with 1% warmup, floor at 10% of peak
+
+# %%
+PYTHIA_TOKENS_PER_STEP = 2_097_152
+PYTHIA_TOTAL_STEPS = 143_000
+PYTHIA_TOTAL_TOKENS = PYTHIA_TOTAL_STEPS * PYTHIA_TOKENS_PER_STEP   # ≈ 300B
+PYTHIA_WARMUP_TOKENS = 0.01 * PYTHIA_TOTAL_TOKENS                   # 1430 steps
+
+PYTHIA_PEAK_LR = {                       # paper Table 1; 14m/31m from the GitHub NeoX configs
+    '14m': 1.0e-3, '31m': 1.0e-3, '70m': 1.0e-3, '160m': 6.0e-4, '410m': 3.0e-4,
+    '1b': 3.0e-4, '1.4b': 2.0e-4, '2.8b': 1.6e-4, '6.9b': 1.2e-4, '12b': 1.2e-4}
+
+
+def pythia_lr(tokens, peak):
+    """Linear warmup to peak, cosine decay to 0.1*peak at end of training."""
+    t = np.asarray(tokens, dtype=float)
+    warm = t / PYTHIA_WARMUP_TOKENS
+    prog = np.clip((t - PYTHIA_WARMUP_TOKENS) / (PYTHIA_TOTAL_TOKENS - PYTHIA_WARMUP_TOKENS), 0, 1)
+    cos = 0.1 + 0.9 * 0.5 * (1 + np.cos(np.pi * prog))
+    return peak * np.where(t < PYTHIA_WARMUP_TOKENS, warm, cos)
+
+
+toks = np.geomspace(1e6, PYTHIA_TOTAL_TOKENS, 4000)
+fig, ax = plt.subplots(figsize=(8, 4.5))
+colors = plt.cm.viridis(np.linspace(0, 0.9, len(PYTHIA_PEAK_LR)))
+for (name, peak), c in zip(PYTHIA_PEAK_LR.items(), colors):
+    ax.plot(toks, pythia_lr(toks, peak), color=c, label=f'pythia-{name} ({peak:.1e})')
+ax.set(xscale='log', xlabel='pretraining tokens', ylabel='learning rate',
+       title='Pythia — 1% linear warmup, cosine to 10% of peak over 300B tokens')
+ax.legend(fontsize=8, ncol=2)
+ax.grid(alpha=0.3)
+plt.tight_layout()
+
+# %% [markdown]
+# ### OLMo-2 — warmup + cosine with t_max = 5T, truncated at stage-1 end, stage-2 anneal to 0
+# Both sizes share the token-denominated schedule shape (t_warmup = 8.39B, alpha_f = 0.1,
+# t_max = 5T); they differ in peak LR and where stage 1 stops. Solid = stage 1 (the
+# checkpoints used in this project), dashed = the 50B-token stage-2 linear anneal to 0.
+
+# %%
+OLMO_WARMUP_TOKENS = 8_388_608_000
+OLMO_T_MAX = 5e12
+OLMO_ALPHA_F = 0.1
+OLMO_STAGE2_TOKENS = 50e9
+OLMO = {  # name: (peak lr, stage-1 end in tokens)
+    'OLMo-2-0425-1B': (4.0e-4, 4.0e12),
+    'OLMo-2-1124-7B': (3.0e-4, 3.9e12)}
+
+
+def olmo_lr(tokens, peak):
+    """Linear warmup from 0, cosine toward alpha_f*peak at t_max (never reached: truncated)."""
+    t = np.asarray(tokens, dtype=float)
+    warm = t / OLMO_WARMUP_TOKENS
+    prog = np.clip((t - OLMO_WARMUP_TOKENS) / (OLMO_T_MAX - OLMO_WARMUP_TOKENS), 0, 1)
+    cos = OLMO_ALPHA_F + (1 - OLMO_ALPHA_F) * 0.5 * (1 + np.cos(np.pi * prog))
+    return peak * np.where(t < OLMO_WARMUP_TOKENS, warm, cos)
+
+
+fig, ax = plt.subplots(figsize=(8, 4.5))
+for (name, (peak, s1_end)), c in zip(OLMO.items(), ('tab:blue', 'tab:orange')):
+    t1 = np.geomspace(1e7, s1_end, 4000)
+    ax.plot(t1, olmo_lr(t1, peak), color=c, label=f'{name} ({peak:.1e})')
+    t2 = np.linspace(s1_end, s1_end + OLMO_STAGE2_TOKENS, 200)
+    lr_end = olmo_lr(s1_end, peak)
+    ax.plot(t2, lr_end * (1 - (t2 - s1_end) / OLMO_STAGE2_TOKENS), color=c, ls='--',
+            label=f'{name} stage-2 anneal')
+ax.set(xscale='log', xlabel='pretraining tokens', ylabel='learning rate',
+       title='OLMo-2 — 8.39B-token warmup, cosine (t_max = 5T, floor 10%), truncated at stage-1 end')
+ax.legend(fontsize=9)
+ax.grid(alpha=0.3)
+plt.tight_layout()
+
+# %% [markdown]
+# ### nanochat-d12 — no warmup, constant then linear warmdown over the final 20%
+# Per-group LRs (Muon matrix / AdamW embedding / AdamW unembedding); the (dmodel/768)^-1/2
+# AdamW scale is exactly 1 at d12. y is log-scaled — the groups span 0.004–0.2.
+
+# %%
+D12_STEPS = 7080                       # num_iterations of the d12 run (final checkpoint step)
+D12_TOKENS_PER_STEP = 524_288
+D12_TOTAL_TOKENS = D12_STEPS * D12_TOKENS_PER_STEP
+WARMDOWN_RATIO = 0.2
+D12_GROUP_LR = {'embedding (AdamW)': 0.2, 'matrix (Muon)': 0.02, 'unembedding (AdamW)': 0.004}
+
+
+def nanochat_multiplier(tokens):
+    t = np.asarray(tokens, dtype=float)
+    start = (1 - WARMDOWN_RATIO) * D12_TOTAL_TOKENS
+    return np.where(t <= start, 1.0, (D12_TOTAL_TOKENS - t) / (WARMDOWN_RATIO * D12_TOTAL_TOKENS))
+
+
+toks = np.geomspace(1e6, D12_TOTAL_TOKENS, 4000)
+fig, ax = plt.subplots(figsize=(8, 4.5))
+for (name, lr), c in zip(D12_GROUP_LR.items(), ('tab:green', 'tab:blue', 'tab:red')):
+    ax.plot(toks, lr * nanochat_multiplier(toks), color=c, label=f'{name}: {lr}')
+ax.set(xscale='log', yscale='log', xlabel='pretraining tokens', ylabel='learning rate',
+       title=f'nanochat-d12 — constant, linear warmdown to 0 over final 20% '
+             f'({D12_STEPS} steps ≈ {D12_TOTAL_TOKENS/1e9:.2f}B tokens)')
+ax.legend(fontsize=9)
+ax.grid(alpha=0.3, which='both')
+plt.tight_layout()
+
+# %% [markdown]
+# ### All families on one axis (log–log)
+# The comparison the checkpoint sweeps actually face: at matched token counts the families sit
+# at very different points of their schedules — Pythia/OLMo checkpoints late in the sweep are
+# deep into cosine decay, while nanochat runs at full LR until its final ~740M tokens.
+
+# %%
+fig, ax = plt.subplots(figsize=(8, 4.5))
+for name, peak in (('160m', 6e-4), ('1b', 3e-4), ('6.9b', 1.2e-4)):
+    t = np.geomspace(1e6, PYTHIA_TOTAL_TOKENS, 3000)
+    ax.plot(t, pythia_lr(t, peak), label=f'pythia-{name}')
+for name, (peak, s1_end) in OLMO.items():
+    t = np.geomspace(1e7, s1_end, 3000)
+    ax.plot(t, olmo_lr(t, peak), label=name)
+t = np.geomspace(1e6, D12_TOTAL_TOKENS, 3000)
+ax.plot(t, 0.02 * nanochat_multiplier(t), label='nanochat-d12 (matrix/Muon)')
+ax.set(xscale='log', yscale='log', xlabel='pretraining tokens', ylabel='learning rate',
+       title='LR schedules across families (log–log)')
+ax.legend(fontsize=9)
+ax.grid(alpha=0.3, which='both')
+plt.tight_layout()

@@ -6,9 +6,9 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.19.4
+#       jupytext_version: 1.19.5
 #   kernelspec:
-#     display_name: representation-geometry (3.14.0)
+#     display_name: representation-geometry (3.14.6.final.0)
 #     language: python
 #     name: python3
 # ---
@@ -85,19 +85,19 @@ PAIRINGS = (('', ''), ('attn', 'attn'), ('mlp', 'mlp'), ('attn', 'mlp'))
 import numpy as np
 import matplotlib.pyplot as plt
 
-def _final_rankme_compare():
+def _final_rankme_compare(hook='after_final_norm'):
     panels = ((BLOCK_SAMPLES, 'Padded: 16,384 last-token rows'),
               (PACKED_SAMPLES, 'Packed: 262,144 tokens'))
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
     for ax, (src, title) in zip(axes, panels):
         for model in filter_model_names:
-            ys, steps = _lib.get_ys(src, model, ('after_final_norm', 'acts_centered'), 'rankme')
+            ys, steps = _lib.get_ys(src, model, (hook, 'acts_centered'), 'rankme')
             xs = np.asarray(_lib.get_xs_tokens(model, steps), dtype=float)
             keep = xs > 0   # step 0 has zero tokens, unplottable on log-x
             ax.plot(xs[keep], np.asarray(ys)[keep], marker='o', ms=3, lw=2,
                     label=get_model_label(model))
         ax.set(xscale='log', title=title, xlabel='tokens')
-        ax.set_ylabel('RankMe (after final norm, centered)')
+        ax.set_ylabel(f'RankMe ({hook.replace('_',' ')}, centered)')
     lo = min(ax.get_ylim()[0] for ax in axes)
     hi = max(ax.get_ylim()[1] for ax in axes)
     for ax in axes:
@@ -108,6 +108,7 @@ def _final_rankme_compare():
     plt.show()
 
 _final_rankme_compare()
+_final_rankme_compare(hook='before_final_norm')
 
 
 # %% [markdown]
@@ -153,6 +154,12 @@ CFG_BS = lambda m: BLOCK_SAMPLES
 
 _rr_srcs = lambda model: [(BLOCK_SAMPLES, (f'blk{l}.{s}.out', 'block_residual_coupling'), f'{s} {l}')
                           for l in range(n_blocks_bs[model]) for s in ('attn', 'mlp')]
+_tr_srcs = lambda model: [(BLOCK_SAMPLES, (f'blk{l}.{s}.out', 'acts_uncentered'), f'{s} {l}')
+                          for l in range(n_blocks_bs[model]) for s in ('attn', 'mlp')]
+_ledger_srcs = lambda model: [(BLOCK_SAMPLES, (f'blk{l}', 'block_ledger'), f'blk {l}')
+                              for l in range(n_blocks_bs[model])]
+
+# %%
 grid_start(ncols=2, title='Layer contribution — share of final-stream energy (R over r)')
 for model in filter_model_names:
     plot_layer_contribution(model, _rr_srcs(model), yvar='R_over_r', normalize=False,
@@ -163,8 +170,6 @@ grid_show()
 # Share of residual energy from just the traces (previously missing in the padded twin):
 # uncentered write traces normalized over writes + the embedding stream; gray dashed = the
 # embedding's share.
-_tr_srcs = lambda model: [(BLOCK_SAMPLES, (f'blk{l}.{s}.out', 'acts_uncentered'), f'{s} {l}')
-                          for l in range(n_blocks_bs[model]) for s in ('attn', 'mlp')]
 grid_start(ncols=2, title='Layer contribution — share of residual energy (trace)')
 for model in filter_model_names:
     plot_layer_contribution(model, _tr_srcs(model), yvar='trace', normalize=True,
@@ -176,13 +181,21 @@ grid_show()
 # Ledger-based layer contribution: each block's signed ΔS_k (= χ + quality + interference —
 # overlap and cross terms INCLUDED, unlike the gross-energy stack above). Positives stack up,
 # negatives down; the net stack height is log RankMe(final) − log RankMe(embeddings).
-_ledger_srcs = lambda model: [(BLOCK_SAMPLES, (f'blk{l}', 'block_ledger'), f'blk {l}')
-                              for l in range(n_blocks_bs[model])]
 grid_start(ncols=2, title='Layer contribution — rank-entropy ledger (signed ΔS)')
 for model in filter_model_names:
     plot_layer_contribution(model, _ledger_srcs(model), yvar='delta_s', normalize=False,
                             title=get_model_label(model))
 grid_show()
+
+# %%
+# The same stacks per ledger term: ΔS_k split into its χ / quality / interference parts.
+for term in ('chi', 'quality', 'interference'):
+    grid_start(ncols=2, title=f'Layer contribution — rank-entropy ledger ({term})')
+    for model in filter_model_names:
+        plot_layer_contribution(model, _ledger_srcs(model), yvar=term, normalize=False,
+                                title=get_model_label(model))
+    grid_show()
+
 
 # %% [markdown]
 # #### Ledger contribution stacks (showcase implementation — sign-crossing fills)

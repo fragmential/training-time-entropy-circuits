@@ -770,13 +770,14 @@ def plot_spectrum(
 def plot_layer_contribution(model, sources, xvar='tokens', yvar='trace', title=None,
                             color_palette='gradient', color_kwargs={}, key=True,
                             normalize=True, sep_lw=0.0, sep_color='white',
-                            baseline_src=None, remainder_label=None):
+                            baseline_src=None, remainder_label=None, alpha=1.0):
     """Depth-stacked contributions over training. normalize=True: 100%-shares (nonneg yvar,
     e.g. uncentered trace = gross energy). normalize=False: raw signed values — positives
     stack up, negatives down (e.g. the ledger's delta_s, which includes overlap/cross terms).
-    baseline_src (cfg, hook, label): included in the normalization denominator and drawn as
-    a gray dashed line (e.g. the embedding stream). remainder_label: draw 1 − Σshares as a
-    gray dashed line (for share metrics whose gap to 1 is the embedding, e.g. R_over_r)."""
+    baseline_src (cfg, hook, label[, yvar]): gray dashed line; normalized mode also adds it
+    to the denominator and draws its share, signed mode draws it raw (the optional 4th
+    element overrides yvar, e.g. matrix_entropy under a delta_s stack). remainder_label:
+    draw 1 − Σshares as a gray dashed line (share metrics whose gap to 1 is the embedding)."""
     palettes = make_color_palettes(base_colors, len(sources), method=color_palette, **color_kwargs)
     W, xs = [], None
     for src in sources:
@@ -786,12 +787,13 @@ def plot_layer_contribution(model, sources, xvar='tokens', yvar='trace', title=N
     W = np.asarray(W, float)
     base = None
     if baseline_src is not None:
-        bys, _bsteps = get_ys(baseline_src[0], model, baseline_src[1], yvar)
+        byvar = baseline_src[3] if len(baseline_src) > 3 else yvar
+        bys, _bsteps = get_ys(baseline_src[0], model, baseline_src[1], byvar)
         base = np.asarray(bys, float) if bys is not None else None
     den = W.sum(0) + (base if base is not None else 0.0)
     frac = W / den if normalize else W
     colors = [palettes[i][0] for i in range(len(W))]            # gradient is model-independent -> [0]
-    stack = lambda Y: plt.stackplot(xs, *Y, colors=colors, linewidth=sep_lw,
+    stack = lambda Y: plt.stackplot(xs, *Y, colors=colors, alpha=alpha, linewidth=sep_lw,
                                     edgecolor=sep_color if sep_lw else 'none')
     if normalize or (frac >= 0).all():
         stack(frac)
@@ -799,8 +801,9 @@ def plot_layer_contribution(model, sources, xvar='tokens', yvar='trace', title=N
     else:                                                       # signed: positives up, negatives down
         stack(np.clip(frac, 0, None)); stack(np.clip(frac, None, 0))
         plt.axhline(0, color='0.3', lw=0.8)
-    if base is not None and normalize:
-        plt.plot(xs, base / den, color='0.25', lw=1.8, ls='--', label=baseline_src[2])
+    if base is not None:
+        plt.plot(xs, base / den if normalize else base, color='0.25', lw=1.8, ls='--',
+                 label=baseline_src[2])
         plt.legend(fontsize=7, loc='upper right')
     if remainder_label is not None:
         plt.plot(xs, 1 - W.sum(0), color='0.25', lw=1.8, ls='--', label=remainder_label)

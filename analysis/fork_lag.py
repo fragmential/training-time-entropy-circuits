@@ -6,7 +6,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.19.4
+#       jupytext_version: 1.19.5
 #   kernelspec:
 #     display_name: Python 3
 #     language: python
@@ -45,6 +45,28 @@ SW = torch.load('data/results/toy/appendix_sweeps.pt', weights_only=True)
 
 RX = '-0.5'                                    # one of '0', '-0.1', '-0.25', '-0.5'
 r = SW['rx'][RX]
+
+# %% [markdown]
+# ### (optional) rerun the toy with the init rotated
+#
+# Skip this cell to use the saved (unrotated) trajectory. Otherwise it recomputes `r`
+# inline — <1 s, 300 GD steps on the 6-sample toy — with the whole feature init rotated
+# `ROT_DEG` degrees CCW (0 = identical geometry to the saved run, modulo the jitter draw).
+
+# %%
+import math
+from toy.appendix_sweeps import run, _init
+
+ROT_DEG = 90
+
+def rot(x, deg):
+    a = math.radians(deg)
+    return x @ torch.tensor([[math.cos(a), math.sin(a)], [-math.sin(a), math.cos(a)]])
+
+theta0, W0 = _init(rx=float(RX))
+r = run(rot(theta0, ROT_DEG), W0)
+
+# %%
 F = r['theta_path'].numpy()                    # (T, 6, 2) feature rows
 W = r['W_path'].numpy()                        # (T, 2, 4) classifier columns
 T = len(F)

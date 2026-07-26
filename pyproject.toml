@@ -28,6 +28,7 @@ dev = ["pytest>=8.0"]
 dev = [
     "nbstripout>=0.9.1",
     "import-linter>=2.0",
+    "jupytext>=1.19.5",
 ]
 notebook = ["ipykernel"]
 

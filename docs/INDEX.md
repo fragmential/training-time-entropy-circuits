@@ -30,7 +30,7 @@ analysis/toy_multilayer.ipynb.
 | model_init_details.md | reference | measured embed/head inits per family (incl. the OLMo-7B step-150 rank-380 anomaly, nanochat zero-init writes) |
 | cka_alignment.md | methods | the stream↔unembedding CKA statistic: definition, invariances, rotated-W control, d=2 blind spots |
 | toy.md | evidence (RQ3) | the whole toy arc: single-layer reproduction + controls (§2), fourth condition / kick / lag / transience (§3), depth pattern conditions + ablation table (§4), decomposition signature (§5), architecture knobs (§6) |
-| ledger.md | methods | the decomposition: derivation, symbols, term meanings, exactness caveats, alignment-metric taxonomy |
+| ledger.md | methods | the decomposition: symbols, term meanings, exactness caveats, alignment-metric taxonomy ("ledger"/"quality" are repo-internal names, banned in thesis prose; thesis derivation drafted in thesis-writing/decomposition_method/main.tex) |
 | rq2.md | methods (RQ2) | geneig/excess-mass methods, split-half estimator (v1 flaw + v2 + contamination audit), population inventory — the redo's blueprint |
 | collection/ | archive-adjacent | ops/process docs kept out of the main flow: architecture.md (codebase), model_architectures.txt, next_run_additions.md (next-sweep metric additions), values_prompt.md (code-values charter) |
 | archive/ | archive | pre-RQ-era scratch (profiling, old TODOs) |
