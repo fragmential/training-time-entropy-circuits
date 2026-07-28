@@ -203,46 +203,11 @@ for term in ('chi', 'quality', 'interference'):
 # pythia's final layers' ΔS flips sign here (final_report §2.3, conditional final layers).
 
 # %%
-def ledger_stack(model):
-    import numpy as np
-    import matplotlib.pyplot as plt
-    cfg = CFG_BS(model)
-    terms = {y: np.sum([_lib.get_ys(cfg, model, (f'blk{l}', 'block_ledger'), y)[0]
-                        for l in range(NB_BS[model])], axis=0)
-             for y in ('chi', 'quality', 'interference')}
-    xs = np.asarray(_lib.get_xs_tokens(
-        model, _lib.get_ys(cfg, model, ('blk0', 'block_ledger'), 'chi')[1]), float)
-    keep = xs > 0
-    xs, terms = xs[keep], {k: np.asarray(v, float)[keep] for k, v in terms.items()}
-    # refine the grid with sign crossings so fills pinch to zero instead of twisting
-    lx = np.log(xs)
-    cross = []
-    for v in terms.values():
-        i = np.nonzero(np.signbit(v[:-1]) != np.signbit(v[1:]))[0]
-        cross.append(lx[i] + v[i] / (v[i] - v[i + 1]) * (lx[i + 1] - lx[i]))
-    grid = np.unique(np.concatenate([lx, *cross]))
-    terms = {k: np.interp(grid, lx, v) for k, v in terms.items()}
-    gx = np.exp(grid)
-    plt.figure(figsize=(8, 4))
-    pos, neg = np.zeros(len(gx)), np.zeros(len(gx))
-    for name, c in (('chi', 'tab:green'), ('quality', 'tab:red'), ('interference', 'tab:purple')):
-        up, dn = np.clip(terms[name], 0, None), np.clip(terms[name], None, 0)
-        plt.fill_between(gx, pos, pos + up, label=name, color=c, alpha=0.55, lw=0)
-        plt.fill_between(gx, neg, neg + dn, color=c, alpha=0.55, lw=0)
-        pos, neg = pos + up, neg + dn
-    plt.plot(gx, sum(terms.values()), 'k', lw=2.5, label='ΔS total')
-    es, esteps = _lib.get_ys(cfg, model, ('blk0.attn.in', 'acts_centered'), 'matrix_entropy')
-    if es is not None:
-        exs = np.asarray(_lib.get_xs_tokens(model, esteps), float)
-        ek = exs > 0
-        plt.plot(exs[ek], np.asarray(es, float)[ek], color='0.4', ls=':', lw=1.5,
-                 label='S(embedding stream)')
-    plt.xscale('log'); plt.xlabel('tokens'); plt.ylabel('rank entropy')
-    plt.legend(fontsize=8); plt.title(f'Ledger contributions — {get_model_label(model)}')
-    plt.show()
-
+grid_start(ncols=2, title='Ledger contribution stacks (padded)')
 for model in MODELS_LC:
-    ledger_stack(model)
+    _lib.plot_ledger_stack(model, CFG_BS(model), NB_BS[model],
+                           title=get_model_label(model))
+grid_show()
 
 # %% [markdown]
 # #### Per-block ledger terms over training (showcase formatting): ΔS, quality, overlap
@@ -424,26 +389,11 @@ for model in filter_model_names:
 # The three ledger terms summed over blocks, sign-stacked over training: the books balance,
 # so the black ΔS line IS the log-RankMe trajectory relative to the embeddings — no extra
 # weighting (R_over_r would double-count the w_i already inside each term).
-def _ledger_stack(model):
-    import numpy as np
-    import matplotlib.pyplot as plt
-    terms = {y: np.sum([_lib.get_ys(BLOCK_SAMPLES, model, (f'blk{l}', 'block_ledger'), y)[0]
-                        for l in range(n_blocks_bs[model])], axis=0)
-             for y in ('chi', 'quality', 'interference')}
-    xs = _lib.get_xs_tokens(model, _lib.get_ys(BLOCK_SAMPLES, model, ('blk0', 'block_ledger'), 'chi')[1])
-    plt.figure(figsize=(8, 4))
-    pos, neg = np.zeros(len(xs)), np.zeros(len(xs))
-    for name, c in (('chi', 'tab:green'), ('quality', 'tab:red'), ('interference', 'tab:purple')):
-        v, base = terms[name], np.where(terms[name] >= 0, pos, neg)
-        plt.fill_between(xs, base, base + v, label=name, color=c, alpha=0.55)
-        pos, neg = pos + np.clip(v, 0, None), neg + np.clip(v, None, 0)
-    plt.plot(xs, sum(terms.values()), 'k', lw=2.5, label='ΔS total')
-    plt.xscale('log'); plt.xlabel('tokens'); plt.ylabel('rank entropy')
-    plt.legend(); plt.title(f'Ledger contributions — {get_model_label(model)}')
-    plt.show()
-
+grid_start(ncols=2, title='Ledger contributions (Exp 4.8)')
 for model in filter_model_names:
-    _ledger_stack(model)
+    _lib.plot_ledger_stack(model, BLOCK_SAMPLES, n_blocks_bs[model], emb=False, legend=10,
+                           title=get_model_label(model))
+grid_show()
 
 # %% [markdown]
 # ### Rogue write anatomy (Exp 4.9, Pythia)

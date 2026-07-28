@@ -396,6 +396,8 @@ def make_label(model_name, source_label, label_model, label_source):
 
 # %%
 def _export_transcription(title, calls, extra_kwargs):
+    if not any(func.__name__ == 'plot_group' for func, *_ in calls):
+        return
     os.makedirs('analysis/transcriptions', exist_ok=True)
     safe = re.sub(r'[^\w\-]', '_', title or 'untitled').strip('_')
     path = f'analysis/transcriptions/{safe}.txt'
@@ -570,9 +572,9 @@ def legend_or_colorbar(legend_max: int = 12):
 
 _grid = None
 
-def grid_start(ncols=2, figsize=None, title=None, savefig=True, savedir=None, ylim=None, sharey=False, **kwargs):
+def grid_start(ncols=2, figsize=None, title=None, savefig=True, savedir=None, ylim=None, sharey=False, sharex=False, **kwargs):
     global _grid
-    _grid = dict(ncols=ncols, figsize=figsize, title=title, savefig=savefig, savedir=savedir, ylim=ylim, sharey=sharey, extra_kwargs=kwargs, calls=[])
+    _grid = dict(ncols=ncols, figsize=figsize, title=title, savefig=savefig, savedir=savedir, ylim=ylim, sharey=sharey, sharex=sharex, extra_kwargs=kwargs, calls=[])
 
 def grid_show():
     global _grid
@@ -585,10 +587,12 @@ def grid_show():
     savedir = _grid['savedir']
     ylim = _grid['ylim']
     sharey = _grid['sharey']
+    sharex = _grid['sharex']
     extra_kwargs = _grid['extra_kwargs']
     _grid = None
 
-    fig, axes = plt.subplots(nrows, ncols, figsize=figsize)
+    # native sharing also hides inner tick labels, matching plt.subplots(sharex/sharey)
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize, sharex=sharex, sharey=sharey)
     axes = np.array(axes).flatten()
     for i, (func, args, kwargs) in enumerate(calls):
         func(*args, _ax=axes[i], **(extra_kwargs | kwargs))
@@ -602,7 +606,7 @@ def grid_show():
         ax.set_visible(False)
     plt.tight_layout()
     if title is not None:
-        plt.suptitle(title)
+        plt.suptitle(title, y=0.998, va='top')          # pinned to the top edge, clear of panel titles
         plt.subplots_adjust(top= 0.984 - (0.10 / nrows))
     plt.show()
 
@@ -770,13 +774,20 @@ def plot_spectrum(
 def plot_layer_contribution(model, sources, xvar='tokens', yvar='trace', title=None,
                             color_palette='gradient', color_kwargs={}, key=True,
                             normalize=True, sep_lw=0.0, sep_color='white',
-                            baseline_src=None, remainder_label=None, alpha=1.0):
+                            baseline_src=None, baseline_ls='--', baseline_delta=False,
+                            total_src=None, total_lw=2.0, remainder_label=None, alpha=1.0):
     """Depth-stacked contributions over training. normalize=True: 100%-shares (nonneg yvar,
     e.g. uncentered trace = gross energy). normalize=False: raw signed values — positives
     stack up, negatives down (e.g. the ledger's delta_s, which includes overlap/cross terms).
-    baseline_src (cfg, hook, label[, yvar]): gray dashed line; normalized mode also adds it
+    baseline_src (cfg, hook, label[, yvar]): gray line in baseline_ls (dashed by default,
+    ':' for the dotted S(embedding stream) convention); normalized mode also adds it
     to the denominator and draws its share, signed mode draws it raw (the optional 4th
-    element overrides yvar, e.g. matrix_entropy under a delta_s stack). remainder_label:
+    element overrides yvar, e.g. matrix_entropy under a delta_s stack). baseline_delta:
+    signed mode only — draw the baseline as its change from the first plotted step (0 at
+    t0) so a large-offset curve like S_emb sits on the stack's scale. total_src (same tuple
+    shape, signed mode only): black line of that series MINUS the baseline — the measured
+    depth differential (S_bfn − S_emb) the signed stack should sum to, i.e. the ledger
+    plot's black ΔS total read straight off the endpoints. remainder_label:
     draw 1 − Σshares as a gray dashed line (share metrics whose gap to 1 is the embedding)."""
     palettes = make_color_palettes(base_colors, len(sources), method=color_palette, **color_kwargs)
     W, xs = [], None
@@ -784,12 +795,14 @@ def plot_layer_contribution(model, sources, xvar='tokens', yvar='trace', title=N
         ys, step_nums = get_ys(src[0], model, src[1], yvar)
         if ys is None: continue
         W.append(ys); xs = XVAR_FNS[xvar](model, step_nums)
-    W = np.asarray(W, float)
+    W, xs = np.asarray(W, float), np.asarray(xs, float)
+    keep = xs > 0                                        # step 0 is off a log axis anyway
+    W, xs = W[:, keep], xs[keep]
     base = None
     if baseline_src is not None:
         byvar = baseline_src[3] if len(baseline_src) > 3 else yvar
         bys, _bsteps = get_ys(baseline_src[0], model, baseline_src[1], byvar)
-        base = np.asarray(bys, float) if bys is not None else None
+        base = np.asarray(bys, float)[keep] if bys is not None else None
     den = W.sum(0) + (base if base is not None else 0.0)
     frac = W / den if normalize else W
     colors = [palettes[i][0] for i in range(len(W))]            # gradient is model-independent -> [0]
@@ -802,9 +815,16 @@ def plot_layer_contribution(model, sources, xvar='tokens', yvar='trace', title=N
         stack(np.clip(frac, 0, None)); stack(np.clip(frac, None, 0))
         plt.axhline(0, color='0.3', lw=0.8)
     if base is not None:
-        plt.plot(xs, base / den if normalize else base, color='0.25', lw=1.8, ls='--',
-                 label=baseline_src[2])
+        line = base / den if normalize else base - (base[0] if baseline_delta else 0.0)
+        plt.plot(xs, line, color='0.25', lw=1.8, ls=baseline_ls, label=baseline_src[2])
         plt.legend(fontsize=7, loc='upper right')
+    if total_src is not None and not normalize:          # measured depth differential
+        tyvar = total_src[3] if len(total_src) > 3 else yvar
+        tys, _tsteps = get_ys(total_src[0], model, total_src[1], tyvar)
+        if tys is not None:
+            tot = np.asarray(tys, float)[keep] - (base if base is not None else 0.0)
+            plt.plot(xs, tot, color='k', lw=total_lw, label=total_src[2])
+            plt.legend(fontsize=7, loc='upper right')
     if remainder_label is not None:
         plt.plot(xs, 1 - W.sum(0), color='0.25', lw=1.8, ls='--', label=remainder_label)
         plt.legend(fontsize=7, loc='upper right')
@@ -821,6 +841,61 @@ def plot_layer_contribution(model, sources, xvar='tokens', yvar='trace', title=N
 
 
 @griddable
+# The showcase §3 "Ledger contributions" stack: the three ledger terms summed over blocks,
+# sign-stacked over training (positives up from zero, negatives down); black = ΔS total.
+@griddable
+def plot_ledger_stack(model, source, n_blocks, xvar='tokens', title=None,
+                      ylabel='rank entropy', legend=8, emb=True,
+                      total_lw=2.5, emb_lw=1.5):
+    """One model's ledger stack from results dir `source`. The x-grid is refined with each
+    term's sign crossings (interpolated in log-x, where the drawn segments are straight) so
+    each fill closes vertically at zero instead of drawing a twisted quadrilateral across
+    the opposite stack when a term changes sign. emb: dotted gray S(embedding stream), the
+    base of the black depth-differential. legend: fontsize, or None to skip (grids with a
+    shared legend put it on one panel only). A missing source turns the panel off."""
+    probe, steps = get_ys(source, model, ('blk0', 'block_ledger'), 'chi')
+    if probe is None:
+        plt.gca().axis('off')
+        return
+    terms = {y: np.sum([get_ys(source, model, (f'blk{l}', 'block_ledger'), y)[0]
+                        for l in range(n_blocks)], axis=0)
+             for y in ('chi', 'quality', 'interference')}
+    xs = np.asarray(XVAR_FNS[xvar](model, steps), float)
+    keep = xs > 0                                        # step 0 is off a log axis anyway
+    xs, terms = xs[keep], {k: np.asarray(v, float)[keep] for k, v in terms.items()}
+    lx = np.log(xs)
+    cross = []
+    for v in terms.values():
+        i = np.nonzero(np.signbit(v[:-1]) != np.signbit(v[1:]))[0]
+        cross.append(lx[i] + v[i] / (v[i] - v[i + 1]) * (lx[i + 1] - lx[i]))
+    grid = np.unique(np.concatenate([lx, *cross]))
+    terms = {k: np.interp(grid, lx, v) for k, v in terms.items()}
+    gx = np.exp(grid)
+    pos, neg = np.zeros(len(gx)), np.zeros(len(gx))
+    for name, c in (('chi', 'tab:green'), ('quality', 'tab:red'), ('interference', 'tab:purple')):
+        up, dn = np.clip(terms[name], 0, None), np.clip(terms[name], None, 0)
+        plt.fill_between(gx, pos, pos + up, label=name, color=c, alpha=0.55, lw=0)
+        plt.fill_between(gx, neg, neg + dn, color=c, alpha=0.55, lw=0)
+        pos, neg = pos + up, neg + dn
+    plt.plot(gx, sum(terms.values()), 'k', lw=total_lw, label='ΔS total')
+    if emb:
+        es, esteps = get_ys(source, model, ('blk0.attn.in', 'acts_centered'), 'matrix_entropy')
+        if es is not None:
+            exs = np.asarray(XVAR_FNS[xvar](model, esteps), float)
+            ek = exs > 0
+            plt.plot(exs[ek], np.asarray(es, float)[ek], color='0.4', ls=':', lw=emb_lw,
+                     label='S(embedding stream)')
+    plt.xscale('log')
+    plt.xlabel({'steps': 'step'}.get(xvar, xvar))
+    if ylabel:
+        plt.ylabel(ylabel)
+    if title is not None:
+        plt.title(title)
+    if legend:
+        plt.legend(fontsize=legend)
+    plt.show()
+
+
 def plot_heatmap(M, labels=None, labels2=None, title=None, cmap='coolwarm', vmin=-1, vmax=1,
                  hide_diag=False, dynamic=False):
     """labels = rows (y); labels2 = columns (x), defaulting to labels (square matrices)."""

@@ -6,9 +6,9 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.19.4
+#       jupytext_version: 1.19.5
 #   kernelspec:
-#     display_name: representation-geometry (3.14.0)
+#     display_name: representation-geometry (3.14.6.final.0)
 #     language: python
 #     name: python3
 # ---
@@ -54,6 +54,9 @@ HK = build_hooks()
 BLOCK_SAMPLES = "block_representations_samples"
 TRAINSET_PACKED, FINEWEB_PADDED = "rankme_trainset_packed_4MT", "rankme_fineweb_padded"
 ALL4 = ['pythia-1b-deduped', 'pythia-6.9b-deduped', 'OLMo-2-0425-1B', 'OLMo-2-1124-7B']
+# The presented model selection: ALL4 plus nanochat-d12 and pythia-410m, ordered so the two
+# additions land in the top row of the 2-column grids.
+ALL6 = ['nanochat-d12', 'pythia-410m-deduped', *ALL4]
 PAIR = ['pythia-1b-deduped', 'OLMo-2-1124-7B']          # one exemplar per family
 # §3 covers the full model set: four pythia scales, both OLMo-2 scales, nanochat-d12
 LEDGER_MODELS = ['pythia-160m-deduped', 'pythia-410m-deduped', 'pythia-1b-deduped',
@@ -92,6 +95,8 @@ for model in LEDGER_MODELS:
             f'later figure decomposes. The small pythias are sanity checks for §3\'s 160m '
             f'edge case.')
 
+#FIGURE A1
+
 # %% [markdown]
 # ## 2. What the scalar hides: the phases are spectrally local
 #
@@ -119,6 +124,8 @@ for model in PAIR:
             f'gone by k=512, and the deepest window moves the OPPOSITE way (flattening) '
             f'through all of training: a top-of-spectrum concentration front, not a global '
             f'contraction.')
+
+#FIGURE C1
 
 # %% [markdown]
 # ### Baseline: what a pure spectrum-tilt compression would look like
@@ -200,6 +207,11 @@ caption('The tilt baseline (dashed): a power-law spectrum whose slope steepens o
         'every band falls in lockstep and one α describes every rank. Measured instead: the '
         'deep band RISES through the compression phase and the band slopes fan out — real '
         'compression is a head event, not a uniform tilt.')
+#FIGURE C2
+
+# %%
+#FIGURE C3
+# log-piecewise rankme showing how the rankme moves like a wave until entropy peak. heatmap vertical axis time horizontal axis spectrum
 
 # %% [markdown]
 # ## 3. The decomposition: what carries the compression, per family
@@ -227,52 +239,20 @@ caption('The tilt baseline (dashed): a power-law spectrum whose slope steepens o
 # 160m/nanochat).
 
 # %%
-def ledger_stack(model):
-    cfg = cfg_of(model)
-    terms = {y: np.sum([_lib.get_ys(cfg, model, (f'blk{l}', 'block_ledger'), y)[0]
-                        for l in range(n_blocks[model])], axis=0)
-             for y in ('chi', 'quality', 'interference')}
-    xs = np.asarray(_lib.get_xs_tokens(
-        model, _lib.get_ys(cfg, model, ('blk0', 'block_ledger'), 'chi')[1]), float)
-    keep = xs > 0                                        # step 0 is off a log axis anyway
-    xs, terms = xs[keep], {k: np.asarray(v, float)[keep] for k, v in terms.items()}
-    # Refine the grid with every term's sign crossings (interpolated in log-x, where the
-    # drawn segments are straight) so each fill closes vertically at zero instead of
-    # drawing a twisted quadrilateral across the opposite stack when a term changes sign.
-    lx = np.log(xs)
-    cross = []
-    for v in terms.values():
-        i = np.nonzero(np.signbit(v[:-1]) != np.signbit(v[1:]))[0]
-        cross.append(lx[i] + v[i] / (v[i] - v[i + 1]) * (lx[i + 1] - lx[i]))
-    grid = np.unique(np.concatenate([lx, *cross]))
-    terms = {k: np.interp(grid, lx, v) for k, v in terms.items()}
-    gx = np.exp(grid)
-    plt.figure(figsize=(8, 4))
-    pos, neg = np.zeros(len(gx)), np.zeros(len(gx))
-    for name, c in (('chi', 'tab:green'), ('quality', 'tab:red'), ('interference', 'tab:purple')):
-        up, dn = np.clip(terms[name], 0, None), np.clip(terms[name], None, 0)
-        plt.fill_between(gx, pos, pos + up, label=name, color=c, alpha=0.55, lw=0)
-        plt.fill_between(gx, neg, neg + dn, color=c, alpha=0.55, lw=0)
-        pos, neg = pos + up, neg + dn
-    plt.plot(gx, sum(terms.values()), 'k', lw=2.5, label='ΔS total')
-    es, esteps = _lib.get_ys(cfg, model, ('blk0.attn.in', 'acts_centered'), 'matrix_entropy')
-    if es is not None:
-        exs = np.asarray(_lib.get_xs_tokens(model, esteps), float)
-        ek = exs > 0
-        plt.plot(exs[ek], np.asarray(es, float)[ek], color='0.4', ls=':', lw=1.5,
-                 label='S(embedding stream)')
-    plt.xscale('log'); plt.xlabel('tokens'); plt.ylabel('rank entropy')
-    plt.legend(fontsize=8); plt.title(f'Ledger contributions — {get_model_label(model)}'); plt.show()
-    caption(f'The decomposition summed over blocks, {get_model_label(model)}: ΔS = χ (green) '
-            f'+ quality (red) + interference (purple); black = the total, the '
-            f'depth-differential log RankMe (stack output entropy MINUS input entropy per '
-            f'checkpoint — negative means output below input, not negative entropy). '
-            f'Positive parts stack up from zero, negative down. Dotted gray = the embedding '
-            f'stream\'s own entropy, the base of the black difference. The 7-model split '
-            f'and its edge cases: section header.')
-
+grid_start(ncols=2, title='Ledger contributions')
 for model in LEDGER_MODELS:
-    ledger_stack(model)
+    _lib.plot_ledger_stack(model, cfg_of(model), n_blocks[model],
+                           title=get_model_label(model))
+grid_show()
+caption('The decomposition summed over blocks, one panel per model: ΔS = χ (green) '
+        '+ quality (red) + interference (purple); black = the total, the '
+        'depth-differential log RankMe (stack output entropy MINUS input entropy per '
+        'checkpoint — negative means output below input, not negative entropy). '
+        'Positive parts stack up from zero, negative down. Dotted gray = the embedding '
+        'stream\'s own entropy, the base of the black difference. The 7-model split '
+        'and its edge cases: section header.')
+
+#FIGURE B3
 
 # %% [markdown]
 # ### Layer decomposition of the quality term
@@ -330,6 +310,8 @@ term_per_block(LEDGER_MODELS, 'delta_s', suptitle='Per-block ΔS — packed (all
 caption('Each block\'s total ΔS_k over training (colorbar = block index), packed geometry, '
         'all 7 models. The §3 stacks are the sums of these lines, term-split; here the net '
         'per-block change is shown directly.')
+#FIGURE B1
+# but I can't figure out why olmo has significant early layer bump here.
 
 # %%
 PADDED_BS = 'block_representations_samples_padded'
@@ -390,6 +372,8 @@ for model in ('pythia-1b-deduped',):
             f'write departs from the family: blk3 collapses to rank ≈ 1 at the stream '
             f'RankMe peak while its trace keeps growing.')
 
+#FIGURE B2.0
+
 # %%
 # rogue_hist, step by step: (1) load the RAW per-token activations of blk3.mlp's output
 # (block_rogue_id run, final ckpt; rows = the 262k packed-mix token positions, in order);
@@ -427,6 +411,9 @@ caption('Histogram of each token row\'s |projection onto the sink direction| (lo
         'axis): window-start rows (blue, any token), newline tokens elsewhere (red), all '
         'others (gray). Both sink slots separate from the bulk, and the red tail is almost '
         'entirely each window\'s FIRST newline — 96% of newlines sit in the bulk.')
+
+#FIGURE B2.2
+# but the labelling is not clear. plot does not even say what layer this is. Purpose of this plot is to confirm what's driving blk3 magnitude
 
 # %%
 # Systematic version: mean |projection| per token TYPE (all tokens, n>=20, no prior grouping) —
@@ -466,6 +453,9 @@ caption('Mean |projection| per token TYPE (n ≥ 20), top 20; red = newline-bear
         'tick = lower edge of the 95% CI (a far-left tick = noise-dominated mean). Only the '
         'newline rows are statistically solid. This per-type view structurally hides the '
         'position-0 slot (spread over ~500 types) — see the histogram above.')
+
+#FIGURE B2.1
+# this should go before B2.2. Story goes: identify token -> compare with first pos
 
 # %% [markdown]
 # ### Follow-ups: is the newline slot just a missing resting token? and where does the
@@ -517,11 +507,15 @@ caption('Mean |projection onto the sink direction| per token class over depth: a
         'control (not plotted): an explicit <|endoftext|> does not absorb the first-newline '
         'slot.')
 
+# FIGURE 2.?
+# I don't really know what the purpose is of this plot and don't understand what it's showing, if I understood I would maybe put it in,
+# but as of now it makes zero sense to me. I don't understand the purpose. purpose should be one short sentence.
+
 # %%
 def cancellation_headmass(model):
-    L = n_blocks[model]
-    mats, steps = _lib.get_ys(BLOCK_SAMPLES, model, ('', 'block_block_coupling'), 'signed_trace')
-    leaves = _lib.get_y(BLOCK_SAMPLES, model, ('', 'block_block_coupling'), 'leaves', steps[0])
+    L, cfg = n_blocks[model], cfg_of(model)
+    mats, steps = _lib.get_ys(cfg, model, ('', 'block_block_coupling'), 'signed_trace')
+    leaves = _lib.get_y(cfg, model, ('', 'block_block_coupling'), 'leaves', steps[0])
     xs, last = _lib.get_xs_tokens(model, steps), leaves.index(f'blk{L - 1}.mlp.out')
     fig, axes = plt.subplots(1, 3, figsize=(16, 4))
     fig.suptitle(f'Cancellation / head-mass / concentration — {get_model_label(model)}')
@@ -530,13 +524,14 @@ def cancellation_headmass(model):
         axes[0].plot(xs, [m[i, last] for m in mats], marker='o', lw=2, label=f'mlp {l} ~ mlp {L-1}')
     axes[0].set(xscale='log', title='signed trace vs last write', xlabel='tokens'); axes[0].legend(fontsize=8)
     for l in (0, L // 2, L - 1):
-        cs, ss = _lib.get_ys(BLOCK_SAMPLES, model, (f'blk{l}.mlp.out', 'eigendirection_attrib'), 'contrib')
+        cs, ss = _lib.get_ys(cfg, model, (f'blk{l}.mlp.out', 'eigendirection_attrib'), 'contrib')
         axes[1].plot(_lib.get_xs_tokens(model, ss), [float(np.abs(c[:32]).sum() / np.abs(c).sum()) for c in cs],
                      marker='o', lw=2, label=f'mlp {l}')
     axes[1].set(xscale='log', ylim=(0, 1), title='head-mass (top-32 share)', xlabel='tokens'); axes[1].legend(fontsize=8)
-    share = [_lib.get_y(BLOCK_SAMPLES, model, (f'blk{l}.mlp.out', 'acts_centered'), 'eigenspectrum', None)[0]
+    share = [_lib.get_y(cfg, model, (f'blk{l}.mlp.out', 'acts_centered'), 'eigenspectrum', None)[0]
              for l in range(L)]
-    axes[2].bar(range(L), share, color='tab:red' if 'pythia' in model else 'tab:blue')
+    axes[2].bar(range(L), share, color={'pythia': 'tab:red', 'OLMo': 'tab:blue'}.get(
+        next((f for f in ('pythia', 'OLMo') if f in model), ''), 'tab:green'))
     axes[2].set(ylim=(0, 1), title='top-eigval share per mlp write (final)', xlabel='block')
     plt.show()
     caption(f'Left: signed-trace coupling of early/mid writes against the LAST write '
@@ -545,8 +540,16 @@ def cancellation_headmass(model):
             f'checkpoint — Pythia\'s bar near 1.0 at blk3 IS the sink write; OLMo-2 has '
             f'none above ~0.1.')
 
-for model in ALL4:
+for model in ALL6:
     cancellation_headmass(model)
+
+# FIGURE 2.?
+# third subplot (top eig-val share) looks cool but genuinely idk how to understand it.
+# what does "top-eigval share" mean? furthermore, maybe we have too many plots on this point. it feels unbalanced
+# also, middle plot I don't understand what it is at all? another thing where maybe if I understand what question it's answering it would be okay.
+# subplot 1 seems to make sense, it's answering "what layers are being deleted by final layer?"
+# however, I would like to note that the mlp layer choices are pretty random. Skipping layers is a critical oversight.
+
 
 # %% [markdown]
 # ## 5. OLMo-2's mechanism: distributed aligned reinforcement
@@ -568,7 +571,7 @@ def coupling_grid(models, rows='mlp', cols='mlp', step=None):
     fig, axes = plt.subplots(nrows, 2, figsize=(11, 4.5 * nrows), squeeze=False)
     fig.suptitle(f'{rows} × {cols} signed-trace coupling, final checkpoint')
     for ax, model in zip(axes.flat, models):
-        bb = lambda y: _lib.get_y(BLOCK_SAMPLES, model, ('', 'block_block_coupling'), y, step)
+        bb = lambda y: _lib.get_y(cfg_of(model), model, ('', 'block_block_coupling'), y, step)
         M, rl, cl = submatrix(bb('signed_trace'), bb('leaves'), rows=rows, cols=cols)
         if rows == cols:
             M = M - np.diag(np.diag(M))
@@ -582,13 +585,14 @@ def coupling_grid(models, rows='mlp', cols='mlp', step=None):
 
 # %%
 
-coupling_grid(ALL4)
+coupling_grid(ALL6)
 caption('Signed trace between every pair of mlp writes, final checkpoint (red = '
-        'reinforcing, blue = cancelling; diagonal removed). Both OLMo-2 panels show the '
-        'late-block red square — every late write aligned with every other; both Pythia '
+        'reinforcing, blue = cancelling; diagonal removed), across the 6-model selection '
+        '(top row: nanochat-d12, pythia-410m). Both OLMo-2 panels show the '
+        'late-block red square — every late write aligned with every other; the Pythia '
         'panels instead show a blue band through the sink-write block. This is '
         '"distributed aligned reinforcement", operationally.')
-
+#FIGURE B4.0
 
 # %% [markdown]
 # ### Does the alignment actually carry the compression?
@@ -612,15 +616,15 @@ caption('Signed trace between every pair of mlp writes, final checkpoint (red = 
 
 # %%
 def alignment_vs_interference(model):
-    L = n_blocks[model]
-    mats, csteps = _lib.get_ys(BLOCK_SAMPLES, model, ('', 'block_block_coupling'), 'signed_trace')
-    leaves = _lib.get_y(BLOCK_SAMPLES, model, ('', 'block_block_coupling'), 'leaves', csteps[0])
+    L, cfg = n_blocks[model], cfg_of(model)
+    mats, csteps = _lib.get_ys(cfg, model, ('', 'block_block_coupling'), 'signed_trace')
+    leaves = _lib.get_y(cfg, model, ('', 'block_block_coupling'), 'leaves', csteps[0])
     cxs = _lib.get_xs_tokens(model, csteps)
     idx = [leaves.index(f'blk{k}.mlp.out') for k in range(L // 2, L)]
     late = [float(np.mean([m[i, j] for i in idx for j in idx if i != j])) for m in mats]
-    intf = {k: np.asarray(_lib.get_ys(BLOCK_SAMPLES, model, (f'blk{k}', 'block_ledger'), 'interference')[0])
+    intf = {k: np.asarray(_lib.get_ys(cfg, model, (f'blk{k}', 'block_ledger'), 'interference')[0])
             for k in range(L)}
-    isteps = _lib.get_ys(BLOCK_SAMPLES, model, ('blk0', 'block_ledger'), 'interference')[1]
+    isteps = _lib.get_ys(cfg, model, ('blk0', 'block_ledger'), 'interference')[1]
     ixs = _lib.get_xs_tokens(model, isteps)
     fig = plt.figure(figsize=(13, 5))
     gs = fig.add_gridspec(2, 2, width_ratios=(1.3, 1), hspace=0.15, wspace=0.25)
@@ -661,10 +665,15 @@ def alignment_vs_interference(model):
                if 'OLMo' in model else
                'No positive alignment appears, and the negative-interference blocks sit at '
                'NEGATIVE coupling: Pythia\'s interference is the sink-write cancellation, '
-               'not reinforcement.'))
+               'not reinforcement.' if 'pythia' in model else
+               'nanochat-d12 is quality-carried (§3), so this panel is the negative case: '
+               'no aligned late ensemble to carry an interference-driven compression.'))
 
-for model in ALL4:
+for model in ALL6:
     alignment_vs_interference(model)
+
+#FIGURE B4.?
+# Very confused about any plot in her. Doesn't make sense. I don't think I will use it.
 
 # %% [markdown]
 # ## 6. The minimal model (RQ3)
@@ -707,6 +716,7 @@ if os.path.exists(lifig):
             'schematic, (B) classifier weight rows W_i in 2D over training, (C) feature '
             'vectors f(x), (D) RankMe and top singular values — phases drawn as dotted '
             '(warmup) / solid (entropy-seeking) / dashed (compression) segments.')
+#FIGURE F0
 
 # %%
 TOY_CAPS = {
@@ -729,6 +739,8 @@ for f, cap_txt in TOY_CAPS.items():
     if os.path.exists(p):
         plt.figure(figsize=(11, 6)); plt.imshow(mpimg.imread(p)); plt.axis('off'); plt.show()
         caption(cap_txt)
+#FIGURE F1
+#FIGURE F2
 
 # %% [markdown]
 # **On mse_skew's small dip.** mse_skew cannot fit its task: with logits = FW at d = 2,
@@ -916,11 +928,12 @@ if os.path.exists(p):
 
 # %%
 # mlp×attn coupling (moved out of §5 — a separate observation from the write-ensemble claim)
-coupling_grid(PAIR, rows='mlp', cols='attn')
+coupling_grid(ALL6, rows='mlp', cols='attn')
 caption('Signed trace between mlp writes (rows) and attention writes (cols), final '
         'checkpoint. The near-diagonal negatives show MLPs partially consuming their '
         'neighbouring attention outputs — the "memory management" pattern of the GELU-4L '
         'literature. Side observation, independent of the family mechanisms.')
+#FIGURE G
 
 # %% [markdown]
 # ### Compression valleys: the depth-axis view (one object, three shadows)

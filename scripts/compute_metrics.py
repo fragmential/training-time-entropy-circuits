@@ -831,6 +831,8 @@ def _block_block_coupling(node: Node) -> dict | None:
         leaves:       list[str]     # (M,) leaf paths, the row/column order
         cka:          torch.Tensor  # (M, M) CKA(c_j, c_k) ∈ [0,1], symmetric
         signed_trace: torch.Tensor  # (M, M) normalized signed tr Cov(c_j, c_k) ∈ [-1,1]
+        nuclear:      torch.Tensor  # (M, M) ‖Cov(c_j, c_k)‖* = Σσ_i; diagonal = tr (PSD), so
+                                    #   tr/‖·‖* gives a signed alignment that is 1 on the diagonal
         mean_cos:     torch.Tensor  # (M, M) mean per-token cos(c_j, c_k) — democratic counterpart
     """
     views = _block_out_views(node)
@@ -842,17 +844,20 @@ def _block_block_coupling(node: Node) -> dict | None:
         return None    # a zero block output (e.g. zero-init c_proj at step 0) — coupling undefined
     stats = prefer_gpu(lambda Xj, mj, Xk, mk: (
         C := Xj.float().T @ Xk.float() / Xj.shape[0] - torch.outer(mj, mk),
-        C.trace(), C.square().sum(),
+        C.trace(), C.square().sum(), torch.linalg.svdvals(C).sum(),
         ((Xj.float() * Xk.float()).sum(1) / (Xj.float().norm(dim=1) * Xk.float().norm(dim=1))).mean())[1:])
     M = len(views)
     cka, st, mc = torch.eye(M), torch.eye(M), torch.eye(M)
+    nuc = torch.diag(torch.tensor(tr, dtype=torch.float32))
     for j in range(M):
         for k in range(j + 1, M):
-            trC, froC2, cos = stats(comps[j][0], comps[j][1], comps[k][0], comps[k][1])
+            trC, froC2, nucC, cos = stats(comps[j][0], comps[j][1], comps[k][0], comps[k][1])
             cka[j, k] = cka[k, j] = float(froC2) / (fro[j] * fro[k])
             st[j, k] = st[k, j] = float(trC) / (tr[j] * tr[k]) ** 0.5
+            nuc[j, k] = nuc[k, j] = float(nucC)
             mc[j, k] = mc[k, j] = float(cos)
-    return {"leaves": [p for p, _ in views], "cka": cka, "signed_trace": st, "mean_cos": mc}
+    return {"leaves": [p for p, _ in views], "cka": cka, "signed_trace": st, "nuclear": nuc,
+            "mean_cos": mc}
 
 
 def _mean_migration(node: Node, m: int = 32) -> dict | None:

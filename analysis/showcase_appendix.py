@@ -6,9 +6,9 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.19.4
+#       jupytext_version: 1.19.5
 #   kernelspec:
-#     display_name: Python 3
+#     display_name: representation-geometry (3.14.6.final.0)
 #     language: python
 #     name: python3
 # ---
@@ -326,6 +326,8 @@ caption('The canonical run to 3000 steps (dotted = the paper\'s 300-step window)
 # supplementary caption sentence: "only information about the most frequently occurring
 # classes are learned." Data: `mse_skew` in appendix_sweeps.pt (exact mse_skew spec:
 # dup=3, lr=0.3, init=0.3, 3 seeds).
+#
+# (note from dante: I have lowkey zero clue what the above slop text is intending to say, but I will make it clear that based on the visual evidence, there does still seem to be compression, it just doesn't stay because the optimal solution here is actually to only fit the two common classes, but yeah seems like there's still a kick.)
 
 # %%
 fig, axes = plt.subplots(1, 3, figsize=(15, 4))
@@ -743,44 +745,19 @@ def series(cfg, model, node, fam, key):
     return steps, [r[s][node][fam][key] for s in steps]
 
 # %%
-# Ledger contributions (the showcase §3 stacked panel) per ablated run, next to the baseline.
-def ledger_ax(ax, cfg, model, ttl):
-    r = np.load(f'data/results/{cfg}/results_{model}.npy', allow_pickle=True).item()
-    steps = [s for s in sorted(r) if s > 0]
-    terms = {y: np.array([sum(float(r[s][f'blk{l}']['block_ledger'][y]) for l in range(NB[model]))
-                          for s in steps]) for y in ('chi', 'quality', 'interference')}
-    # refine the grid with sign crossings (interpolated in log-x) so fills close at zero
-    lx = np.log(np.array(steps, float))
-    cross = []
-    for v in terms.values():
-        i = np.nonzero(np.signbit(v[:-1]) != np.signbit(v[1:]))[0]
-        cross.append(lx[i] + v[i] / (v[i] - v[i + 1]) * (lx[i + 1] - lx[i]))
-    grid = np.unique(np.concatenate([lx, *cross]))
-    terms = {k: np.interp(grid, lx, v) for k, v in terms.items()}
-    gx = np.exp(grid)
-    pos, neg = np.zeros(len(gx)), np.zeros(len(gx))
-    for name, c in (('chi', 'tab:green'), ('quality', 'tab:red'), ('interference', 'tab:purple')):
-        up, dn = np.clip(terms[name], 0, None), np.clip(terms[name], None, 0)
-        ax.fill_between(gx, pos, pos + up, label=name, color=c, alpha=0.55, lw=0)
-        ax.fill_between(gx, neg, neg + dn, color=c, alpha=0.55, lw=0)
-        pos, neg = pos + up, neg + dn
-    ax.plot(gx, sum(terms.values()), 'k', lw=2, label='ΔS total')
-    es = [float(r[s]['blk0.attn.in']['acts_centered']['matrix_entropy']) for s in steps]
-    ax.plot(steps, es, color='0.4', ls=':', lw=1.2, label='S(embedding stream)')
-    ax.set(xscale='log', xlabel='step', title=ttl)
-
+# Ledger contributions (the showcase §3 stacked panel) per ablated run, next to the
+# baseline — plot_ledger_stack in the grid environment, styled as before (steps on x,
+# legend on the baseline panel only, ylabel on the left column, no figure export).
 for model in LOO_MODELS:
-    fig, axes = plt.subplots(2, 3, figsize=(16, 7), sharex=True, sharey=True)
-    ledger_ax(axes.flat[0], CFG(model), model, 'baseline')
-    for ax, tag in zip(axes.flat[1:], QUARTERS[NB[model]]):
-        try:
-            ledger_ax(ax, f'ablate_{tag}', model, f'− {tag}')
-        except FileNotFoundError:
-            ax.axis('off')
-    axes.flat[0].legend(fontsize=7)
-    axes[0, 0].set_ylabel('rank entropy'); axes[1, 0].set_ylabel('rank entropy')
-    fig.suptitle(f'Ledger contributions under ablation — {model}')
-    plt.tight_layout(); plt.show()
+    _lib.grid_start(ncols=3, figsize=(16, 7), sharex=True, sharey=True, savefig=False,
+                    title=f'Ledger contributions under ablation — {model}',
+                    xvar='steps', total_lw=2, emb_lw=1.2)
+    _lib.plot_ledger_stack(model, CFG(model), NB[model], title='baseline',
+                           legend=7, ylabel='rank entropy')
+    for i, tag in enumerate(QUARTERS[NB[model]]):
+        _lib.plot_ledger_stack(model, f'ablate_{tag}', NB[model], title=f'− {tag}',
+                               legend=None, ylabel='rank entropy' if i == 2 else None)
+    _lib.grid_show()
     caption(f'The decomposition ΔS = χ (green) + quality (red) + interference (purple), '
             f'summed over blocks, for {model}: top-left the unablated packed sweep, the '
             f'other five panels the ablated runs (− tag = those blocks\' writes zeroed). '
@@ -788,12 +765,14 @@ for model in LOO_MODELS:
             f'Descriptive only.')
 
 for model, tag in CARRIER.items():
-    fig, axes = plt.subplots(1, 2, figsize=(13, 4.5), sharex=True, sharey=True)
-    ledger_ax(axes[0], CFG(model), model, 'baseline')
-    ledger_ax(axes[1], f'ablate_{tag}', model, f'− {tag}')
-    axes[0].legend(fontsize=7); axes[0].set_ylabel('rank entropy')
-    fig.suptitle(f'Ledger contributions, {model}: baseline vs carrier ablation')
-    plt.tight_layout(); plt.show()
+    _lib.grid_start(ncols=2, figsize=(13, 4.5), sharex=True, sharey=True, savefig=False,
+                    title=f'Ledger contributions, {model}: baseline vs carrier ablation',
+                    xvar='steps', total_lw=2, emb_lw=1.2)
+    _lib.plot_ledger_stack(model, CFG(model), NB[model], title='baseline',
+                           legend=7, ylabel='rank entropy')
+    _lib.plot_ledger_stack(model, f'ablate_{tag}', NB[model], title=f'− {tag}',
+                           legend=None, ylabel=None)
+    _lib.grid_show()
     caption(f'The same stacked decomposition for {model}: left the unablated sweep, right '
             f'the run with {tag}\'s writes zeroed. Descriptive only.')
 

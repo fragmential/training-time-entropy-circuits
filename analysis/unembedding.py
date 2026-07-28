@@ -8,7 +8,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.5
 #   kernelspec:
-#     display_name: Python 3
+#     display_name: representation-geometry (3.14.6.final.0)
 #     language: python
 #     name: python3
 # ---
@@ -98,6 +98,8 @@ def share_k(F, W, ks, centered=True, rotate_seed=None):
 TOY_VARIANTS = ('single_long', 'uniform', 'nobottleneck', 'mse_skew', 'mse_uniform')
 CLS_COLORS = ('magenta', 'orange', 'royalblue', 'seagreen')
 PLOT_UNTIL = 400
+
+# %%
 fig, axes = plt.subplots(3, 5, figsize=(21, 10.8))
 for col, tag in enumerate(TOY_VARIANTS):
     t_ = traj(tag)
@@ -274,6 +276,12 @@ def cka_fw(F, W, rotate_seed=None):
     G = W.float() @ W.float().T
     return float((S * G).sum() / (S.norm() * G.norm()).clamp(min=1e-12))
 
+# The appendix init homotopy: α = 0 clustered → 1 iid-tiny init (all SKEW counts, dense
+# per-step trajectories); panels below reuse it.
+SW = torch.load('data/results/toy/appendix_sweeps.pt', weights_only=True)
+HOM_ALPHAS, HOM_SEEDS = ('0', '0.5', '0.75', '0.875', '1'), (0, 1, 2)
+
+# %%
 fig, axes = plt.subplots(1, 5, figsize=(19, 3.6), sharey=True)
 for ax, tag in zip(axes, TOY_VARIANTS):
     t = traj(tag)
@@ -314,12 +322,9 @@ caption('RankMe of W̃ over training for the three corrections (colors), with th
         'representations\' uncentered RankMe (dashed gray) for reference. Descriptive '
         'only.')
 
-# The same two statistics across the init homotopy (appendix_sweeps.pt): panel 1 =
-# single_long as above; panels 2–5 = α ∈ {0, 0.25, 0.5, 1} blends of the clustered
-# init toward iid-tiny (all SKEW counts, dense per-step trajectories).
-SW = torch.load('data/results/toy/appendix_sweeps.pt', weights_only=True)
-HOM_ALPHAS, HOM_SEEDS = ('0', '0.5', '0.75', '0.875', '1'), (0, 1, 2)
-
+# %%
+# The same two statistics across the init homotopy (SW): columns = α blends of the
+# clustered init toward iid-tiny, rows = seeds.
 for stat in ('cka', 'rankme'):
     fig, axes = plt.subplots(3, 5, figsize=(19, 10))
     for row, s in enumerate(HOM_SEEDS):
@@ -361,7 +366,34 @@ for stat in ('cka', 'rankme'):
 # From data/results/unembedding_spectra.pt (weights-only; all 7 models).
 
 # %%
+# Weights-side sources and spectrum statistics, shared by every §3 figure (and §4's d).
+# US: raw unembedding singular values per model/step. VS: the corrected variants
+# (W − 1·(Wᵀf), W(I−μ̂μ̂ᵀ), both), from oneoff_scripts/unembedding_variant_spectra.py —
+# absent until that job lands, in which case those figures are skipped.
 US = torch.load('data/results/unembedding_spectra.pt', weights_only=False)
+VS_PATH = 'data/results/unembedding_variant_spectra.pt'
+VS = torch.load(VS_PATH, weights_only=False) if os.path.exists(VS_PATH) else None
+HEAD_VARIANTS = ('standard', 'drop_top1', 'freq_centered', 'mean_deflated', 'freq_mean')
+WINDOWS = ((11, 100), (128, 512))                 # alphaReQ rank windows
+
+def _rm(sv):
+    lam = sv.numpy().astype(float) ** 2
+    p = lam / lam.sum(); p = p[p > 0]
+    return float(np.exp(-(p * np.log(p)).sum()))
+
+def _al(sv, k0, k1):
+    """alphaReQ: weighted log-log slope of the sv² decay over ranks [k0, k1)."""
+    try:
+        return _lib._alpha(sv.numpy().astype(float) ** 2, k0=k0, k1=k1)
+    except (ValueError, np.linalg.LinAlgError):
+        return np.nan
+
+def _sv_of(src, per_step, step, var):
+    """The spectrum to score: raw for standard, sv[1:] for drop_top1, else the variant."""
+    sv = per_step[step] if src is US else per_step[step].get(var)
+    return None if sv is None else (sv[1:] if var == 'drop_top1' else sv)
+
+# %%
 fig, axes = plt.subplots(2, 4, figsize=(19, 8))
 for ax, (model, per_step) in zip(axes.flat, US.items()):
     steps = sorted(per_step)
@@ -383,16 +415,7 @@ caption('Singular-value spectra of each model\'s unembedding at ~6 checkpoints a
 # One fig per spectrum: standard = raw sv; drop_top1 = sv[1:]; freq_centered = W − 1·(Wᵀf)
 # (empirical unigram f from the collection mix — softmax-invariant); mean_deflated =
 # W(I−μ̂μ̂ᵀ) with μ the after_final_norm stream mean at that step; freq_mean = both.
-# Corrected variants read data/results/unembedding_variant_spectra.pt
-# (oneoff_scripts/unembedding_variant_spectra.py) and are skipped until the job lands.
-def _rm(sv):
-    lam = sv.numpy().astype(float) ** 2
-    p = lam / lam.sum(); p = p[p > 0]
-    return float(np.exp(-(p * np.log(p)).sum()))
-
-VS_PATH = 'data/results/unembedding_variant_spectra.pt'
-VS = torch.load(VS_PATH, weights_only=False) if os.path.exists(VS_PATH) else None
-for var in ('standard', 'drop_top1', 'freq_centered', 'mean_deflated', 'freq_mean'):
+for var in HEAD_VARIANTS:
     src = US if var in ('standard', 'drop_top1') else VS
     if src is None:
         print(f'{var}: unembedding_variant_spectra.pt not present yet — job pending')
@@ -402,9 +425,8 @@ for var in ('standard', 'drop_top1', 'freq_centered', 'mean_deflated', 'freq_mea
         steps = sorted(per_step)
         xs = np.asarray(_lib.get_xs_tokens(model, steps), float)
         keep = xs > 0
-        sv_of = lambda s: (per_step[s] if src is US else per_step[s].get(var))
-        ys = np.asarray([_rm(sv_of(s)[1:]) if var == 'drop_top1' else
-                         (_rm(sv_of(s)) if sv_of(s) is not None else np.nan) for s in steps])
+        ys = np.asarray([_rm(sv) if (sv := _sv_of(src, per_step, s, var)) is not None
+                         else np.nan for s in steps])
         ok = keep & np.isfinite(ys)                       # join across missing checkpoints
         ax.plot(xs[ok], ys[ok], lw=1.8)
         ax.set(xscale='log', xlabel='tokens', title=model)
@@ -418,18 +440,9 @@ for var in ('standard', 'drop_top1', 'freq_centered', 'mean_deflated', 'freq_mea
             f'model, tokens on the x-axis. Descriptive only.')
 
 # %%
-# The same figures with alphaReQ (weighted log-log slope of the sv² decay, _lib._alpha)
-# instead of RankMe; two rank windows per panel: 11–100 (the standard bulk window) and
-# 128–512.
-WINDOWS = ((11, 100), (128, 512))
-
-def _al(sv, k0, k1):
-    try:
-        return _lib._alpha(sv.numpy().astype(float) ** 2, k0=k0, k1=k1)
-    except (ValueError, np.linalg.LinAlgError):
-        return np.nan
-
-for var in ('standard', 'drop_top1', 'freq_centered', 'mean_deflated', 'freq_mean'):
+# The same figures with alphaReQ (weighted log-log slope of the sv² decay) instead of
+# RankMe; two rank windows per panel: 11–100 (the standard bulk window) and 128–512.
+for var in HEAD_VARIANTS:
     src = US if var in ('standard', 'drop_top1') else VS
     if src is None:
         print(f'{var}: unembedding_variant_spectra.pt not present yet — job pending')
@@ -439,12 +452,10 @@ for var in ('standard', 'drop_top1', 'freq_centered', 'mean_deflated', 'freq_mea
         steps = sorted(per_step)
         xs = np.asarray(_lib.get_xs_tokens(model, steps), float)
         keep = xs > 0
-        sv_of = lambda s: (per_step[s] if src is US else per_step[s].get(var))
         ys0 = None
         for k0, k1 in WINDOWS:
-            ys = np.asarray([_al(sv_of(s)[1:], k0, k1) if var == 'drop_top1' else
-                             (_al(sv_of(s), k0, k1) if sv_of(s) is not None else np.nan)
-                             for s in steps])
+            ys = np.asarray([_al(sv, k0, k1) if (sv := _sv_of(src, per_step, s, var)) is not None
+                             else np.nan for s in steps])
             ok = keep & np.isfinite(ys)                   # join across missing checkpoints
             ax.plot(xs[ok], ys[ok], lw=1.8, label=f'{k0}–{k1}')
             ys0 = ys[ok] if ys0 is None else ys0
@@ -471,12 +482,24 @@ for var in ('standard', 'drop_top1', 'freq_centered', 'mean_deflated', 'freq_mea
 # and head singular vectors). Both final leaves; chance = k/d.
 
 # %%
-AL_PATH = 'data/results/unembedding_alignment.pt'
-if not os.path.exists(AL_PATH):
+# Alignment sources for §4 (each None until its job lands; the figures below skip on None).
+LEAVES = ('before_final_norm', 'after_final_norm')
+CKEYS = ('standard', 'freq_centered', 'mean_deflated', 'freq_mean')
+CCOLORS = ('tab:blue', 'tab:orange', 'tab:green', 'tab:purple')
+ROT_SEEDS = (0, 1, 2)
+
+def _load(path):
+    return torch.load(path, weights_only=False) if os.path.exists(path) else None
+
+AL = _load('data/results/unembedding_alignment.pt')       # share_k
+CK = _load('data/results/unembedding_cka.pt')             # CKA, packed stream
+CKP = _load('data/results/unembedding_cka_padded.pt')     # CKA, padded last-token stream
+
+# %%
+if AL is None:
     print('unembedding_alignment.pt not present yet — job pending')
 else:
-    AL = torch.load(AL_PATH, weights_only=False)
-    for leaf in ('before_final_norm', 'after_final_norm'):
+    for leaf in LEAVES:
         fig, axes = plt.subplots(2, 4, figsize=(19, 8))
         for ax, (model, res) in zip(axes.flat, AL.items()):
             r = res[leaf]
@@ -509,14 +532,10 @@ else:
 # the gap to the matching solid line, not the absolute level.
 
 # %%
-CKA_PATH = 'data/results/unembedding_cka.pt'
-if not os.path.exists(CKA_PATH):
+if CK is None:
     print('unembedding_cka.pt not present yet — job pending')
 else:
-    CK = torch.load(CKA_PATH, weights_only=False)
-    CKEYS = ('standard', 'freq_centered', 'mean_deflated', 'freq_mean')
-    CCOLORS = ('tab:blue', 'tab:orange', 'tab:green', 'tab:purple')
-    for leaf in ('before_final_norm', 'after_final_norm'):
+    for leaf in LEAVES:
         fig, axes = plt.subplots(2, 4, figsize=(19, 8))
         for ax, (model, by) in zip(axes.flat, CK.items()):
             steps = sorted(by)
@@ -526,8 +545,39 @@ else:
                 ys = np.asarray([by[s][leaf][v] for s in steps])
                 ax.plot(xs[keep], ys[keep], lw=1.6, color=c, label=v)
             for v, c in (('standard', 'tab:blue'), ('freq_centered', 'tab:orange')):
-                rot = np.asarray([[by[s][leaf][f'{v}_rot{r}'] for r in (0, 1, 2)] for s in steps])
+                rot = np.asarray([[by[s][leaf][f'{v}_rot{r}'] for r in ROT_SEEDS] for s in steps])
                 ax.fill_between(xs[keep], rot[keep].min(1), rot[keep].max(1), color=c,
+                                alpha=0.25, lw=0, label=f'{v} rotated')
+            ax.set(xscale='log', xlabel='tokens', title=model)
+            ax.legend(fontsize=6)
+        for ax in axes.flat[len(CK):]:
+            ax.axis('off')
+        axes[0, 0].set_ylabel(r'CKA$(\Sigma_c, \tilde{W}^\top\tilde{W})$')
+        axes[1, 0].set_ylabel(r'CKA$(\Sigma_c, \tilde{W}^\top\tilde{W})$')
+        fig.suptitle(f'Stream ↔ unembedding CKA over training — {leaf}')
+        plt.tight_layout(); plt.show()
+        caption(f'CKA between the centered stream covariance at {leaf} and the head Gram '
+                f'under each correction (solid lines), with the rotated-W controls as '
+                f'shaded min–max bands (3 seeds) for standard and freq_centered. One '
+                f'panel per model, tokens on the x-axis. Descriptive only.')
+
+# %%
+if CK is None:
+    print('unembedding_cka.pt not present yet — job pending')
+else:
+    for leaf in LEAVES:
+        fig, axes = plt.subplots(2, 4, figsize=(19, 8))
+        for ax, (model, by) in zip(axes.flat, CK.items()):
+            steps = sorted(by)
+            xs = np.asarray(_lib.get_xs_tokens(model, steps), float)
+            keep = xs > 0
+            rot_base = np.asarray([[by[s][leaf][f'standard_rot{r}'] for r in ROT_SEEDS] for s in steps])[keep].mean(1)
+            for v, c in zip(CKEYS, CCOLORS):
+                ys = np.asarray([by[s][leaf][v] for s in steps])
+                ax.plot(xs[keep], ys[keep]/rot_base, lw=1.6, color=c, label=v)
+            for v, c in (('standard', 'tab:blue'), ('freq_centered', 'tab:orange')):
+                rot = np.asarray([[by[s][leaf][f'{v}_rot{r}'] for r in ROT_SEEDS] for s in steps])
+                ax.fill_between(xs[keep], rot[keep].min(1)/rot_base, rot[keep].max(1)/rot_base, color=c,
                                 alpha=0.25, lw=0, label=f'{v} rotated')
             ax.set(xscale='log', xlabel='tokens', title=model)
             ax.legend(fontsize=6)
@@ -545,12 +595,10 @@ else:
 # %%
 # The identical figures on the padded (last-token) stream set — Σc from
 # final_stream_svd_padded via unembedding_cka.py --stream_dir; no nanochat (no padded data).
-CKA_PATH_P = 'data/results/unembedding_cka_padded.pt'
-if not os.path.exists(CKA_PATH_P):
+if CKP is None:
     print('unembedding_cka_padded.pt not present yet — job pending')
 else:
-    CKP = torch.load(CKA_PATH_P, weights_only=False)
-    for leaf in ('before_final_norm', 'after_final_norm'):
+    for leaf in LEAVES:
         fig, axes = plt.subplots(2, 4, figsize=(19, 8))
         for ax, (model, by) in zip(axes.flat, CKP.items()):
             steps = sorted(by)
@@ -560,7 +608,7 @@ else:
                 ys = np.asarray([by[s][leaf][v] for s in steps])
                 ax.plot(xs[keep], ys[keep], lw=1.6, color=c, label=v)
             for v, c in (('standard', 'tab:blue'), ('freq_centered', 'tab:orange')):
-                rot = np.asarray([[by[s][leaf][f'{v}_rot{r}'] for r in (0, 1, 2)] for s in steps])
+                rot = np.asarray([[by[s][leaf][f'{v}_rot{r}'] for r in ROT_SEEDS] for s in steps])
                 ax.fill_between(xs[keep], rot[keep].min(1), rot[keep].max(1), color=c,
                                 alpha=0.25, lw=0, label=f'{v} rotated')
             ax.set(xscale='log', xlabel='tokens', title=model)
@@ -575,3 +623,199 @@ else:
                 f'CKA between the centered stream covariance and the head Gram per '
                 f'correction, rotated-W controls shaded. No nanochat (no padded data). '
                 f'Descriptive only.')
+
+# %% [markdown]
+# ### Head alphaReQ vs stream alphaReQ, same window
+#
+# The windowed alphaReQ of the standard unembedding spectrum (§3) overlaid on the SAME
+# statistic computed on the model's own after_final_norm centered stream covariance
+# (block_representations_samples; nanochat from nanochat_samples). Separate y-axes — the
+# two live on different scales; only the shapes are comparable. Shown for the bulk window
+# 11–100 and for the deeper 32–512.
+
+# %%
+BLOCK_SAMPLES = 'block_representations_samples'
+AFN_HOOK = ('after_final_norm', 'acts_centered')
+
+def cfg_of(model):
+    return 'nanochat_samples' if model == 'nanochat-d12' else BLOCK_SAMPLES
+
+X_MIN = 10 ** 8.5                                  # shared x starts here (non-nanochat panels)
+
+def _span(vs, log=False):
+    """Common axis range over a list of value arrays, padded 5% (multiplicatively if log)."""
+    lo, hi = min(v.min() for v in vs), max(v.max() for v in vs)
+    if log:
+        f = (hi / lo) ** 0.02
+        return lo / f, hi * f
+    pad = 0.05 * (hi - lo) or 0.05
+    return lo - pad, hi + pad
+
+def alpha_overlay(k0, k1, rankme=False):
+    """Per model: unembedding alphaReQ[k0,k1) (blue, left) vs the same statistic on its own
+    after_final_norm stream (red, twin right), and with rankme=True the stream's RankMe as a
+    third series (green, second right spine). Every color and the token axis share one range
+    across panels — set explicitly, not via sharex/sharey, so every panel keeps its own
+    drawn-and-labelled axes — with nanochat excluded from all of them (its run is ~2 dex
+    shorter and its levels sit elsewhere)."""
+    fig, axes = plt.subplots(2, 4, figsize=(19, 8))
+    rights, shared, x_vals = [], [], []
+    vals = {'blue': [], 'red': [], 'green': []}                  # non-nanochat, on-screen only
+    for ax, (model, per_step) in zip(axes.flat, US.items()):
+        steps = sorted(per_step)
+        xs = np.asarray(_lib.get_xs_tokens(model, steps), float)
+        ys = np.asarray([_al(per_step[s], k0, k1) for s in steps])
+        ok = (xs > 0) & np.isfinite(ys)
+        lines = [ax.plot(xs[ok], ys[ok], lw=1.8, color='tab:blue',
+                         label='unembedding (standard)')[0]]
+        ax.tick_params(axis='y', labelcolor='tab:blue')
+        share = 'nanochat' not in model                          # nanochat: own x and y ranges
+        if share:
+            x_vals.append(xs[ok])
+            if (vis := ok & (xs >= X_MIN)).any():
+                vals['blue'].append(ys[vis])
+
+        exs = [ax.twinx()]
+        if rankme:
+            exs.append(ax.twinx())
+            exs[1].spines['right'].set_position(('outward', 42))
+        rights.append(exs)
+        series = [('red', 'alpha_window', {'k0': k0, 'k1': k1}, 'stream alphaReQ')]
+        if rankme:
+            series.append(('green', 'rankme', {}, 'stream RankMe'))
+        for ex, (col, yvar, kw, lbl) in zip(exs, series):
+            sy, ssteps = _lib.get_ys(cfg_of(model), model, AFN_HOOK, yvar, kw)
+            ex.tick_params(axis='y', labelcolor=f'tab:{col}')
+            if sy is None:
+                continue
+            sxs = np.asarray(_lib.get_xs_tokens(model, ssteps), float)
+            sy = np.asarray(sy, float)
+            sok = (sxs > 0) & np.isfinite(sy)
+            lines.append(ex.plot(sxs[sok], sy[sok], lw=1.8, color=f'tab:{col}', label=lbl)[0])
+            if share:
+                x_vals.append(sxs[sok])
+                if (svis := sok & (sxs >= X_MIN)).any():
+                    vals[col].append(sy[svis])
+        if share:
+            shared.append((ax, exs))
+        ax.set(xscale='log', xlabel='tokens', title=model)
+        ax.legend(handles=lines, fontsize=6)
+    for ax in axes.flat[len(US):]:
+        ax.axis('off')
+
+    if x_vals:                                                   # left edge pinned at X_MIN
+        _, xhi = _span(x_vals, log=True)
+        for ax, _ in shared:
+            ax.set_xlim(X_MIN, xhi)
+    if vals['blue']:
+        ylim = _span(vals['blue'])
+        for ax, _ in shared:
+            ax.set_ylim(*ylim)
+    for j, col in enumerate(('red', 'green')):
+        if vals[col] and j < len(rights[0]):
+            ylim = _span(vals[col])
+            for _, exs in shared:
+                exs[j].set_ylim(*ylim)
+    for r in (0, 1):
+        axes[r, 0].set_ylabel(f'alphaReQ [{k0}–{k1}] of the unembedding', color='tab:blue')
+    for j in (3, len(rights) - 1):                               # labels on the right edge
+        rights[j][0].set_ylabel(f'alphaReQ [{k0}–{k1}] of the stream', color='tab:red')
+        if rankme:
+            rights[j][1].set_ylabel('RankMe of the stream', color='tab:green')
+    fig.suptitle(f'alphaReQ (ranks {k0}–{k1}) — unembedding (left axis) vs the model\'s own '
+                 f'after_final_norm stream (right axis)'
+                 + (', with the stream RankMe (outer right axis)' if rankme else ''))
+    plt.tight_layout(); plt.show()
+
+def rankme_overlay():
+    """Per model: RankMe of the unembedding spectrum (blue, left) vs RankMe of the
+    after_final_norm stream covariance (red, twin right), each solid = full spectrum,
+    dashed = with the top eigendirection dropped. x is shared as in alpha_overlay (nanochat
+    excepted); y is NOT shared — every panel autoscales both of its axes."""
+    fig, axes = plt.subplots(2, 4, figsize=(19, 8))
+    twins, shared, x_vals = [], [], []
+    for ax, (model, per_step) in zip(axes.flat, US.items()):
+        steps = sorted(per_step)
+        xs = np.asarray(_lib.get_xs_tokens(model, steps), float)
+        share = 'nanochat' not in model                          # nanochat: own x and y ranges
+        ex = ax.twinx()
+        twins.append(ex)
+        lines = []
+        for drop1, ls, lbl in ((False, '-', 'full spectrum'),
+                               (True, '--', 'top-1 dropped')):
+            hv = np.asarray([_rm(per_step[s][1:] if drop1 else per_step[s]) for s in steps])
+            ok = (xs > 0) & np.isfinite(hv)
+            lines.append(ax.plot(xs[ok], hv[ok], ls, lw=1.8, color='tab:blue',
+                                 label=f'unembedding, {lbl}')[0])
+            sv, ssteps = _lib.get_ys(cfg_of(model), model, AFN_HOOK,
+                                     'tail_rankme' if drop1 else 'rankme',
+                                     {'k': 1} if drop1 else {})
+            if share:
+                x_vals.append(xs[ok])
+            if sv is None:
+                continue
+            sxs = np.asarray(_lib.get_xs_tokens(model, ssteps), float)
+            sv = np.asarray(sv, float)
+            sok = (sxs > 0) & np.isfinite(sv)
+            lines.append(ex.plot(sxs[sok], sv[sok], ls, lw=1.8, color='tab:red',
+                                 label=f'stream, {lbl}')[0])
+            if share:
+                x_vals.append(sxs[sok])
+        ax.tick_params(axis='y', labelcolor='tab:blue')
+        ex.tick_params(axis='y', labelcolor='tab:red')
+        if share:
+            shared.append((ax, ex))
+        ax.set(xscale='log', xlabel='tokens', title=model)
+        ax.legend(handles=lines, fontsize=6)
+    for ax in axes.flat[len(US):]:
+        ax.axis('off')
+    if x_vals:                                                   # left edge pinned at X_MIN
+        _, xhi = _span(x_vals, log=True)
+        for ax, _ in shared:
+            ax.set_xlim(X_MIN, xhi)
+    for r in (0, 1):
+        axes[r, 0].set_ylabel('RankMe of the unembedding', color='tab:blue')
+    for j in (3, len(twins) - 1):
+        twins[j].set_ylabel('RankMe of the stream', color='tab:red')
+    fig.suptitle('RankMe — unembedding (left axis) vs the after_final_norm stream (right axis); '
+                 'solid = full spectrum, dashed = top eigendirection dropped; y autoscaled per panel')
+    plt.tight_layout(); plt.show()
+
+def overlay_caption(k0, k1, rankme=False):
+    return (f'Blue (left axis): alphaReQ of the standard unembedding singular-value-squared '
+            f'spectrum over ranks {k0}–{k1}, as in §3. Red (right axis): the same windowed '
+            f'alphaReQ on the model\'s own centered after_final_norm stream covariance '
+            f'(packed samples run). '
+            + ('Green (outer right axis): RankMe of that same stream covariance — the '
+               'headline curve, window-free. ' if rankme else '')
+            + f'The series keep separate scales, but each scale is shared across panels — '
+            f'blue comparable to blue, red to red{", green to green" if rankme else ""} — as '
+            f'is the token axis, which starts at 10^8.5 tokens; nanochat-d12 is excluded from '
+            f'all of them and autoscales on its own (much shorter run). Every panel draws its '
+            f'own labelled axes. Checkpoint grids differ between the unembedding and stream '
+            f'series. Descriptive only.')
+
+# %%
+alpha_overlay(*WINDOWS[0])                                       # the standard bulk window, 11–100
+caption(overlay_caption(*WINDOWS[0]))
+#FIGURE D1
+
+# %%
+alpha_overlay(11, 256)                                           # deeper band, both series
+caption(overlay_caption(11, 256))
+
+# %%
+alpha_overlay(*WINDOWS[0], rankme=True)                          # same, with the stream RankMe
+caption(overlay_caption(*WINDOWS[0], rankme=True))
+
+
+# %%
+rankme_overlay()
+caption('Blue (left axis): RankMe of the unembedding singular-value-squared spectrum. Red '
+        '(right axis): RankMe of the centered after_final_norm stream covariance (packed '
+        'samples run). Solid = full spectrum; dashed = the top eigendirection dropped '
+        '(sv[1:] for the head, tail_rankme k=1 for the stream) — the control for the two '
+        'objects\' rank-1 spikes, the head\'s unigram direction and the stream\'s dominant '
+        'direction. Every panel autoscales its own y axes (levels differ by model, so only '
+        'the shapes are comparable); the token axis is shared from 10^8.5, nanochat-d12 '
+        'excepted. Descriptive only.')

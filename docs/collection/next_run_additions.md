@@ -3,6 +3,9 @@
 Everything here is **inline-only** (needs raw samples at metric time; samples are never
 persisted), so existing results can't be patched — these land on the next collection sweep.
 
+0. Cosine of centered samples against mean
+0. Cosine of centered class samples against their GT unembed row. / + I guess all the things from "Linguistic Collapse: Neural Collapse in (Large) Language Models" (wu2024linguistic)
+
 1. **`cos_cr` also against the incoming stream** (`cos_c_rin`): the per-token mean cosine in
    `block_residual_coupling` is currently measured only against the *final* stream $r$;
    add the same against $r_{<k}$ (the views are already fetched — `_c_r`'s `v[1]`).

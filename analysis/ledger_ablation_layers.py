@@ -8,7 +8,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.5
 #   kernelspec:
-#     display_name: Python 3
+#     display_name: representation-geometry (3.14.6.final.0)
 #     language: python
 #     name: python3
 # ---
@@ -31,11 +31,17 @@ import matplotlib.pyplot as plt
 from analysis import experiments_lib as _lib
 importlib.reload(_lib)
 from analysis.experiments_lib import plot_layer_contribution, grid_start, grid_show
+from utils.model_registry import get_token_count
 
 NB = {'pythia-160m-deduped': 12, 'pythia-410m-deduped': 24, 'pythia-1b-deduped': 16,
       'pythia-6.9b-deduped': 32, 'OLMo-2-0425-1B': 16, 'OLMo-2-1124-7B': 32,
       'nanochat-d12': 12}
 CFG = lambda m: 'nanochat_samples' if m == 'nanochat-d12' else 'block_representations_samples'
+QUARTERS = {12: ['blk0-2', 'blk3-5', 'blk6-8', 'blk9-11', 'blk3-8'],
+            16: ['blk0-3', 'blk4-7', 'blk8-11', 'blk12-15', 'blk4-11'],
+            24: ['blk0-5', 'blk6-11', 'blk12-17', 'blk18-23', 'blk6-17'],
+            32: ['blk0-7', 'blk8-15', 'blk16-23', 'blk24-31', 'blk8-23']}
+CARRIER = {'pythia-1b-deduped': 'blk3', 'pythia-6.9b-deduped': 'blk4-5'}
 
 def ledger_ax(ax, cfg, model, layers, ttl):
     """Stacked χ/quality/interference fills over training, summed over `layers` only."""
@@ -44,7 +50,7 @@ def ledger_ax(ax, cfg, model, layers, ttl):
     terms = {y: np.array([sum(float(r[s][f'blk{l}']['block_ledger'][y]) for l in layers)
                           for s in steps]) for y in ('chi', 'quality', 'interference')}
     # refine the grid with sign crossings (interpolated in log-x) so fills close at zero
-    lx = np.log(np.array(steps, float))
+    lx = np.log(np.array([get_token_count(model, s) for s in steps], float))
     cross = []
     for v in terms.values():
         i = np.nonzero(np.signbit(v[:-1]) != np.signbit(v[1:]))[0]
@@ -60,7 +66,7 @@ def ledger_ax(ax, cfg, model, layers, ttl):
         pos, neg = pos + up, neg + dn
     ax.plot(gx, sum(terms.values()), 'k', lw=2, label='ΔS (group)')
     ax.axhline(0, color='gray', lw=0.8)
-    ax.set(xscale='log', xlabel='step', title=ttl)
+    ax.set(xscale='log', xlabel='Pretraining tokens', title=ttl)
 
 def ledger_fig(model, ablate):
     """2x2: rows = final layer / last quarter contributions, cols = baseline / ablated."""
@@ -141,3 +147,40 @@ ledger_term_stacks('nanochat-d12', 'blk3-5')
 # %%
 # pythia-1b: the same three depth stacks, baseline vs the blk3 (carrier) ablation.
 ledger_term_stacks('pythia-1b-deduped', 'blk3')
+
+# %%
+for model, nb in NB.items():
+    ledger_term_stacks(model, QUARTERS[nb][0])
+
+# %% [markdown]
+# ## OLMo-2: single mid-late layer + third quarter, baseline vs second-quarter ablation
+
+# %%
+def ledger_pair(model, single):
+    """2x2 ledger: rows = single layer / third quarter, cols = baseline / − second quarter."""
+    L = NB[model]
+    q2 = f'blk{L // 4}-{L // 2 - 1}'
+    q3 = list(range(L // 2, 3 * L // 4))
+    rows = [(f'blk{single}', [single]),
+            (f'third quarter (blk{q3[0]}-{q3[-1]})', q3)]
+    fig, axes = plt.subplots(2, 2, figsize=(13, 8), sharex=True)
+    for (label, layers), (axl, axr) in zip(rows, axes):
+        ledger_ax(axl, CFG(model), model, layers, f'baseline — {label}')
+        ledger_ax(axr, f'ablate_{q2}', model, layers, f'− {q2} — {label}')
+        axl.set_ylabel('rank entropy')
+        lo = min(axl.get_ylim()[0], axr.get_ylim()[0])
+        hi = max(axl.get_ylim()[1], axr.get_ylim()[1])
+        axl.set_ylim(lo, hi); axr.set_ylim(lo, hi)
+    axes[0, 0].legend(fontsize=7)
+    fig.suptitle(f'Ledger contributions — {model}, baseline vs {q2} writes zeroed')
+    plt.tight_layout()
+    outdir = Path('analysis/figures/ledger_ablation_layers')
+    outdir.mkdir(parents=True, exist_ok=True)
+    fig.savefig(outdir / f'{model}_q2_ablation_single_q3.pdf', bbox_inches='tight')
+    plt.show()
+
+# %%
+ledger_pair('OLMo-2-0425-1B', 10)
+
+# %%
+ledger_pair('OLMo-2-1124-7B', 15)

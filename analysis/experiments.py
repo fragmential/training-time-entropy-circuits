@@ -6,9 +6,9 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.19.4
+#       jupytext_version: 1.19.5
 #   kernelspec:
-#     display_name: representation-geometry (3.14.0)
+#     display_name: representation-geometry (3.14.6.final.0)
 #     language: python
 #     name: python3
 # ---
@@ -239,24 +239,23 @@ plot_group('rankme_center_diff', data_sources_2[:1], filter_model_names)
 plot_group('rankme_center_prop', data_sources_2[:1], filter_model_names)
 grid_show()
 
-grid_start(ncols=2, title='Final residual Trace and Mean interaction', omit_step0=False)
-plot_group('trace', data_sources_5[:1], filter_model_names, title='Before final norm, uncentered')
-plot_group('trace', data_sources_5[1:], filter_model_names, title='After final norm, uncentered')
+# grid_start(ncols=2, title='Final residual Trace and Mean interaction', omit_step0=False)
+# plot_group('trace', data_sources_5[:1], filter_model_names, title='Before final norm, uncentered')
+# plot_group('trace', data_sources_5[1:], filter_model_names, title='After final norm, uncentered')
 
-plot_group('trace', data_sources_3[:1], filter_model_names, title='Before final norm, centered')
-plot_group('trace', data_sources_3[1:], filter_model_names, title='After final norm, centered')
+# plot_group('trace', data_sources_3[:1], filter_model_names, title='Before final norm, centered')
+# plot_group('trace', data_sources_3[1:], filter_model_names, title='After final norm, centered')
 
-plot_group('mean_norm', data_sources_5[:1], filter_model_names, title='Before final norm')
-plot_group('mean_norm', data_sources_5[1:], filter_model_names, title='After final norm')
+# plot_group('mean_norm', data_sources_5[:1], filter_model_names, title='Before final norm')
+# plot_group('mean_norm', data_sources_5[1:], filter_model_names, title='After final norm')
 
-plot_group('mean_frac', data_sources_5[:1], filter_model_names, title='Before final norm')
-plot_group('mean_frac', data_sources_5[1:], filter_model_names, title='After final norm')
+# plot_group('mean_frac', data_sources_5[:1], filter_model_names, title='Before final norm')
+# plot_group('mean_frac', data_sources_5[1:], filter_model_names, title='After final norm')
 
-# plot_group('mean_ratio', data_sources_5[:1], filter_model_names, title='Before final norm', disable_midx=[1])
-# plot_group('mean_ratio', data_sources_5[1:], filter_model_names, title='After final norm', disable_midx=[1])
+# # plot_group('mean_ratio', data_sources_5[:1], filter_model_names, title='Before final norm', disable_midx=[1])
+# # plot_group('mean_ratio', data_sources_5[1:], filter_model_names, title='After final norm', disable_midx=[1])
 
-grid_show()
-
+# grid_show()
 
 # %% [markdown]
 # ### Block Means
@@ -403,6 +402,15 @@ CFG_BS = lambda m: 'nanochat_samples' if m == 'nanochat-d12' else BLOCK_SAMPLES
 
 _rr_srcs = lambda model: [(CFG_BS(model), (f'blk{l}.{s}.out', 'block_residual_coupling'), f'{s} {l}')
                           for l in range(NB_BS[model]) for s in ('attn', 'mlp')]
+_tr_srcs = lambda model: [(CFG_BS(model), (f'blk{l}.{s}.out', 'acts_uncentered'), f'{s} {l}')
+                          for l in range(NB_BS[model]) for s in ('attn', 'mlp')]
+_ledger_srcs = lambda model: [(CFG_BS(model), (f'blk{l}', 'block_ledger'), f'blk {l}')
+                              for l in range(NB_BS[model])]
+
+
+
+# %%
+
 grid_start(ncols=2, title='Layer contribution — share of final-stream energy (R over r)')
 for model in MODELS_LC:
     plot_layer_contribution(model, _rr_srcs(model), yvar='R_over_r', normalize=False,
@@ -412,8 +420,6 @@ grid_show()
 # %%
 # Share of residual energy from just the traces: uncentered write traces normalized over
 # writes + the embedding stream; gray dashed = the embedding's share.
-_tr_srcs = lambda model: [(CFG_BS(model), (f'blk{l}.{s}.out', 'acts_uncentered'), f'{s} {l}')
-                          for l in range(NB_BS[model]) for s in ('attn', 'mlp')]
 grid_start(ncols=2, title='Layer contribution — share of residual energy (trace)')
 for model in MODELS_LC:
     plot_layer_contribution(model, _tr_srcs(model), yvar='trace', normalize=True,
@@ -425,12 +431,17 @@ grid_show()
 # Ledger-based layer contribution: each block's signed ΔS_k (= χ + quality + interference —
 # overlap and cross terms INCLUDED, unlike the gross-energy stack above). Positives stack up,
 # negatives down; the net stack height is log RankMe(final) − log RankMe(embeddings).
-_ledger_srcs = lambda model: [(CFG_BS(model), (f'blk{l}', 'block_ledger'), f'blk {l}')
-                              for l in range(NB_BS[model])]
+# Dotted gray = S(embedding stream) as its change from the first step (0 at t0), so it sits
+# on the stack's scale rather than at its own absolute offset. Black = the measured depth
+# differential S(before_final_norm) − S(embedding), which the signed stack should sum to.
 grid_start(ncols=2, title='Layer contribution — rank-entropy ledger (signed ΔS)')
 for model in MODELS_LC:
     plot_layer_contribution(model, _ledger_srcs(model), yvar='delta_s', normalize=False,
-                            title=get_model_label(model))
+                            title=get_model_label(model), baseline_ls=':', baseline_delta=True,
+                            baseline_src=(CFG_BS(model), ('blk0.attn.in', 'acts_centered'),
+                                          'ΔS(embedding stream)', 'matrix_entropy'),
+                            total_src=(CFG_BS(model), ('before_final_norm', 'acts_centered'),
+                                       'S(bfn) − S(emb)', 'matrix_entropy'))
 grid_show()
 
 # %%
@@ -448,46 +459,11 @@ for term in ('chi', 'quality', 'interference'):
 # depth-differential is measured against.
 
 # %%
-def ledger_stack(model):
-    import numpy as np
-    import matplotlib.pyplot as plt
-    cfg = CFG_BS(model)
-    terms = {y: np.sum([_lib.get_ys(cfg, model, (f'blk{l}', 'block_ledger'), y)[0]
-                        for l in range(NB_BS[model])], axis=0)
-             for y in ('chi', 'quality', 'interference')}
-    xs = np.asarray(_lib.get_xs_tokens(
-        model, _lib.get_ys(cfg, model, ('blk0', 'block_ledger'), 'chi')[1]), float)
-    keep = xs > 0
-    xs, terms = xs[keep], {k: np.asarray(v, float)[keep] for k, v in terms.items()}
-    # refine the grid with sign crossings so fills pinch to zero instead of twisting
-    lx = np.log(xs)
-    cross = []
-    for v in terms.values():
-        i = np.nonzero(np.signbit(v[:-1]) != np.signbit(v[1:]))[0]
-        cross.append(lx[i] + v[i] / (v[i] - v[i + 1]) * (lx[i + 1] - lx[i]))
-    grid = np.unique(np.concatenate([lx, *cross]))
-    terms = {k: np.interp(grid, lx, v) for k, v in terms.items()}
-    gx = np.exp(grid)
-    plt.figure(figsize=(8, 4))
-    pos, neg = np.zeros(len(gx)), np.zeros(len(gx))
-    for name, c in (('chi', 'tab:green'), ('quality', 'tab:red'), ('interference', 'tab:purple')):
-        up, dn = np.clip(terms[name], 0, None), np.clip(terms[name], None, 0)
-        plt.fill_between(gx, pos, pos + up, label=name, color=c, alpha=0.55, lw=0)
-        plt.fill_between(gx, neg, neg + dn, color=c, alpha=0.55, lw=0)
-        pos, neg = pos + up, neg + dn
-    plt.plot(gx, sum(terms.values()), 'k', lw=2.5, label='ΔS total')
-    es, esteps = _lib.get_ys(cfg, model, ('blk0.attn.in', 'acts_centered'), 'matrix_entropy')
-    if es is not None:
-        exs = np.asarray(_lib.get_xs_tokens(model, esteps), float)
-        ek = exs > 0
-        plt.plot(exs[ek], np.asarray(es, float)[ek], color='0.4', ls=':', lw=1.5,
-                 label='S(embedding stream)')
-    plt.xscale('log'); plt.xlabel('tokens'); plt.ylabel('rank entropy')
-    plt.legend(fontsize=8); plt.title(f'Ledger contributions — {get_model_label(model)}')
-    plt.show()
-
+grid_start(ncols=2, title='Ledger contribution stacks')
 for model in MODELS_LC:
-    ledger_stack(model)
+    _lib.plot_ledger_stack(model, CFG_BS(model), NB_BS[model],
+                           title=get_model_label(model))
+grid_show()
 
 # %% [markdown]
 # #### Per-block ledger terms over training (showcase formatting): ΔS, quality, overlap
