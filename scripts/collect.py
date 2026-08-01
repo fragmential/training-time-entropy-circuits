@@ -199,7 +199,8 @@ class CollectConfig:
     # GPU nodes, so the spill counts against the job's memory — 7B-scale runs leave this off.
     drift_metrics: "bool | dict[str, bool] | list[bool]" = False
     # Per-layer vocabulary-entropy lens (utils/entropy_lens.py): mean next-token-distribution
-    # entropy of each residual depth, computed teacher-forced on the collection batches.
+    # entropy AND its alphaReQ (rank-11–100 slope of the sorted probabilities) at each residual
+    # depth, computed teacher-forced on the collection batches.
     # Saved into the results file under node "vocab_entropy" (requires compute_metrics).
     vocab_entropy: bool = False
     # Leave-one-out groups for the inline `loo` metric: list of block-index lists, or

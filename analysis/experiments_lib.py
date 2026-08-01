@@ -128,6 +128,8 @@ def _alpha(evs: np.ndarray, k0: int = 32, k1: int = 300) -> float:
 virtual_hooks = {
     "peak_eigval": (["eigenspectrum", "trace"], (lambda evs, tr: evs[0].item()*tr)),
     "tail_rankme": (["eigenspectrum"], (lambda evs, k=32: _rankme(np.asarray(evs)[k:]))),
+    "tail_matrix_entropy": (["eigenspectrum"],
+                            (lambda evs, k=32: float(np.log(_rankme(np.asarray(evs)[k:]))))),
     "alpha_window": (["eigenspectrum"], _alpha),   # kwargs k0/k1: bulk alphaReQ, head excluded
     "top1_dominance": (["eigenspectrum"], (lambda evs: float(evs[0] / evs[1]))),   # λ1/λ2
     "eigvals": (["eigenspectrum", "trace"], (lambda evs, tr: evs*tr)),
@@ -297,6 +299,7 @@ YVAR_LABELS = {
     'cos_drift_ema':         r'$\cos(\mu_t, \overline{\mu}_{<t})$ (EMA drift)',
     # Block-composition / ledger family (samples runs)
     'tail_rankme':           r'RankMe of $\lambda_{>k}$ (head removed)',
+    'tail_matrix_entropy':   r'Matrix entropy of $\lambda_{>k}$ (head removed)',
     'alpha_window':          r'$\alpha_{[k_0,k_1)}$ (windowed)',
     'top1_dominance':        r'$\lambda_1/\lambda_2$ (head top-1 dominance)',
     'delta_s':               r'$\Delta S$ (block rank-entropy change)',
@@ -572,9 +575,11 @@ def legend_or_colorbar(legend_max: int = 12):
 
 _grid = None
 
-def grid_start(ncols=2, figsize=None, title=None, savefig=True, savedir=None, ylim=None, sharey=False, sharex=False, **kwargs):
+def grid_start(ncols=2, figsize=None, title=None, savefig=True, savedir=None, ylim=None, sharey=False, sharex=False, all_xlabels=False, **kwargs):
+    """sharex/sharey take plt.subplots' values: True (whole grid), 'row', 'col', False.
+    all_xlabels=True keeps the x tick labels/label on every panel despite sharex."""
     global _grid
-    _grid = dict(ncols=ncols, figsize=figsize, title=title, savefig=savefig, savedir=savedir, ylim=ylim, sharey=sharey, sharex=sharex, extra_kwargs=kwargs, calls=[])
+    _grid = dict(ncols=ncols, figsize=figsize, title=title, savefig=savefig, savedir=savedir, ylim=ylim, sharey=sharey, sharex=sharex, all_xlabels=all_xlabels, extra_kwargs=kwargs, calls=[])
 
 def grid_show():
     global _grid
@@ -588,6 +593,7 @@ def grid_show():
     ylim = _grid['ylim']
     sharey = _grid['sharey']
     sharex = _grid['sharex']
+    all_xlabels = _grid['all_xlabels']
     extra_kwargs = _grid['extra_kwargs']
     _grid = None
 
@@ -597,11 +603,15 @@ def grid_show():
     for i, (func, args, kwargs) in enumerate(calls):
         func(*args, _ax=axes[i], **(extra_kwargs | kwargs))
     used = axes[:len(calls)]
-    if sharey and ylim is None:                       # share one comparable y-range across the grid
-        lims = [ax.get_ylim() for ax in used]
+    if sharey is True and ylim is None:               # share one comparable y-range across the grid
+        lims = [ax.get_ylim() for ax in used]         # ('row'/'col' sharing is matplotlib's own job)
         ylim = (min(l[0] for l in lims), max(l[1] for l in lims))
     if ylim:
         for ax in used: ax.set_ylim(*ylim)
+    if all_xlabels:                                   # undo sharex's hiding of the inner tick labels
+        for ax in used:
+            ax.tick_params(labelbottom=True)
+            ax.xaxis.get_label().set_visible(True)
     for ax in axes[len(calls):]:
         ax.set_visible(False)
     plt.tight_layout()
@@ -616,6 +626,7 @@ def grid_show():
         savedir = savedir or title or 'unnamed'
         outdir = Path('analysis/figures') / savedir
         outdir.mkdir(parents=True, exist_ok=True)
+        fig.savefig(outdir / '_grid.pdf', bbox_inches='tight')   # the assembled panel, as shown
         for i, (func, args, kwargs) in enumerate(calls):
             subplot_title = (extra_kwargs | kwargs).get('title')
             safe_name = f'{i}_{subplot_title}'.replace('/', '_').replace(' ', '_') if subplot_title else f'{i}_subplot'
@@ -840,25 +851,27 @@ def plot_layer_contribution(model, sources, xvar='tokens', yvar='trace', title=N
     plt.show()
 
 
-@griddable
 # The showcase §3 "Ledger contributions" stack: the three ledger terms summed over blocks,
 # sign-stacked over training (positives up from zero, negatives down); black = ΔS total.
 @griddable
-def plot_ledger_stack(model, source, n_blocks, xvar='tokens', title=None,
-                      ylabel='rank entropy', legend=8, emb=True,
+def plot_ledger_stack(model, source, n_blocks=None, blocks=None, xvar='tokens', title=None,
+                      ylabel='rank entropy', legend=8, emb=True, zero_line=False,
                       total_lw=2.5, emb_lw=1.5):
-    """One model's ledger stack from results dir `source`. The x-grid is refined with each
+    """One model's ledger stack from results dir `source`, summed over `blocks` (an explicit
+    list of block indices) or the first `n_blocks`. The x-grid is refined with each
     term's sign crossings (interpolated in log-x, where the drawn segments are straight) so
     each fill closes vertically at zero instead of drawing a twisted quadrilateral across
     the opposite stack when a term changes sign. emb: dotted gray S(embedding stream), the
-    base of the black depth-differential. legend: fontsize, or None to skip (grids with a
-    shared legend put it on one panel only). A missing source turns the panel off."""
-    probe, steps = get_ys(source, model, ('blk0', 'block_ledger'), 'chi')
+    base of the black depth-differential (only meaningful for a whole-depth stack). legend:
+    fontsize, or None to skip (grids with a shared legend put it on one panel only). A
+    missing source turns the panel off."""
+    blocks = list(range(n_blocks)) if blocks is None else list(blocks)
+    probe, steps = get_ys(source, model, (f'blk{blocks[0]}', 'block_ledger'), 'chi')
     if probe is None:
         plt.gca().axis('off')
         return
     terms = {y: np.sum([get_ys(source, model, (f'blk{l}', 'block_ledger'), y)[0]
-                        for l in range(n_blocks)], axis=0)
+                        for l in blocks], axis=0)
              for y in ('chi', 'quality', 'interference')}
     xs = np.asarray(XVAR_FNS[xvar](model, steps), float)
     keep = xs > 0                                        # step 0 is off a log axis anyway
@@ -878,6 +891,8 @@ def plot_ledger_stack(model, source, n_blocks, xvar='tokens', title=None,
         plt.fill_between(gx, neg, neg + dn, color=c, alpha=0.55, lw=0)
         pos, neg = pos + up, neg + dn
     plt.plot(gx, sum(terms.values()), 'k', lw=total_lw, label='ΔS total')
+    if zero_line:                                        # the pivot the signed fills close on
+        plt.axhline(0, color='gray', lw=0.8)
     if emb:
         es, esteps = get_ys(source, model, ('blk0.attn.in', 'acts_centered'), 'matrix_entropy')
         if es is not None:

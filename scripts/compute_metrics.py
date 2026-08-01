@@ -822,6 +822,14 @@ def _overlap_chi(node: Node) -> dict | None:
     return {"chi": chi, "h_w": h_w, "chi_frac": chi / h_w if h_w > 0 else 0.0, "w": w}
 
 
+# Width above which the nuclear norm is skipped. It needs its own d×d SVD per pair (the cross-
+# covariance is non-symmetric, and its singular values follow from neither leaf's auto-covariance
+# spectrum), which is ~0.8× the rest of the pair's work up to d=2048 but 6.7× at d=4096 (H100,
+# fp32: 49 ms vs 415 ms). At 7B scale — M=64 leaves, 2016 pairs, 50 checkpoints — that is +12 h
+# of GPU-locked time per sweep, so the big models get everything except `nuclear`.
+_NUCLEAR_MAX_D = 2048
+
+
 def _block_block_coupling(node: Node) -> dict | None:
     """Pairwise block↔block reductions over all blk*.{attn,mlp}.out leaves: the all-pairs
     CKA matrix (each Cov(c_j, c_k) materialized transiently, bypassing the resolver cache)
@@ -832,7 +840,8 @@ def _block_block_coupling(node: Node) -> dict | None:
         cka:          torch.Tensor  # (M, M) CKA(c_j, c_k) ∈ [0,1], symmetric
         signed_trace: torch.Tensor  # (M, M) normalized signed tr Cov(c_j, c_k) ∈ [-1,1]
         nuclear:      torch.Tensor  # (M, M) ‖Cov(c_j, c_k)‖* = Σσ_i; diagonal = tr (PSD), so
-                                    #   tr/‖·‖* gives a signed alignment that is 1 on the diagonal
+                                    #   tr/‖·‖* gives a signed alignment that is 1 on the diagonal.
+                                    #   ABSENT above _NUCLEAR_MAX_D — see the constant.
         mean_cos:     torch.Tensor  # (M, M) mean per-token cos(c_j, c_k) — democratic counterpart
     """
     views = _block_out_views(node)
@@ -842,9 +851,11 @@ def _block_block_coupling(node: Node) -> dict | None:
     tr, fro = zip(*(_tr_fro(_t(l)) for *_, l in comps))
     if any(t == 0 for t in tr):
         return None    # a zero block output (e.g. zero-init c_proj at step 0) — coupling undefined
+    nuc_on = _t(comps[0][0]).shape[1] <= _NUCLEAR_MAX_D
     stats = prefer_gpu(lambda Xj, mj, Xk, mk: (
         C := Xj.float().T @ Xk.float() / Xj.shape[0] - torch.outer(mj, mk),
-        C.trace(), C.square().sum(), torch.linalg.svdvals(C).sum(),
+        C.trace(), C.square().sum(),
+        torch.linalg.svdvals(C).sum() if nuc_on else C.new_zeros(()),
         ((Xj.float() * Xk.float()).sum(1) / (Xj.float().norm(dim=1) * Xk.float().norm(dim=1))).mean())[1:])
     M = len(views)
     cka, st, mc = torch.eye(M), torch.eye(M), torch.eye(M)
@@ -856,8 +867,8 @@ def _block_block_coupling(node: Node) -> dict | None:
             st[j, k] = st[k, j] = float(trC) / (tr[j] * tr[k]) ** 0.5
             nuc[j, k] = nuc[k, j] = float(nucC)
             mc[j, k] = mc[k, j] = float(cos)
-    return {"leaves": [p for p, _ in views], "cka": cka, "signed_trace": st, "nuclear": nuc,
-            "mean_cos": mc}
+    return {"leaves": [p for p, _ in views], "cka": cka, "signed_trace": st, "mean_cos": mc,
+            **({"nuclear": nuc} if nuc_on else {})}
 
 
 def _mean_migration(node: Node, m: int = 32) -> dict | None:

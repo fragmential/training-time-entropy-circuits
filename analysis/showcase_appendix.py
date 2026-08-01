@@ -34,7 +34,10 @@ import torch
 import matplotlib.pyplot as plt
 from analysis import experiments_lib as _lib
 importlib.reload(_lib)
-from analysis.experiments_lib import get_model_label
+from analysis.experiments_lib import get_model_label, get_xs_tokens, XVAR_LABELS
+
+# LLM x-axes are pretraining tokens (XVAR_FNS['tokens']); only the toy sections use steps.
+TOKENS = XVAR_LABELS['tokens']
 
 BLOCK_SAMPLES = 'block_representations_samples'
 SWAP = 'block_representations_samples_swap'
@@ -150,9 +153,9 @@ def swap_quality(model):
 plt.figure(figsize=(9, 4.5))
 for model, c in (('pythia-1b-deduped', 'tab:red'), ('OLMo-2-0425-1B', 'tab:blue')):
     for lbl, (st, q) in swap_quality(model).items():
-        plt.plot(st, q, color=c, lw=2, ls='--' if 'swap' in lbl else '-',
+        plt.plot(get_xs_tokens(model, st), q, color=c, lw=2, ls='--' if 'swap' in lbl else '-',
                  label=f'{get_model_label(model)}, {lbl}')
-plt.xscale('log'); plt.xlabel('step'); plt.ylabel('Σ quality (over blocks)')
+plt.xscale('log'); plt.xlabel(TOKENS); plt.ylabel('Σ quality (over blocks)')
 plt.title('Dataset-swap control: the ledger driver follows the MODEL, not the data')
 plt.legend(fontsize=8); plt.show()
 caption('Σquality for each 1B model on its own mix (solid) vs the other family\'s mix '
@@ -220,7 +223,9 @@ for i, d in enumerate(DELTAS):
                          textcoords='offset points')
 axes[1].set(xlabel='fork-onset step (0 = separated from init)',
             ylabel='decline (largest post-warmup drawdown)', title='decline vs fork timing')
-plt.tight_layout(); plt.show()
+plt.tight_layout()
+plt.savefig(f'figures/fork_timing.pdf', bbox_inches='tight')
+plt.show()
 caption('Left: mean RankMe per δ over 10 seeds (darker = smaller δ = later fork; δ=0.316 '
         'starts with the pair already separated). Right: decline vs fork step (faint = '
         'seeds, solid = means; declines measured on the full 1000-step runs).')
@@ -523,6 +528,8 @@ caption('Packed (top): spectrum and RankMe essentially invariant from 16k rows u
         'head-crush is a representation property, not sample count. Padded post-norm '
         '(bottom right): RankMe is still climbing at the standard budget, so trends at '
         'fixed N are safe but tail-band levels across different n are not comparable.')
+#FIGURE H
+# CONTROLS section
 
 # %% [markdown]
 # ## F. One candidate route for the padded last-token puzzle, ruled out
@@ -618,9 +625,11 @@ caption('Answer: no. Left: the slot rows\' enormous write is almost entirely gon
 # %%
 LOO_MODELS = ['pythia-160m-deduped', 'pythia-410m-deduped', 'pythia-1b-deduped',
               'pythia-6.9b-deduped', 'OLMo-2-0425-1B', 'OLMo-2-1124-7B', 'nanochat-d12']
+ALL6 = ['pythia-410m-deduped', 'pythia-1b-deduped', 'pythia-6.9b-deduped', 'nanochat-d12', 'OLMo-2-0425-1B', 'OLMo-2-1124-7B']
 NB = {'pythia-160m-deduped': 12, 'pythia-410m-deduped': 24, 'pythia-1b-deduped': 16,
       'pythia-6.9b-deduped': 32, 'OLMo-2-0425-1B': 16, 'OLMo-2-1124-7B': 32,
       'nanochat-d12': 12}
+CFG = lambda m: 'nanochat_samples' if m == 'nanochat-d12' else 'block_representations_samples'
 
 def loo_res(model, key='delta_rankme'):
     r = np.load(f'data/results/loo_samples/results_{model}.npy', allow_pickle=True).item()
@@ -643,9 +652,9 @@ for ax, model in zip(axes.flat, LOO_MODELS):
         if '-' in g:
             continue
         k = int(g[3:])
-        ax.plot(steps, ys, lw=1.3, color=plt.get_cmap('viridis')(k / (L - 1)))
+        ax.plot(get_xs_tokens(model, steps), ys, lw=1.3, color=plt.get_cmap('viridis')(k / (L - 1)))
     ax.axhline(0, color='gray', lw=0.8)
-    ax.set(xscale='log', xlabel='step', title=model)
+    ax.set(xscale='log', xlabel=TOKENS, title=model)
 for ax in axes.flat[len(LOO_MODELS):]:
     ax.axis('off')
 axes[0, 0].set_ylabel('delta RankMe (single blocks)')
@@ -659,11 +668,11 @@ caption('delta_rankme per single-block group over training, per model (colorbar 
 fig, axes = plt.subplots(2, 4, figsize=(19, 8))
 for ax, model in zip(axes.flat, LOO_MODELS):
     st, base = loo_base(model)
-    ax.plot(st, base, 'k', lw=2.2, label='baseline')
+    ax.plot(get_xs_tokens(model, st), base, 'k', lw=2.2, label='baseline')
     steps, loo = loo_res(model, key='rankme')
     for g in [g for g in loo if '-' in g]:
-        ax.plot(steps, loo[g], lw=1.4, label=f'− {g}')
-    ax.set(xscale='log', xlabel='step', title=model)
+        ax.plot(get_xs_tokens(model, steps), loo[g], lw=1.4, label=f'− {g}')
+    ax.set(xscale='log', xlabel=TOKENS, title=model)
     ax.legend(fontsize=6)
 for ax in axes.flat[len(LOO_MODELS):]:
     ax.axis('off')
@@ -680,9 +689,9 @@ for ax, model in zip(axes.flat, LOO_MODELS):
     steps, loo = loo_res(model, key='delta_entropy')
     chunks = [g for g in loo if '-' in g]
     for g in chunks:
-        ax.plot(steps, loo[g], lw=1.6, label=g)
+        ax.plot(get_xs_tokens(model, steps), loo[g], lw=1.6, label=g)
     ax.axhline(0, color='gray', lw=0.8)
-    ax.set(xscale='log', xlabel='step', title=model)
+    ax.set(xscale='log', xlabel=TOKENS, title=model)
     ax.legend(fontsize=6)
 for ax in axes.flat[len(LOO_MODELS):]:
     ax.axis('off')
@@ -696,7 +705,6 @@ caption('delta_entropy (rank entropy S, unablated − ablated) for the contiguou
 # %%
 # Single-WRITE leave-one-out (`ablation_contribution`, covariance-space) from the MAIN
 # packed sweeps — per attn/mlp write separately.
-CFG = lambda m: 'nanochat_samples' if m == 'nanochat-d12' else 'block_representations_samples'
 for sub in ('mlp', 'attn'):
     fig, axes = plt.subplots(2, 4, figsize=(19, 8))
     for ax, model in zip(axes.flat, LOO_MODELS):
@@ -708,9 +716,9 @@ for sub in ('mlp', 'attn'):
                   for s in steps]
             if ys[0] is None:
                 continue
-            ax.plot(steps, ys, lw=1.2, color=plt.get_cmap('viridis')(l / (L - 1)))
+            ax.plot(get_xs_tokens(model, steps), ys, lw=1.2, color=plt.get_cmap('viridis')(l / (L - 1)))
         ax.axhline(0, color='gray', lw=0.8)
-        ax.set(xscale='log', xlabel='step', title=model)
+        ax.set(xscale='log', xlabel=TOKENS, title=model)
     for ax in axes.flat[len(LOO_MODELS):]:
         ax.axis('off')
     axes[0, 0].set_ylabel(f'delta RankMe ({sub} writes)')
@@ -746,12 +754,12 @@ def series(cfg, model, node, fam, key):
 
 # %%
 # Ledger contributions (the showcase §3 stacked panel) per ablated run, next to the
-# baseline — plot_ledger_stack in the grid environment, styled as before (steps on x,
+# baseline — plot_ledger_stack in the grid environment, styled as before (tokens on x,
 # legend on the baseline panel only, ylabel on the left column, no figure export).
-for model in LOO_MODELS:
+for model in ALL6:
     _lib.grid_start(ncols=3, figsize=(16, 7), sharex=True, sharey=True, savefig=False,
                     title=f'Ledger contributions under ablation — {model}',
-                    xvar='steps', total_lw=2, emb_lw=1.2)
+                    xvar='tokens', total_lw=2, emb_lw=1.2)
     _lib.plot_ledger_stack(model, CFG(model), NB[model], title='baseline',
                            legend=7, ylabel='rank entropy')
     for i, tag in enumerate(QUARTERS[NB[model]]):
@@ -767,7 +775,7 @@ for model in LOO_MODELS:
 for model, tag in CARRIER.items():
     _lib.grid_start(ncols=2, figsize=(13, 4.5), sharex=True, sharey=True, savefig=False,
                     title=f'Ledger contributions, {model}: baseline vs carrier ablation',
-                    xvar='steps', total_lw=2, emb_lw=1.2)
+                    xvar='tokens', total_lw=2, emb_lw=1.2)
     _lib.plot_ledger_stack(model, CFG(model), NB[model], title='baseline',
                            legend=7, ylabel='rank entropy')
     _lib.plot_ledger_stack(model, f'ablate_{tag}', NB[model], title=f'− {tag}',
@@ -777,20 +785,21 @@ for model, tag in CARRIER.items():
             f'the run with {tag}\'s writes zeroed. Descriptive only.')
 
 # %%
+PLT_MODELS = ALL6
 for leaf in ('after_final_norm', 'before_final_norm'):
-    fig, axes = plt.subplots(2, 4, figsize=(19, 8))
-    for ax, model in zip(axes.flat, LOO_MODELS):
+    fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+    for ax, model in zip(axes.flat, PLT_MODELS):
         st, base = series(CFG(model), model, leaf, 'acts_centered', 'rankme')
-        ax.plot(st, base, 'k', lw=2.2, label='baseline')
+        ax.plot(get_xs_tokens(model, st), base, 'k', lw=2.2, label='baseline')
         for i, tag in enumerate(interventions(model)):
             try:
                 st2, ys = series(f'ablate_{tag}', model, leaf, 'acts_centered', 'rankme')
             except FileNotFoundError:
                 continue
-            ax.plot(st2, ys, lw=1.4, color=plt.get_cmap('tab10')(i), label=f'− {tag}')
-        ax.set(xscale='log', xlabel='step', title=model)
+            ax.plot(get_xs_tokens(model, st2), ys, lw=1.4, color=plt.get_cmap('tab10')(i), label=f'− {tag}')
+        ax.set(xscale='log', xlabel=TOKENS, title=model)
         ax.legend(fontsize=6)
-    for ax in axes.flat[len(LOO_MODELS):]:
+    for ax in axes.flat[len(PLT_MODELS):]:
         ax.axis('off')
     axes[0, 0].set_ylabel(f'{leaf} RankMe (centered)')
     axes[1, 0].set_ylabel(f'{leaf} RankMe (centered)')
@@ -800,8 +809,8 @@ for leaf in ('after_final_norm', 'before_final_norm'):
             f'sweep, colors = each ablated run (− tag = those blocks\' writes zeroed). '
             f'Descriptive only.')
 
-    fig, axes = plt.subplots(2, 4, figsize=(19, 8))
-    for ax, model in zip(axes.flat, LOO_MODELS):
+    fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+    for ax, model in zip(axes.flat, PLT_MODELS):
         st, base = series(CFG(model), model, leaf, 'acts_centered', 'matrix_entropy')
         bmap = dict(zip(st, base))
         for i, tag in enumerate(interventions(model)):
@@ -810,11 +819,12 @@ for leaf in ('after_final_norm', 'before_final_norm'):
             except FileNotFoundError:
                 continue
             pts = [(s, bmap[s] - y) for s, y in zip(st2, ys) if s in bmap]
-            ax.plot(*zip(*pts), lw=1.4, color=plt.get_cmap('tab10')(i), label=f'− {tag}')
+            ax.plot(get_xs_tokens(model, [s for s, _ in pts]), [d for _, d in pts],
+                    lw=1.4, color=plt.get_cmap('tab10')(i), label=f'− {tag}')
         ax.axhline(0, color='gray', lw=0.8)
-        ax.set(xscale='log', xlabel='step', title=model)
+        ax.set(xscale='log', xlabel=TOKENS, title=model)
         ax.legend(fontsize=6)
-    for ax in axes.flat[len(LOO_MODELS):]:
+    for ax in axes.flat[len(PLT_MODELS):]:
         ax.axis('off')
     axes[0, 0].set_ylabel('delta S (baseline − ablated)')
     axes[1, 0].set_ylabel('delta S (baseline − ablated)')
@@ -823,6 +833,35 @@ for leaf in ('after_final_norm', 'before_final_norm'):
     caption(f'The same runs as deltas at {leaf}, in rank entropy S: baseline S minus ablated S '
             f'at matching checkpoints, one line per intervention. Positive = the ablated run '
             f'sits below the baseline. Descriptive only.')
+
+#FIGURE B5?
+# idk where this goes. but I'd like to show black + remove last quarter + remove third quarter + remove first quarter
+
+# %%
+# The same runs and leaves as the RankMe grid above, read out as the power-law exponent
+# alpha_ReQ (stringer fit over eigenvalue ranks 11-100) instead of RankMe.
+for leaf in ('after_final_norm', 'before_final_norm'):
+    fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+    for ax, model in zip(axes.flat, PLT_MODELS):
+        st, base = series(CFG(model), model, leaf, 'acts_centered', 'alpha')
+        ax.plot(get_xs_tokens(model, st), base, 'k', lw=2.2, label='baseline')
+        for i, tag in enumerate(interventions(model)):
+            try:
+                st2, ys = series(f'ablate_{tag}', model, leaf, 'acts_centered', 'alpha')
+            except FileNotFoundError:
+                continue
+            ax.plot(get_xs_tokens(model, st2), ys, lw=1.4, color=plt.get_cmap('tab10')(i), label=f'− {tag}')
+        ax.set(xscale='log', xlabel=TOKENS, title=model)
+        ax.legend(fontsize=6)
+    for ax in axes.flat[len(PLT_MODELS):]:
+        ax.axis('off')
+    axes[0, 0].set_ylabel(f'{leaf} alpha (centered)')
+    axes[1, 0].set_ylabel(f'{leaf} alpha (centered)')
+    fig.suptitle(f'{leaf} alpha_ReQ under ablation: baseline (black) vs each intervention')
+    plt.tight_layout(); plt.show()
+    caption(f'{leaf} centered alpha_ReQ (power-law fit over eigenvalue ranks 11-100) over '
+            f'training: black = the unablated packed sweep, colors = each ablated run '
+            f'(− tag = those blocks\' writes zeroed). Descriptive only.')
 
 # %%
 def summed_term(cfg, model, term):
@@ -835,15 +874,15 @@ for term in ('quality', 'interference', 'chi'):
     fig, axes = plt.subplots(2, 4, figsize=(19, 8))
     for ax, model in zip(axes.flat, LOO_MODELS):
         st, base = summed_term(CFG(model), model, term)
-        ax.plot(st, base, 'k', lw=2.2, label='baseline')
+        ax.plot(get_xs_tokens(model, st), base, 'k', lw=2.2, label='baseline')
         for i, tag in enumerate(interventions(model)):
             try:
                 st2, ys = summed_term(f'ablate_{tag}', model, term)
             except FileNotFoundError:
                 continue
-            ax.plot(st2, ys, lw=1.4, color=plt.get_cmap('tab10')(i), label=f'− {tag}')
+            ax.plot(get_xs_tokens(model, st2), ys, lw=1.4, color=plt.get_cmap('tab10')(i), label=f'− {tag}')
         ax.axhline(0, color='gray', lw=0.8)
-        ax.set(xscale='log', xlabel='step', title=model)
+        ax.set(xscale='log', xlabel=TOKENS, title=model)
         ax.legend(fontsize=6)
     for ax in axes.flat[len(LOO_MODELS):]:
         ax.axis('off')
@@ -866,9 +905,10 @@ for term in ('quality', 'delta_s'):
             L = NB[model]
             for l in range(L):
                 ys = [float(r[s][f'blk{l}']['block_ledger'][term]) for s in steps]
-                ax.plot(steps, ys, lw=1.3, color=plt.get_cmap('viridis')(l / (L - 1)))
+                ax.plot(get_xs_tokens(model, steps), ys, lw=1.3,
+                        color=plt.get_cmap('viridis')(l / (L - 1)))
             ax.axhline(0, color='gray', lw=0.8)
-            ax.set(xscale='log', xlabel='step', title=ttl)
+            ax.set(xscale='log', xlabel=TOKENS, title=ttl)
         axes[0].set_ylabel(f'per-block {term}')
         fig.suptitle(f'Per-block {term}, {model}: baseline vs carrier ablation')
         plt.tight_layout(); plt.show()

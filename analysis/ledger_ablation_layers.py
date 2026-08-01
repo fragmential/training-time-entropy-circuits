@@ -30,8 +30,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from analysis import experiments_lib as _lib
 importlib.reload(_lib)
-from analysis.experiments_lib import plot_layer_contribution, grid_start, grid_show
-from utils.model_registry import get_token_count
+from analysis.experiments_lib import (plot_layer_contribution, plot_ledger_stack,
+                                      grid_start, grid_show)
 
 NB = {'pythia-160m-deduped': 12, 'pythia-410m-deduped': 24, 'pythia-1b-deduped': 16,
       'pythia-6.9b-deduped': 32, 'OLMo-2-0425-1B': 16, 'OLMo-2-1124-7B': 32,
@@ -43,56 +43,38 @@ QUARTERS = {12: ['blk0-2', 'blk3-5', 'blk6-8', 'blk9-11', 'blk3-8'],
             32: ['blk0-7', 'blk8-15', 'blk16-23', 'blk24-31', 'blk8-23']}
 CARRIER = {'pythia-1b-deduped': 'blk3', 'pythia-6.9b-deduped': 'blk4-5'}
 
-def ledger_ax(ax, cfg, model, layers, ttl):
-    """Stacked χ/quality/interference fills over training, summed over `layers` only."""
-    r = np.load(f'data/results/{cfg}/results_{model}.npy', allow_pickle=True).item()
-    steps = [s for s in sorted(r) if s > 0]
-    terms = {y: np.array([sum(float(r[s][f'blk{l}']['block_ledger'][y]) for l in layers)
-                          for s in steps]) for y in ('chi', 'quality', 'interference')}
-    # refine the grid with sign crossings (interpolated in log-x) so fills close at zero
-    lx = np.log(np.array([get_token_count(model, s) for s in steps], float))
-    cross = []
-    for v in terms.values():
-        i = np.nonzero(np.signbit(v[:-1]) != np.signbit(v[1:]))[0]
-        cross.append(lx[i] + v[i] / (v[i] - v[i + 1]) * (lx[i + 1] - lx[i]))
-    grid = np.unique(np.concatenate([lx, *cross]))
-    terms = {k: np.interp(grid, lx, v) for k, v in terms.items()}
-    gx = np.exp(grid)
-    pos, neg = np.zeros(len(gx)), np.zeros(len(gx))
-    for name, c in (('chi', 'tab:green'), ('quality', 'tab:red'), ('interference', 'tab:purple')):
-        up, dn = np.clip(terms[name], 0, None), np.clip(terms[name], None, 0)
-        ax.fill_between(gx, pos, pos + up, label=name, color=c, alpha=0.55, lw=0)
-        ax.fill_between(gx, neg, neg + dn, color=c, alpha=0.55, lw=0)
-        pos, neg = pos + up, neg + dn
-    ax.plot(gx, sum(terms.values()), 'k', lw=2, label='ΔS (group)')
-    ax.axhline(0, color='gray', lw=0.8)
-    ax.set(xscale='log', xlabel='Pretraining tokens', title=ttl)
+def ledger_grid(model, rows, cols, title, savedir, figsize=None):
+    """Grid of experiments_lib.plot_ledger_stack panels: rows = (label, block list),
+    cols = (label, results dir). sharey='row' keeps each row's panels comparable without
+    flattening single-layer rows against whole-quarter ones; all_xlabels keeps the token
+    axis on every row. emb=False: the embedding line is only meaningful full-depth."""
+    grid_start(ncols=len(cols), figsize=figsize or (6.5 * len(cols), 4 * len(rows)),
+               sharex=True, sharey='row', all_xlabels=True, emb=False, zero_line=True,
+               title=title, savedir=savedir)
+    for i, (rlabel, layers) in enumerate(rows):
+        for j, (clabel, cfg) in enumerate(cols):
+            plot_ledger_stack(model, cfg, blocks=layers, title=f'{clabel} — {rlabel}',
+                              ylabel='rank entropy' if j == 0 else None,
+                              legend=7 if i == 0 and j == 0 else None)
+    grid_show()
 
 def ledger_fig(model, ablate):
-    """2x2: rows = final layer / last quarter contributions, cols = baseline / ablated."""
+    """3x2: rows = penultimate / final layer / last quarter, cols = baseline / ablated."""
     L = NB[model]
-    rows = [(f'final layer (blk{L - 1})', [L - 1]),
+    rows = [(f'penultimate layer (blk{L - 2})', [L - 2]),
+            (f'final layer (blk{L - 1})', [L - 1]),
             (f'last quarter (blk{3 * L // 4}-{L - 1})', list(range(3 * L // 4, L)))]
-    fig, axes = plt.subplots(2, 2, figsize=(13, 8), sharex=True)
-    for (label, layers), (axl, axr) in zip(rows, axes):
-        ledger_ax(axl, CFG(model), model, layers, f'baseline — {label}')
-        ledger_ax(axr, f'ablate_{ablate}', model, layers, f'− {ablate} — {label}')
-        axl.set_ylabel('rank entropy')
-        lo = min(axl.get_ylim()[0], axr.get_ylim()[0])
-        hi = max(axl.get_ylim()[1], axr.get_ylim()[1])
-        axl.set_ylim(lo, hi); axr.set_ylim(lo, hi)
-    axes[0, 0].legend(fontsize=7)
-    fig.suptitle(f'Ledger contributions per layer group — {model}, {ablate} writes zeroed')
-    plt.tight_layout()
-    outdir = Path('analysis/figures/ledger_ablation_layers')
-    outdir.mkdir(parents=True, exist_ok=True)
-    fig.savefig(outdir / f'{model}_{ablate}.pdf', bbox_inches='tight')
-    plt.show()
+    ledger_grid(model, rows, [('baseline', CFG(model)), (f'− {ablate}', f'ablate_{ablate}')],
+                f'Ledger contributions per layer group — {model}, {ablate} writes zeroed',
+                f'ledger_ablation_layers/{model}_{ablate}')
 
 # %%
-# pythia-1b (16 blocks), blk3 (the carrier) ablated. Row 1: the final layer's
-# contributions (blk15); row 2: the last quarter's (blk12-15). Left baseline, right ablated.
+# pythia-1b (16 blocks), blk3 (the carrier) ablated. Rows: the penultimate layer's
+# contributions (blk14), the final layer's (blk15), the last quarter's (blk12-15).
+# Left baseline, right ablated.
 ledger_fig('pythia-1b-deduped', 'blk3')
+# FIGURE B2?.?
+# Not sure where. but this needs to be in. Also the pythia 6.9b version but that's blk3-4 which we currently don't have yet.
 
 # %%
 # The other models: the carrier where one exists (pythia-6.9b: blk4-5), otherwise the
@@ -107,25 +89,13 @@ for model, ablate in ABLATIONS.items():
 # nanochat-d12: the late layers 9/10/11 separately and together, baseline vs the two
 # early-block ablations.
 model = 'nanochat-d12'
-rows = [('blk9', [9]), ('blk10', [10]), ('blk11', [11]), ('blk9-11', [9, 10, 11])]
-cols = [('baseline', CFG(model)), ('− blk0-2', 'ablate_blk0-2'), ('− blk3-5', 'ablate_blk3-5')]
-fig, axes = plt.subplots(4, 3, figsize=(16, 14), sharex=True)
-for (rlabel, layers), axrow in zip(rows, axes):
-    for (clabel, cfg), ax in zip(cols, axrow):
-        ledger_ax(ax, cfg, model, layers, f'{clabel} — {rlabel}')
-    lo = min(a.get_ylim()[0] for a in axrow)
-    hi = max(a.get_ylim()[1] for a in axrow)
-    for a in axrow:
-        a.set_ylim(lo, hi)
-    axrow[0].set_ylabel('rank entropy')
-axes[0, 0].legend(fontsize=7)
-fig.suptitle(f'Ledger contributions of late layers — {model}, baseline vs early-block ablations')
-plt.tight_layout()
-outdir = Path('analysis/figures/ledger_ablation_layers')
-outdir.mkdir(parents=True, exist_ok=True)
-fig.savefig(outdir / f'{model}_late_layers.pdf', bbox_inches='tight')
-plt.show()
+ledger_grid(model,
+            [('blk9', [9]), ('blk10', [10]), ('blk11', [11]), ('blk9-11', [9, 10, 11])],
+            [('baseline', CFG(model)), ('− blk0-2', 'ablate_blk0-2'), ('− blk3-5', 'ablate_blk3-5')],
+            f'Ledger contributions of late layers — {model}, baseline vs early-block ablations',
+            f'ledger_ablation_layers/{model}_late_layers', figsize=(16, 14))
 
+# %%
 # The per-block depth stacks (the experiments.ipynb ledger stacks), baseline vs ablated,
 # per ledger term. The embedding entropy line only makes sense on the ΔS stack.
 TERM_LABEL = {'delta_s': 'signed ΔS', 'quality': 'quality', 'interference': 'interference'}
@@ -161,26 +131,13 @@ def ledger_pair(model, single):
     L = NB[model]
     q2 = f'blk{L // 4}-{L // 2 - 1}'
     q3 = list(range(L // 2, 3 * L // 4))
-    rows = [(f'blk{single}', [single]),
-            (f'third quarter (blk{q3[0]}-{q3[-1]})', q3)]
-    fig, axes = plt.subplots(2, 2, figsize=(13, 8), sharex=True)
-    for (label, layers), (axl, axr) in zip(rows, axes):
-        ledger_ax(axl, CFG(model), model, layers, f'baseline — {label}')
-        ledger_ax(axr, f'ablate_{q2}', model, layers, f'− {q2} — {label}')
-        axl.set_ylabel('rank entropy')
-        lo = min(axl.get_ylim()[0], axr.get_ylim()[0])
-        hi = max(axl.get_ylim()[1], axr.get_ylim()[1])
-        axl.set_ylim(lo, hi); axr.set_ylim(lo, hi)
-    axes[0, 0].legend(fontsize=7)
-    fig.suptitle(f'Ledger contributions — {model}, baseline vs {q2} writes zeroed')
-    plt.tight_layout()
-    outdir = Path('analysis/figures/ledger_ablation_layers')
-    outdir.mkdir(parents=True, exist_ok=True)
-    fig.savefig(outdir / f'{model}_q2_ablation_single_q3.pdf', bbox_inches='tight')
-    plt.show()
+    rows = [(f'blk{single}', [single]), (f'third quarter (blk{q3[0]}-{q3[-1]})', q3)]
+    ledger_grid(model, rows, [('baseline', CFG(model)), (f'− {q2}', f'ablate_{q2}')],
+                f'Ledger contributions — {model}, baseline vs {q2} writes zeroed',
+                f'ledger_ablation_layers/{model}_q2_ablation_single_q3', figsize=(13, 8))
 
 # %%
 ledger_pair('OLMo-2-0425-1B', 10)
 
 # %%
-ledger_pair('OLMo-2-1124-7B', 15)
+ledger_pair('OLMo-2-1124-7B', 16)

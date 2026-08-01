@@ -727,11 +727,19 @@ def alpha_overlay(k0, k1, rankme=False):
                  + (', with the stream RankMe (outer right axis)' if rankme else ''))
     plt.tight_layout(); plt.show()
 
-def rankme_overlay():
-    """Per model: RankMe of the unembedding spectrum (blue, left) vs RankMe of the
-    after_final_norm stream covariance (red, twin right), each solid = full spectrum,
+# (metric name, head scorer on a singular-value tensor, stream yvar full / top-1 dropped)
+OVERLAY_METRICS = {
+    'RankMe': (lambda sv: _rm(sv), 'rankme', 'tail_rankme'),
+    'matrix entropy': (lambda sv: float(np.log(_rm(sv))), 'matrix_entropy',
+                       'tail_matrix_entropy'),
+}
+
+def rankme_overlay(metric='RankMe'):
+    """Per model: `metric` of the unembedding spectrum (blue, left) vs the same statistic on
+    the after_final_norm stream covariance (red, twin right), each solid = full spectrum,
     dashed = with the top eigendirection dropped. x is shared as in alpha_overlay (nanochat
     excepted); y is NOT shared — every panel autoscales both of its axes."""
+    head_fn, full_var, tail_var = OVERLAY_METRICS[metric]
     fig, axes = plt.subplots(2, 4, figsize=(19, 8))
     twins, shared, x_vals = [], [], []
     for ax, (model, per_step) in zip(axes.flat, US.items()):
@@ -743,12 +751,12 @@ def rankme_overlay():
         lines = []
         for drop1, ls, lbl in ((False, '-', 'full spectrum'),
                                (True, '--', 'top-1 dropped')):
-            hv = np.asarray([_rm(per_step[s][1:] if drop1 else per_step[s]) for s in steps])
+            hv = np.asarray([head_fn(per_step[s][1:] if drop1 else per_step[s]) for s in steps])
             ok = (xs > 0) & np.isfinite(hv)
             lines.append(ax.plot(xs[ok], hv[ok], ls, lw=1.8, color='tab:blue',
                                  label=f'unembedding, {lbl}')[0])
             sv, ssteps = _lib.get_ys(cfg_of(model), model, AFN_HOOK,
-                                     'tail_rankme' if drop1 else 'rankme',
+                                     tail_var if drop1 else full_var,
                                      {'k': 1} if drop1 else {})
             if share:
                 x_vals.append(xs[ok])
@@ -774,11 +782,12 @@ def rankme_overlay():
         for ax, _ in shared:
             ax.set_xlim(X_MIN, xhi)
     for r in (0, 1):
-        axes[r, 0].set_ylabel('RankMe of the unembedding', color='tab:blue')
+        axes[r, 0].set_ylabel(f'{metric} of the unembedding', color='tab:blue')
     for j in (3, len(twins) - 1):
-        twins[j].set_ylabel('RankMe of the stream', color='tab:red')
-    fig.suptitle('RankMe — unembedding (left axis) vs the after_final_norm stream (right axis); '
-                 'solid = full spectrum, dashed = top eigendirection dropped; y autoscaled per panel')
+        twins[j].set_ylabel(f'{metric} of the stream', color='tab:red')
+    fig.suptitle(f'{metric} — unembedding (left axis) vs the after_final_norm stream '
+                 f'(right axis); solid = full spectrum, dashed = top eigendirection dropped; '
+                 f'y autoscaled per panel')
     plt.tight_layout(); plt.show()
 
 def overlay_caption(k0, k1, rankme=False):
@@ -819,3 +828,13 @@ caption('Blue (left axis): RankMe of the unembedding singular-value-squared spec
         'direction. Every panel autoscales its own y axes (levels differ by model, so only '
         'the shapes are comparable); the token axis is shared from 10^8.5, nanochat-d12 '
         'excepted. Descriptive only.')
+
+# %%
+rankme_overlay('matrix entropy')
+caption('The same figure in matrix entropy (Shannon entropy of the normalized eigenvalue '
+        'spectrum) instead of RankMe: blue (left axis) the unembedding sv² spectrum, red '
+        '(right axis) the centered after_final_norm stream covariance, solid = full spectrum, '
+        'dashed = top eigendirection dropped. Since RankMe = exp(matrix entropy), this is a '
+        'log rescaling of the panel above — the curves are monotonically equivalent and only '
+        'the relative sizes of the swings change (multiplicative in RankMe, additive here). '
+        'Descriptive only.')

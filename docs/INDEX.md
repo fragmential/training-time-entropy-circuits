@@ -27,7 +27,7 @@ analysis/toy_multilayer.ipynb.
 | dig_findings.md | evidence (RQ1) | the samples-sweep evidence: head/bulk, sink-write identification (two slots), interventions, valleys, dataset-swap controls, metric→finding table |
 | sink_literature.md | literature | sink-paper summaries mapped to our results (+ the original deposit-test negative, filed there; figure: showcase_appendix §F) |
 | ablations.md | evidence | robustness/ablation table (what was checked, how) |
-| model_init_details.md | reference | measured embed/head inits per family (incl. the OLMo-7B step-150 rank-380 anomaly, nanochat zero-init writes) |
+| model_init_details.md | reference | measured embed/head inits per family (incl. the OLMo-7B step-150 rank-380 anomaly, nanochat zero-init writes) + note on OLMo's write-norm clamp vs its embedding scale (the blk0 cliff / depth climb) |
 | cka_alignment.md | methods | the stream↔unembedding CKA statistic: definition, invariances, rotated-W control, d=2 blind spots |
 | toy.md | evidence (RQ3) | the whole toy arc: single-layer reproduction + controls (§2), fourth condition / kick / lag / transience (§3), depth pattern conditions + ablation table (§4), decomposition signature (§5), architecture knobs (§6) |
 | ledger.md | methods | the decomposition: symbols, term meanings, exactness caveats, alignment-metric taxonomy ("ledger"/"quality" are repo-internal names, banned in thesis prose; thesis derivation drafted in thesis-writing/decomposition_method/main.tex) |

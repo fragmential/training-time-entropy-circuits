@@ -125,7 +125,9 @@ Standard checks after edits: `uv run --with pyright pyright <files>` and `uv run
 ## Cluster notes
 No compute on login nodes; `uv run`, `python` not `python3`. **Eigendecomposition-heavy work
 (compute_metrics passes, geneig analyses) goes on a GPU node (gpu_h100 preferred) — never
-staging CPU.** Staging is for I/O-light readouts of already-computed results files only. HF_HOME on /projects (scratch-shared is ~20× slower). VRAM estimator
+staging CPU.** **H100 has 16 CPUs per GPU, so NEVER use 18 CPUs on H100 — it doubles the
+billing cost.** (The 18 in the e2e-test command above is the A100 per-GPU share; do not carry
+it across partitions.) Staging is for I/O-light readouts of already-computed results files only. HF_HOME on /projects (scratch-shared is ~20× slower). VRAM estimator
 underestimates backward-pass runs 2–3×. $TMPDIR on gcn nodes is RAM-backed tmpfs.
 
 ## Dependencies
