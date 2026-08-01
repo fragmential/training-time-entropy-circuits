@@ -1,0 +1,61 @@
+output_dir: data/inferences/alpha_conservation_fine
+# Fine-grained LATE-training final-stream covariances, for the lead/lag question: when the
+# stream's spectrum steepens and the unembedding's flattens, which side moves first?
+# The coarse (log-spaced) final_stream_svd sweep cannot answer it -- consecutive checkpoints
+# there are a factor apart.
+#
+# Cheapest possible collection: one leaf, no per-block hooks, and fast_final_norm swaps the
+# output head for nn.Identity() so the model's own output IS the after-norm stream. That skips
+# the |V| x d unembedding projection, which at 262k tokens is the dominant cost.
+#
+# nanochat is the primary subject: 113 late checkpoints, all on local disk, no downloads.
+# pythia-1b and OLMo-2-1B are every-other / every-fourth for a cross-family check.
+
+model_name:
+  - "nanochat-d12"
+  - "EleutherAI/pythia-1b-deduped"
+  - "allenai/OLMo-2-0425-1B"
+
+#            nanochat  Py1b     OL1B
+batch_size: [128,      256,     48]
+max_tokens: [262_144,  262_144, 262_144]
+
+packed_data_path:
+  nanochat-d12: data/mixes/fineweb_edu_nanochat_1M_512.pt
+  EleutherAI/*: data/mixes/pile_30M_512.pt
+  allenai/*: data/mixes/olmo_mix_30M_512.pt
+
+checkpoints:
+  nanochat-d12: [1500, 1550, 1600, 1650, 1700, 1750, 1800, 1850, 1900, 1950, 2000, 2050,
+                 2100, 2150, 2200, 2250, 2300, 2350, 2400, 2450, 2500, 2550, 2600, 2650,
+                 2700, 2750, 2800, 2850, 2900, 2950, 3000, 3050, 3100, 3150, 3200, 3250,
+                 3300, 3350, 3400, 3450, 3500, 3550, 3600, 3650, 3700, 3750, 3800, 3850,
+                 3900, 3950, 4000, 4050, 4100, 4150, 4200, 4250, 4300, 4350, 4400, 4450,
+                 4500, 4550, 4600, 4650, 4700, 4750, 4800, 4850, 4900, 4950, 5000, 5050,
+                 5100, 5150, 5200, 5250, 5300, 5350, 5400, 5450, 5500, 5550, 5600, 5650,
+                 5700, 5750, 5800, 5850, 5900, 5950, 6000, 6050, 6100, 6150, 6200, 6250,
+                 6300, 6350, 6400, 6450, 6500, 6550, 6600, 6650, 6700, 6750, 6800, 6850,
+                 6900, 6950, 7000, 7050, 7080]
+  EleutherAI/*: [50000, 52000, 54000, 56000, 58000, 60000, 62000, 64000, 66000, 68000,
+                 70000, 72000, 74000, 76000, 78000, 80000, 82000, 84000, 86000, 88000,
+                 90000, 92000, 94000, 96000, 98000, 100000, 102000, 104000, 106000, 108000,
+                 110000, 112000, 114000, 116000, 118000, 120000, 122000, 124000, 126000,
+                 128000, 130000, 132000, 134000, 136000, 138000, 140000, 142000, 143000]
+  allenai/*: [900000, 940000, 980000, 1020000, 1060000, 1100000, 1140000, 1180000, 1220000,
+              1260000, 1300000, 1340000, 1380000, 1420000, 1460000, 1500000, 1540000,
+              1580000, 1620000, 1660000, 1700000, 1740000, 1780000, 1820000, 1860000,
+              1900000]
+
+seq_len: 512
+min_length: 32
+packing: packed
+token_selection: all
+
+hooks:
+  - after_final_norm
+fast_final_norm: true
+
+max_layers_per_pass: 0
+storage_format: cov_svd
+compute_metrics: False
+keep_cached: False

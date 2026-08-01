@@ -68,6 +68,10 @@ from utils.model_registry import (
     prefetch_checkpoint,
     delete_cached_revision,
     ModelWeights,
+    get_final_layernorm,
+    get_head_module,
+    get_mlp_projections,
+    get_post_mlp_norm,
 )
 from utils.hooks import HookCollector, MultiHeadOVDispatcher, setup_identity_head, restore_head
 from utils.hook_specs import resolve as resolve_hook_specs
@@ -91,6 +95,77 @@ def _blk_tag(g):
     contiguous = list(g) == list(range(g[0], g[-1] + 1))
     return (f"blk{g[0]}" if len(g) == 1 else
             f"blk{g[0]}-{g[-1]}" if contiguous else "blk" + "+".join(map(str, g)))
+
+
+def _spec_blocks(spec):
+    """A spec's block field, always as a list. Negative indices count from the end."""
+    b = spec["block"]
+    return list(b) if isinstance(b, (list, tuple)) else [b]
+
+
+def _neuron_tag(spec):
+    """Directory suffix for a neuron-subset intervention; blocks stay as written (possibly
+    negative) so the tag is model-independent and resume can build it without the model."""
+    b = _spec_blocks(spec)
+    span = f"{b[0]}" if len(b) == 1 else f"{b[0]}..{b[-1]}"
+    return f"blk{span}_{spec['rank']}{spec['n']}"
+
+
+def _down_proj(model, config, block_idx):
+    """The block's MLP down-projection module."""
+    return next(m for name, m in get_mlp_projections(model, config, block_idx)
+                if name.endswith(".mlp.down"))
+
+
+def _rho_scores(model, config, b, w_out):
+    """Null-space composition rho for every neuron of the block's MLP."""
+    from utils.nullspace import head_subspace, write_rho
+    gamma = getattr(get_final_layernorm(model, config), "weight", None)
+    v0 = head_subspace(get_head_module(model, config).weight.detach(), gamma,
+                       max(1, round(0.01 * w_out.shape[0])))
+    return write_rho(v0, w_out, getattr(get_post_mlp_norm(model, config, b), "weight", None))
+
+
+def _neuron_indices(model, config, spec, n_layers, seed=0):
+    """[(absolute block, indices), ...] for the neurons a spec selects, ranked from the
+    weights: rho (null-space composition), wnorm (||w_out||), or random at matched count.
+
+    With several blocks the ranking is POOLED across them and the global top-n taken, so
+    "the top-n of the last quarter" is n neurons in total, not n per block."""
+    blocks = [b if b >= 0 else n_layers + b for b in _spec_blocks(spec)]
+    w_outs = [_down_proj(model, config, b).weight.detach() for b in blocks]
+    n, dev = int(spec["n"]), w_outs[0].device
+    if n == 0:
+        return []
+    if spec["rank"] == "random":
+        g = torch.Generator().manual_seed(seed)
+        widths = [w.shape[1] for w in w_outs]
+        pick = torch.randperm(sum(widths), generator=g)[:n].to(dev)
+    else:
+        scores = [w.float().norm(dim=0) if spec["rank"] == "wnorm"
+                  else _rho_scores(model, config, b, w) for b, w in zip(blocks, w_outs)]
+        pick = torch.topk(torch.cat(scores), n).indices
+        widths = [s.numel() for s in scores]
+    offsets = torch.tensor([0] + list(torch.tensor(widths).cumsum(0)[:-1]), device=dev)
+    out = []
+    for i, b in enumerate(blocks):
+        sel = pick[(pick >= offsets[i]) & (pick < offsets[i] + widths[i])] - offsets[i]
+        if len(sel):
+            out.append((b, sel))
+    return out
+
+
+def _neuron_prehook(idx, mode):
+    """Pre-hook on a down-projection: mean- or zero-ablates the selected neurons. The
+    down-proj's input IS the post-nonlinearity activation vector, so patching it here is
+    exactly ablating those neurons."""
+    def hook(_mod, args):
+        a = args[0].clone()
+        sel = a[..., idx]
+        a[..., idx] = (sel.mean(dim=tuple(range(sel.dim() - 1)), keepdim=True).expand_as(sel)
+                       if mode == "mean" else torch.zeros_like(sel))
+        return (a, *args[1:])
+    return hook
 
 
 def _zero_output(_mod, _inp, out):
@@ -214,6 +289,12 @@ class CollectConfig:
     # each writing to <output_dir>_<blk-tag>/<model>.
     ablate: "list[list[int]] | None" = None
     ablate_mode: str = "zero"  # "zero" = write→0; "mean" = write→its batch-token mean
+    # Neuron-subset interventions in one block's MLP, each `{block, rank, n}`:
+    #   block  block index; negative counts from the end (-1 = last block)
+    #   rank   "rho" (null-space composition, utils/nullspace) | "wnorm" (||w_out||) | "random"
+    #   n      how many top-ranked neurons to ablate; 0 = an untouched baseline run
+    # Ranking is weight-derived, so no baseline pass is needed to choose the neurons.
+    ablate_neurons: "list[dict] | None" = None
 
     # --- Cache ---
     keep_cached: bool = False  # don't delete HF checkpoints after processing
@@ -231,7 +312,7 @@ class CollectConfig:
 
     def __post_init__(self):
         _LIST_FIELDS = {"target_layers", "boundary_token_ids", "cross_basis_refs", "checkpoints", "hooks",
-                        "metrics_skip", "loo_groups", "ablate"}
+                        "metrics_skip", "loo_groups", "ablate", "ablate_neurons"}
 
         if not isinstance(self.model_name, list):
             # Single model — validate no vectorized fields are lists
@@ -729,8 +810,10 @@ def main(cfg: CollectConfig):
     print(f"Total checkpoints: {len(schedule)}")
 
     # Filter to unprocessed checkpoints (ablation runs: done = every intervention's file exists)
-    run_dirs = ([os.path.join(f"{cfg.output_dir}_{_blk_tag(g)}", short_name) for g in cfg.ablate]
-                if cfg.ablate else [output_dir])
+    tags = ([_blk_tag(g) for g in (cfg.ablate or [])]
+            + [_neuron_tag(s) for s in (cfg.ablate_neurons or [])])
+    run_dirs = ([os.path.join(f"{cfg.output_dir}_{t}", short_name) for t in tags]
+                if tags else [output_dir])
     to_process = []
     for step_num, revision, step_model in schedule:
         if all(os.path.exists(os.path.join(d, f"step{step_num}.pt"))
@@ -874,21 +957,31 @@ def main(cfg: CollectConfig):
             t_load += time.time() - _t0
             # One pass per intervention (cfg.ablate), model + checkpoint loaded once;
             # a plain run is the single intervention None.
-            for grp in (cfg.ablate or [None]):
-                if grp is None:
+            interventions = ([("blk", g) for g in (cfg.ablate or [])]
+                             + [("neurons", s) for s in (cfg.ablate_neurons or [])]) or [(None, None)]
+            for kind, spec in interventions:
+                if kind is None:
                     run_dir, g_out = cfg.output_dir, output_dir
                 else:
-                    run_dir = f"{cfg.output_dir}_{_blk_tag(grp)}"
+                    tag = _blk_tag(spec) if kind == "blk" else _neuron_tag(spec)
+                    run_dir = f"{cfg.output_dir}_{tag}"
                     g_out = os.path.join(run_dir, short_name)
                 out_path = os.path.join(g_out, f"step{step_num}.pt")
-                if grp is not None and os.path.exists(out_path):
+                if kind is not None and os.path.exists(out_path):
                     continue
                 os.makedirs(g_out, exist_ok=True)
-                ablate_hook = _mean_output if cfg.ablate_mode == "mean" else _zero_output
-                handles = [mod.register_forward_hook(ablate_hook)
-                           for b in grp or ()
-                           for leaf, mod, _cap in get_block_boundary_hooks(model, model_config, b)
-                           if leaf.endswith(".out")]
+                if kind == "neurons":
+                    handles = [
+                        _down_proj(model, model_config, blk).register_forward_pre_hook(
+                            _neuron_prehook(idx, cfg.ablate_mode))
+                        for blk, idx in _neuron_indices(model, model_config, spec, n_layers,
+                                                        cfg.seed or 0)]
+                else:
+                    ablate_hook = _mean_output if cfg.ablate_mode == "mean" else _zero_output
+                    handles = [mod.register_forward_hook(ablate_hook)
+                               for b in (spec or ())
+                               for leaf, mod, _cap in get_block_boundary_hooks(model, model_config, b)
+                               if leaf.endswith(".out")]
 
                 if cfg.sample_labels and cfg.seed is not None:
                     torch.manual_seed(cfg.seed + step_num)

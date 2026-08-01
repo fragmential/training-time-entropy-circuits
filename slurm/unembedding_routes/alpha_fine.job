@@ -1,0 +1,25 @@
+#!/bin/bash
+# The three spectra on the DENSE late-training grid -- consecutive checkpoints, second half of
+# training only. This grid exists for one question: when the unembedding's spectrum flattens,
+# does the representation's steepen slightly later? A delay of a few thousand steps falls
+# entirely between two points of the log-spaced grid, so only closely spaced checkpoints can
+# see it. Everything else in analysis/unembedding_vocab uses the log grid.
+#
+# NO DOWNLOADS: the head SVDs for these steps were written by slurm/all_pending.job, so this
+# reads stored files only.
+#SBATCH --partition=gpu_h100
+#SBATCH --gpus=1
+#SBATCH --job-name=alpha_fine
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --time=02:00:00
+#SBATCH --output=slurm/logs/alpha_fine_%j.out
+
+set -euo pipefail
+cd "$SLURM_SUBMIT_DIR" || exit 1
+export HF_HOME="/projects/prjs1815/hf_cache"
+
+time uv run oneoff_scripts/alpha_conservation.py \
+    --svd_dir data/inferences/alpha_conservation_fine \
+    --out_path data/results/alpha_conservation_fine.pt \
+    --leaves "['after_final_norm']"

@@ -1,0 +1,43 @@
+output_dir: data/inferences/entropy_ablate
+# The last-quarter version of configs/entropy_ablate_ol1b.yaml: instead of one block, the
+# top-n neurons by rho POOLED over the final 4 blocks (OLMo-2-0425-1B's last quarter),
+# which should be the maximal-impact ablation of this kind. n is a total, not per block.
+# Same output_dir base, hooks, token budget and schedule as the two-block run, so the
+# blk-1_rho0 baseline collected there is the right reference -- no baseline spec here.
+# Matched-count random pooled over the same blocks is the control.
+
+model_name: "allenai/OLMo-2-0425-1B"
+batch_size: 48
+max_tokens: 65_536
+packed_data_path: data/mixes/olmo_mix_30M_512.pt
+
+seq_len: 512
+min_length: 32
+max_checkpoints: 20
+checkpoint_spacing: log
+packing: packed
+token_selection: all
+activation_dtype: bf16
+
+hooks:
+  - blk15.mlp.out
+  - blk14.mlp.out
+  - before_final_norm
+  - after_final_norm
+
+max_layers_per_pass: 0
+collect_format: acts
+storage_format: eigenvalues
+compute_metrics: True
+vocab_entropy: True
+drift_metrics: False
+keep_cached: False  # snapshots accumulate past the project quota otherwise
+
+ablate_mode: mean
+ablate_neurons:
+  - {block: [-1, -2, -3, -4], rank: rho, n: 64}
+  - {block: [-1, -2, -3, -4], rank: rho, n: 256}
+  - {block: [-1, -2, -3, -4], rank: rho, n: 1024}
+  - {block: [-1, -2, -3, -4], rank: random, n: 64}
+  - {block: [-1, -2, -3, -4], rank: random, n: 256}
+  - {block: [-1, -2, -3, -4], rank: random, n: 1024}

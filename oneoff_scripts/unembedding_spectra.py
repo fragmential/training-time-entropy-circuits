@@ -24,15 +24,23 @@ MODELS = ("EleutherAI/pythia-160m-deduped", "EleutherAI/pythia-410m-deduped",
 
 def main(out_path: str = "data/results/unembedding_spectra.pt",
          max_checkpoints: int = 20, spacing: str = "log",
-         vectors_dir: "str | None" = None) -> None:
+         vectors_dir: "str | None" = None, models: tuple = MODELS,
+         only_steps: tuple = ()) -> None:
+    """only_steps restricts to an explicit checkpoint list, for filling a specific gap (e.g.
+    the dense late-training grid) without walking the whole schedule. Every revision this
+    fetches is deleted again before the next one, so at most one model sits on disk."""
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     out = torch.load(out_path, weights_only=False) if os.path.exists(out_path) else {}
-    for name in MODELS:
+    wanted = set(only_steps)
+    for name in models:
         config = get_model_config(name)
         head = _fam(config).head
         short = name.split("/")[-1]
         done = out.setdefault(short, {})
-        for step, revision, repo in get_checkpoint_schedule(config, max_checkpoints, spacing):
+        sched = get_checkpoint_schedule(config, None if wanted else max_checkpoints, spacing)
+        for step, revision, repo in sched:
+            if wanted and step not in wanted:
+                continue
             vec_path = os.path.join(vectors_dir, short, f"step{step}.pt") if vectors_dir else None
             if step in done and (vec_path is None or os.path.exists(vec_path)):
                 continue

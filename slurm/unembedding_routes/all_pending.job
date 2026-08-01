@@ -1,0 +1,69 @@
+#!/bin/bash
+# Every outstanding experiment, ONE ARRAY TASK PER MODEL, run sequentially within the task.
+#
+# Why per-model and serial: all three of these download a full snapshot per revision and
+# delete it again immediately. Two of them running on the SAME model at the same time would
+# delete each other's revisions mid-read -- the failure that cost a whole afternoon. One model
+# per task means no two processes ever touch the same revision, and serial-within-task means
+# at most one checkpoint of one model sits on disk at any moment.
+#
+#   1. sink_darkness       is the dominant direction dark, now as a TRAJECTORY (12 log-spaced
+#                          checkpoints) rather than only the final one
+#   2. unembedding_spectra the 74 head SVDs the dense late-training grid is missing, so the
+#                          lead/lag section has more than nanochat in it
+#   3. context_vs_identity fills the pythia-1b and OLMo-1B gaps
+#
+# Submit with:  sbatch --array=0-5 slurm/all_pending.job
+# Never submit a task for a model another job is reading -- both delete revisions as they go.
+#SBATCH --partition=gpu_h100
+#SBATCH --gpus=1
+#SBATCH --job-name=all_pending
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --time=10:00:00
+#SBATCH --output=slurm/logs/all_pending_%A_%a.out
+
+set -euo pipefail
+cd "$SLURM_SUBMIT_DIR" || exit 1
+export HF_HOME="/projects/prjs1815/hf_cache"
+
+MODELS=("nanochat-d12" "EleutherAI/pythia-410m-deduped" "EleutherAI/pythia-1b-deduped" \
+        "allenai/OLMo-2-0425-1B" "EleutherAI/pythia-6.9b-deduped" "allenai/OLMo-2-1124-7B")
+BATCH=(32 24 24 16 8 8)
+MODEL="${MODELS[$SLURM_ARRAY_TASK_ID]}"
+SHORT="${MODEL##*/}"
+echo "Model: $MODEL"
+
+echo "=== 1. sink darkness, 12 log-spaced checkpoints ==="
+time uv run oneoff_scripts/sink_darkness.py \
+    --models "['$MODEL']" --batch_size "${BATCH[$SLURM_ARRAY_TASK_ID]}" \
+    --n_checkpoints 12 --keep_cached false \
+    --out_path "data/results/sink_darkness_${SHORT}.pt"
+
+# Only pythia-1b and OLMo-1B have a dense grid collected; the others skip both steps below.
+STEPS=$(uv run python -c "
+import glob, os
+d = f'data/inferences/alpha_conservation_fine/${SHORT}'
+s = sorted(int(os.path.basename(f)[4:-3]) for f in glob.glob(d + '/step*.pt'))
+print('[' + ','.join(map(str, s)) + ']' if s else '')
+")
+
+if [ -n "$STEPS" ]; then
+    echo "=== 2. head SVDs for the dense grid ($SHORT) ==="
+    # Per-model out_path: array tasks all writing one shared .pt read-modify-write it, so the
+    # task that finishes last silently clobbers the others' entries. alpha_conservation globs
+    # unembedding_spectra*.pt and merges them.
+    time uv run oneoff_scripts/unembedding_spectra.py \
+        --models "['$MODEL']" --only_steps "$STEPS" \
+        --vectors_dir data/results/unembedding_svd \
+        --out_path "data/results/unembedding_spectra_${SHORT}.pt"
+
+    echo "=== 3. context vs identity ==="
+    time uv run oneoff_scripts/context_vs_identity.py \
+        --models "['$MODEL']" --batch_size "${BATCH[$SLURM_ARRAY_TASK_ID]}" \
+        --keep_cached false \
+        --out_path "data/results/context_vs_identity_${SHORT}.pt"
+fi
+
+echo "=== cache left behind by this task (should be ~0) ==="
+du -sh "/projects/prjs1815/hf_cache/hub/models--${MODEL/\//--}" 2>/dev/null || echo "  none"

@@ -291,6 +291,23 @@ def get_num_layers(model, config):
     return len(_getattr_path(model, _fam(config).blocks))
 
 
+_POST_MLP_NORM = {"olmo": "post_feedforward_layernorm"}
+
+
+def get_head_module(model, config):
+    """The unembedding module itself (Pythia: embed_out; others: lm_head). Use
+    get_output_head for the callable that also applies the final norm and softcap."""
+    return _getattr_path(model, _fam(config).head)
+
+
+def get_post_mlp_norm(model, config, block_idx):
+    """The norm applied to a block's MLP output after the down-projection, or None for
+    families that have none (only OLMo-2 post-norms the MLP branch)."""
+    sub = _POST_MLP_NORM.get(config.family)
+    return None if sub is None else _getattr_path(
+        _getattr_path(model, _fam(config).blocks)[block_idx], sub)
+
+
 def get_final_layernorm(model, config):
     """Return the final layernorm module (before the lm_head).
 

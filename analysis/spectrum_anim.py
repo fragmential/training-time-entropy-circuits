@@ -102,6 +102,50 @@ def _matrix_panel(yvar, data_sources, model_names, opts):
     return _matrix_spec([np.asarray(f, dtype=float) for f in frames], opts.get('labels'), opts), steps
 
 
+def _scatter_panel(opts):
+    """Per-checkpoint point cloud handed in directly (frames=[(x, y, sizes[, colors])]) — for
+    data the results backend can't resolve, e.g. per-neuron weight statistics. Ranges are
+    pinned over all frames so the cloud moves and the box doesn't. A 4th per-point array is
+    mapped through `cmap`/`vmin`/`vmax` and gets one colorbar, drawn once in render()."""
+    frames = [tuple(np.asarray(a, dtype=float) for a in f) for f in opts['frames']]
+    xlog, ylog = opts.get('xlog', False), opts.get('ylog', True)
+    def span(j, log):
+        v = np.concatenate([f[j] for f in frames])
+        v = v[v > 0] if log else v
+        return _ylim(v.min(), v.max(), log)
+    return dict(kind='scatter', frames=frames, xlog=xlog, ylog=ylog,
+                xlim=opts.get('xlim') or span(0, xlog), ylim=opts.get('ylim') or span(1, ylog),
+                color=opts.get('color', 'C0'), alpha=opts.get('alpha', 0.35),
+                cmap=opts.get('cmap'), vmin=opts.get('vmin', 0), vmax=opts.get('vmax', 1),
+                cbar_label=opts.get('cbar_label', ''),
+                field=opts.get('field'), field_color=opts.get('field_color', '0.15'),
+                field_width=opts.get('field_width', 0.004),
+                xlabel=opts.get('xlabel', ''), ylabel=opts.get('ylabel', ''),
+                title=opts.get('title'))
+
+
+def _curve_panel(opts):
+    """Static training curves with a red line scanning across them, one x per frame — the
+    progress companion to another panel. series=[(xs, ys, color, label, on_twin)]; twinned
+    series share a second y-axis (created once in render, cleared per frame)."""
+    xlog = opts.get('xlog', True)
+    series = [(np.asarray(xs, dtype=float), np.asarray(ys, dtype=float), c, lab, bool(tw))
+              for xs, ys, c, lab, tw in opts['series']]
+    if xlog:                                    # step 0 sits at tokens=0: unplottable, and it
+        series = [(xs[m], ys[m], c, lab, tw)    # would poison the log-space interpolation
+                  for xs, ys, c, lab, tw in series if (m := xs > 0).any()]
+    x0 = min((s[0].min() for s in series), default=1.0)
+    scan = [max(float(x), x0) if xlog else float(x) for x in opts['scan_x']]
+    return dict(kind='curve', series=series, scan_x=scan,
+                xlog=xlog, ylog=opts.get('ylog', False),
+                twin=any(s[4] for s in series), scan_color=opts.get('scan_color', 'red'),
+                xlabel=opts.get('xlabel', 'tokens'), ylabel=opts.get('ylabel', ''),
+                twin_ylabel=opts.get('twin_ylabel', ''), title=opts.get('title'))
+
+
+_PREBUILT = {'scatter': _scatter_panel, 'curve': _curve_panel}
+
+
 def _matrix_spec(frames, labels, opts):
     """dynamic=True -> symmetric range from the off-diagonal max; per_frame picks whether
     that range is recomputed each frame (full contrast) or pinned once (stable colorbar).
@@ -125,9 +169,14 @@ def _matrix_spec(frames, labels, opts):
                 title=opts.get('title'))
 
 
-def _materialize(panels, ncols, fps, model, xvar, prog_bar, suptitle, figsize, smooth=0, peak=3):
+def _materialize(panels, ncols, fps, model, xvar, prog_bar, suptitle, figsize, smooth=0, peak=3,
+                 frame_labels=None):
     spec_panels, steps = [], None
     for yvar, data_sources, model_names, opts in panels:
+        if opts.get('kind') in _PREBUILT:               # data given by the caller, not resolved
+            spec_panels.append(_PREBUILT[opts['kind']](opts))
+            steps = opts.get('steps', steps)
+            continue
         if opts.get('kind') in ('heatmap', 'matrix'):
             panel, steps = (_heatmap_panel(data_sources, model_names, opts) if opts['kind'] == 'heatmap'
                             else _matrix_panel(yvar, data_sources, model_names, opts))
@@ -189,7 +238,8 @@ def _materialize(panels, ncols, fps, model, xvar, prog_bar, suptitle, figsize, s
             xlabel=r'$\nu$' if mode in ('hist', 'histogram') else 'Component index',
             ylabel=_bk('YVAR_LABELS').get(yvarname, yvarname)))
 
-    flabels = [_frame_label(model, s, xvar) for s in steps] if prog_bar in ('top', 'bottom') else None
+    flabels = (frame_labels or [_frame_label(model, s, xvar) for s in steps]) \
+        if prog_bar in ('top', 'bottom') else None
     return dict(ncols=ncols, fps=fps, prog_bar=prog_bar, suptitle=suptitle, figsize=figsize,
                 n=len(steps), frame_labels=flabels, panels=spec_panels)
 
@@ -302,7 +352,59 @@ def _draw_heatmap(ax, p, i):
     if p['title'] is not None: ax.set_title(p['title'])
 
 
-_DRAW = {'strip': _draw_strip, 'spectrum': _draw_spectrum, 'heatmap': _draw_heatmap}
+def _draw_field(ax, arrows, color, width):
+    """Optional quiver overlay on a scatter panel. Positions AND vectors come in axes
+    fractions and are converted to dots here: quiver's 'xy' units are data units, which a log
+    axis has no uniform version of, so the fraction->pixel conversion has to happen at draw
+    time (the axes box is known then)."""
+    X, Y, U, V = arrows
+    if not len(X): return
+    bb = ax.get_window_extent()
+    ax.quiver(X, Y, np.asarray(U) * bb.width, np.asarray(V) * bb.height,
+              angles='uv', scale=1, scale_units='dots', transform=ax.transAxes,
+              color=color, width=width, zorder=4,
+              edgecolor='white', linewidth=0.6)   # the field sits inside the cloud it measures
+
+
+def _draw_scatter(ax, p, i):
+    x, y, s, *c = p['frames'][i]
+    shade = dict(c=c[0], cmap=p['cmap'], vmin=p['vmin'], vmax=p['vmax']) if c \
+        else dict(color=p['color'])
+    ax.scatter(x, y, s=s, alpha=p['alpha'], edgecolors='none', **shade)
+    if p['field'] is not None:
+        _draw_field(ax, p['field'][i], p['field_color'], p['field_width'])
+    if p['xlog']: ax.set_xscale('log')
+    if p['ylog']: ax.set_yscale('log')
+    ax.set_xlabel(p['xlabel'], fontsize=14); ax.set_ylabel(p['ylabel'], fontsize=14)
+    if p['xlim']: ax.set_xlim(*p['xlim'])
+    if p['ylim']: ax.set_ylim(*p['ylim'])
+    if p['title'] is not None: ax.set_title(p['title'])
+
+
+def _draw_curve(ax, p, i):
+    tw = p.get('_twin')
+    if tw is not None:
+        tw.clear()
+        tw.yaxis.tick_right(); tw.yaxis.set_label_position('right')   # clear() sends both left
+    x, handles = p['scan_x'][i], []
+    for xs, ys, color, label, on_twin in p['series']:
+        a = tw if on_twin else ax
+        handles += a.plot(xs, ys, color=color, lw=1.8, label=label)
+        xi = np.log10(xs) if p['xlog'] else xs                # mark where the scan line cuts
+        a.plot([x], [np.interp(np.log10(x) if p['xlog'] else x, xi, ys)], 'o',
+               color=p['scan_color'], ms=5, zorder=6)
+    ax.axvline(x, color=p['scan_color'], lw=1.6, alpha=0.9, zorder=5)
+    if p['xlog']: ax.set_xscale('log')
+    if p['ylog']: ax.set_yscale('log')
+    ax.set_xlabel(p['xlabel'], fontsize=14); ax.set_ylabel(p['ylabel'], fontsize=14)
+    if tw is not None: tw.set_ylabel(p['twin_ylabel'], fontsize=14)
+    ax.legend(handles=handles, labels=[h.get_label() for h in handles],
+              loc='lower right', fontsize=9)
+    if p['title'] is not None: ax.set_title(p['title'])
+
+
+_DRAW = {'strip': _draw_strip, 'spectrum': _draw_spectrum, 'heatmap': _draw_heatmap,
+         'scatter': _draw_scatter, 'curve': _draw_curve}
 
 
 def render(spec, save=None):
@@ -310,18 +412,25 @@ def render(spec, save=None):
     fig, axes, bar_ax = _layout(kinds, spec['ncols'], spec['prog_bar'], spec['figsize'])
     if spec['suptitle'] is not None:
         fig.suptitle(spec['suptitle'])
-    right = 0.88 if any(p['kind'] == 'heatmap' or (p['kind'] == 'spectrum' and len(p['frames'][0]) > 12)
-                        for p in spec['panels']) else 0.97   # room for colorbar labels
+    right = 0.88 if any(p['kind'] == 'heatmap' or p.get('twin') or p.get('cmap')
+                        or (p['kind'] == 'spectrum' and len(p['frames'][0]) > 12)
+                        for p in spec['panels']) else 0.97   # room for colorbar / twin labels
     fig.subplots_adjust(left=0.08, right=right, top=0.88, bottom=0.12, hspace=0.35, wspace=0.30)
     n = spec['n']
 
     from matplotlib.cm import ScalarMappable          # static colorbars for pinned heatmaps and
     from matplotlib.colors import Normalize, ListedColormap   # depth-gradient legends (survive per-frame clear)
     for ax, p in zip(axes, spec['panels']):
+        if p.get('twin'):                          # once, not per frame: twinx would pile up axes
+            p['_twin'] = ax.twinx()
         if p['kind'] == 'heatmap' and not p['per_frame']:
             cmap = plt.get_cmap(p['cmap']).copy(); cmap.set_bad('white')
             sm = ScalarMappable(cmap=cmap, norm=Normalize(p['vmin'], p['vmax'])); sm.set_array([])
             fig.colorbar(sm, ax=ax, fraction=0.046, pad=0.04)
+        elif p['kind'] == 'scatter' and p['cmap']:      # per-point shading -> one fixed scale
+            sm = ScalarMappable(cmap=plt.get_cmap(p['cmap']),
+                                norm=Normalize(p['vmin'], p['vmax'])); sm.set_array([])
+            fig.colorbar(sm, ax=ax, fraction=0.046, pad=0.02, label=p['cbar_label'])
         elif p['kind'] == 'spectrum' and len(p['frames'][0]) > 12:  # legend wall -> slim colorbar
             colors, labels = [s[1] for s in p['frames'][0]], [s[2] for s in p['frames'][0]]
             sm = ScalarMappable(cmap=ListedColormap(colors)); sm.set_array([])
@@ -331,6 +440,7 @@ def render(spec, save=None):
 
     def update(i):
         for ax, p in zip(axes, spec['panels']):
+            ax.set_xscale('linear')        # clear() keeps the scale, then applies default (0,1)
             ax.clear(); ax.figure.sca(ax)  # not plt.sca: manager is None mid-save
             _DRAW[p['kind']](ax, p, i)
         if bar_ax is not None:
@@ -368,13 +478,15 @@ def _save_mp4_via_sbatch(spec, out):
 
 def animate_spectra(panels, ncols=2, fps=4, figsize=None, model=None,
                     xvar='tokens', prog_bar='bottom', suptitle=None, save=None,
-                    smooth=0, peak=3, **common):
+                    smooth=0, peak=3, frame_labels=None, **common):
     """One animation, several spectrum subplots synced across checkpoints.
     panels: list of (yvar, data_sources, model_names[, opts_dict]). `common` kwargs
     (xlog, ylog, title, ...) apply to every panel; per-panel opts override.
     smooth: window (odd; 0=off) — denoises line spectra, keeps peaks/edges (shared
             smooth_spectrum from experiments_lib, injected via configure()).
     peak:   >1 biases the smoothing toward the window max (upper envelope).
+    frame_labels: override the progress-bar labels (needed when the frames come from a
+            caller-supplied 'scatter'/'curve' panel rather than a resolved step list).
     save:   optional path to ALSO write the animation to — a pure side effect; the inline
             render returned for the notebook is identical whether or not save is given.
             '*.mp4' with no ffmpeg on PATH sbatches a background render; '*.gif' / ffmpeg
@@ -383,7 +495,8 @@ def animate_spectra(panels, ncols=2, fps=4, figsize=None, model=None,
     for p in panels:
         yvar, data_sources, model_names, *rest = p
         norm.append((yvar, data_sources, model_names, {**common, **(rest[0] if rest else {})}))
-    spec = _materialize(norm, ncols, fps, model or norm[0][2][0], xvar, prog_bar, suptitle, figsize, smooth, peak)
+    spec = _materialize(norm, ncols, fps, model or norm[0][2][0], xvar, prog_bar, suptitle,
+                        figsize, smooth, peak, frame_labels)
     if save:                                            # write a file too (does NOT replace inline render)
         if save.endswith('.mp4') and shutil.which('ffmpeg') is None:
             _save_mp4_via_sbatch(spec, save)

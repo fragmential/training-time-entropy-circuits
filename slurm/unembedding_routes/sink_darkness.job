@@ -1,0 +1,30 @@
+#!/bin/bash
+# Is the massive direction in the stream inside the unembedding's dark subspace? Two probes
+# per model: just after the sink write, and the third-to-last block. Direction only, no
+# neuron selection. Cancedda's conventions (raw unembedding, bottom 5%, dark RATIO).
+#
+# Submit with:  sbatch --array=0-5 slurm/sink_darkness.job
+# Does NOT delete cached revisions: another job is reading the 7B caches.
+#SBATCH --partition=gpu_h100
+#SBATCH --gpus=1
+#SBATCH --job-name=sink_dark
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --time=03:00:00
+#SBATCH --output=slurm/logs/sink_dark_%A_%a.out
+
+set -euo pipefail
+cd "$SLURM_SUBMIT_DIR" || exit 1
+export HF_HOME="/projects/prjs1815/hf_cache"
+
+MODELS=("nanochat-d12" "EleutherAI/pythia-410m-deduped" "EleutherAI/pythia-1b-deduped" \
+        "allenai/OLMo-2-0425-1B" "EleutherAI/pythia-6.9b-deduped" "allenai/OLMo-2-1124-7B")
+BATCH=(32 24 24 16 8 8)
+MODEL="${MODELS[$SLURM_ARRAY_TASK_ID]}"
+SHORT="${MODEL##*/}"
+
+echo "Model: $MODEL"
+time uv run oneoff_scripts/sink_darkness.py \
+    --models "['$MODEL']" \
+    --batch_size "${BATCH[$SLURM_ARRAY_TASK_ID]}" \
+    --out_path "data/results/sink_darkness_${SHORT}.pt"
