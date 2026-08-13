@@ -228,6 +228,8 @@ class CollectConfig:
     packing: str = "padded"
     token_selection: str = "last"
     skip_positions: int = 0
+    exclude_first: bool = False   # drop the first position of each window (attention-sink slot)
+    content_only: bool = False    # keep only word/number tokens (drop delimiters/punct/whitespace)
     boundary_token_ids: "list | None" = None
     max_bytes: "int | None" = None  # if set, replaces num_samples as data budget (e.g. 80_000_000)
     max_tokens: "int | None | dict[str, int] | list[int]" = None  # if set, limit packed data to this many tokens (rounds up to full chunks)
@@ -495,7 +497,7 @@ def _parse_storage_format(spec: str) -> tuple[str, tuple[str, ...]]:
 
 def _collect_for_checkpoint(
     model, model_config, cfg, texts, tokenizer, packed_ids,
-    target_layers, device, boundary_token_ids,
+    target_layers, device, boundary_token_ids, content_vocab_mask=None,
 ):
     """Collect all requested data for one checkpoint.
 
@@ -620,6 +622,8 @@ def _collect_for_checkpoint(
                         token_selection=sel,
                         skip_positions=cfg.skip_positions,
                         boundary_token_ids=boundary_token_ids,
+                        exclude_first=cfg.exclude_first,
+                        content_mask_vocab=content_vocab_mask,
                     )
                 return _mask_cache[sel]
 
@@ -861,6 +865,19 @@ def main(cfg: CollectConfig):
         if tokenizer.eos_token_id is not None:
             boundary_token_ids = [tokenizer.eos_token_id]
 
+    # content_only: bool vocab lookup — True for word/number tokens, False for delimiters
+    content_vocab_mask = None
+    if cfg.content_only:
+        vsize = int(packed_ids.max()) + 1 if packed_ids is not None else int(getattr(tokenizer, "vocab_size", 0))
+        content_vocab_mask = torch.zeros(vsize, dtype=torch.bool)
+        for i in range(vsize):
+            try:
+                if any(c.isalnum() for c in tokenizer.decode([i])):
+                    content_vocab_mask[i] = True
+            except Exception:
+                pass
+        print(f"  content_only: keeping {int(content_vocab_mask.sum())}/{vsize} vocab ids as word/number tokens")
+
     # Continue-from: determine how much data the previous run already processed and skip it
     n_chunks_done = 0  # for packed: chunks already accumulated in existing files
     if cfg.continue_from:
@@ -994,7 +1011,7 @@ def main(cfg: CollectConfig):
                 _t0 = time.time()
                 captured = _collect_for_checkpoint(
                     model, model_config, cfg, texts, tokenizer, packed_ids,
-                    blocks, device, boundary_token_ids,
+                    blocks, device, boundary_token_ids, content_vocab_mask,
                 )
                 entropy_result = lens.close() if lens is not None else None
                 for h in handles:

@@ -29,8 +29,8 @@
 #
 # * **Two definitions of "dark", both used here.** The faintest **1%** of the unembedding's
 #   directions is Stolfo et al's k ≈ 0.01·d; the faintest **5%** is Cancedda's band. Sections
-#   1–3 use 1%, section 5 uses 5%, and section 4b shows both so the choice can be seen rather
-#   than assumed. A random direction scores √(k/d) either way, and every figure states its own
+#   1–3 use 1%, section 5 uses 5%, and section 4b shows both — plus a much wider 20% band — so
+#   the choice can be seen rather than assumed. A random direction scores √(k/d) either way, and every figure states its own
 #   k, so the two are read the same way despite the different thresholds.
 #
 # * **Dark directions.** The ~1% the unembedding reads most faintly. A neuron writing there
@@ -74,10 +74,12 @@
 # on, and it is measured where the thing actually lives.
 #
 # Data: `data/results/compression_routes_*.pt` (`oneoff_scripts/compression_routes.py`),
-# `data/results/ablation_curves/mlp_mean.pt`, `data/results/stream_deflation{,_k05}.pt`,
+# `data/results/ablation_curves/mlp_mean.pt`, `data/results/stream_deflation{,_k05,_k20}.pt`,
 # `data/results/sink_darkness_*.pt` (`oneoff_scripts/sink_darkness.py`).
 
 # %%
+# %load_ext autoreload
+# %autoreload 2
 import glob, os, sys
 if os.path.basename(os.getcwd()) == "analysis":
     os.chdir("..")
@@ -417,7 +419,7 @@ where_grid(DEF, "before_final_norm")
 # | measured | directions-in-use (RankMe) of the final representation, over training |
 # | black | untouched |
 # | coloured | the same after deleting a named set of the unembedding's directions from the representation: the faintest k, the single loudest, the loudest k, or a random k as the control |
-# | two rows of figures | k = 1% (Stolfo et al's band) and k = 5% (Cancedda's). The wider band deletes five times as many directions, so the control line moves too — compare each removal against its own random control, not across the two figures |
+# | three figures | k = 1% (Stolfo et al's band), k = 5% (Cancedda's), and k = 20% (no one's band — how far the picture survives widening). Each wider band deletes proportionally more directions, so the control line moves too — compare each removal against its own random control, not across the figures |
 # | reading | the line that comes out *flat* names the carrier. A line that still falls means those directions were not where the packing went |
 # | note | the unembedding is used **raw** — not vocabulary-centred, not gain-folded. The measured representation already carries the final norm's gain, and raw is also Cancedda's convention, so section 5 is directly comparable. An earlier version centred it; that recomputed the matrix from weights for a change worth <0.01 (see `utils/nullspace.head_subspace`) |
 
@@ -459,6 +461,7 @@ def deflation_grid(data, leaf="after_final_norm"):
 
 deflation_grid(DEF)
 deflation_grid(DEF_K05)
+deflation_grid(load("stream_deflation_k20.pt"))
 
 # %% [markdown]
 # ## 4c. The same, as how much of the fall each removal accounts for

@@ -313,6 +313,51 @@ matches the padded measurement is still unchecked.
 - The final-stream deposit test (sink_literature.md) additionally rules out attention
   transport along v₁ at the output.
 
+### The before_final_norm collapse: the final block re-inflates the rogue at the terminal token
+
+Padded (last-token) before_final_norm RankMe collapses to single digits on Pythia (py1b 8.7,
+py6.9b 7.6) while after_final_norm stays ~100–140 — the collapse is entirely pre-norm and
+LayerNorm-removable. Mechanism (block_representations_samples[_padded], final ckpt):
+
+- It is the FINAL block, not blk3. The last-token residual ENTERS the last block at RankMe ~100
+  (py1b blk15.in=101, py6.9b blk31.in=144) and leaves it at ~8. The responsible write is the last
+  MLP (blk{L−1}.mlp.out: RankMe 2.2–2.7, top1 0.84–0.85, trace ≥ the whole incoming residual,
+  avg-magnitude 13–33); the last attn write is innocent (diffuse, trace ~1e2).
+- Sign flips vs the packed norm. Over all tokens the last block cancels the rogue channel
+  (signed_trace blk3↔last −0.64). At the terminal token the cancellation collapses (−0.11): py1b's
+  last-MLP mean contribution to the MA channel flips positive (+40 into ch1668 on the incoming +60
+  → bfn +94), py6.9b's halves (−106 → −54). The final block, which normally scrubs the rogue, stops
+  scrubbing it (py1b reinforces) at the prediction position; its per-document magnitude variance
+  dominates the centered covariance → collapse, and LayerNorm divides out that common-mode
+  magnitude → afn recovers.
+- Confirmed by ablation (sign flip by mode): zeroing the final quarter's writes RAISES padded
+  (last-token) bfn RankMe (py1b 8.7→80, py6.9b 7.6→437) but LOWERS packed bfn RankMe (194→5,
+  260→34) — the same block de-concentrating the token bulk while concentrating the terminal token.
+- Mechanism, layer- AND direction-discriminated (oneoff_scripts/token_type_layer_probe.py;
+  packed py1b, pile/fineweb/olmo_mix, N=4000/type; eigenvalue RankMe; rank_in = residual entering
+  the last block, rank_bfn = after it). There are TWO distinct massive-activation directions that
+  the final block treats OPPOSITELY:
+  1. blk3's sink write direction v1 (top eigvec of blk3.mlp's centered write; ~2 coordinates,
+     ORTHOGONAL to channel 1668, cos −0.02). It is carried almost entirely by pos-0 and
+     first-newline tokens (projection ~830 / ~1240 — showcase §4's slots), which therefore enter
+     the last block rank-collapsed (rank_in ~2). The final MLP CANCELS v1 there (−834 / −1228),
+     so their rank EXPANDS (pos0 2→33, first-newline 3→110). Newlines/sinks do NOT collapse bfn —
+     the final layer removes their blk3 collapse.
+  2. Channel 1668 (the bfn-dominant coordinate). On PILE the final MLP REINFORCES it on PERIODS:
+     periods enter high-rank (rank_in 79) and the last MLP adds +20 to ch1668 → rank_bfn 17.9,
+     and the period bfn top-eigvec IS ch1668 (cos +0.76, ⊥ v1). This is the padded-collapse
+     mechanism (padded last tokens are period-heavy).
+- Pile ≫ fineweb collapse is mechanistic, not a magnitude hand-wave: the period collapse is
+  PILE-SPECIFIC. fineweb periods barely drop (rank_in 126 → rank_bfn 95), collapse in a diffuse
+  direction NOT aligned with ch1668 (cos −0.02, participation 21), and the last MLP CANCELS
+  ch1668 on them (−6.0); olmo_mix is intermediate (159→105, cos 0.59, mlp −10.4). So pile's
+  periods uniquely trigger the final-MLP ch1668 write. NOT entropy: mean next-token H is periods
+  2.9–3.5 vs newlines 1.1–2.0 vs pos-0 ~6.2 — no clean law, and pile periods have LOWER H (2.88)
+  than fineweb's (3.05) yet collapse harder.
+- Open below this floor (MLP feature-interpretability, not a gap in the above): why the same last
+  MLP writes +ch1668 on pile-period contexts but −ch1668 on fineweb/olmo-period contexts (not the
+  incoming ch1668 level — fineweb periods enter with higher ch1668).
+
 ## OLMo's late writes, token-attributed: the anti-Pythia
 
 **Question:** does the same raw-sample attribution find token-concentrated structure in

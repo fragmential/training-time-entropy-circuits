@@ -176,6 +176,8 @@ def compute_token_mask(
     skip_positions: int = 0,
     boundary_token_ids: list | None = None,
     answer_start_positions: torch.Tensor | None = None,
+    exclude_first: bool = False,
+    content_mask_vocab: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Compute a boolean mask selecting which token positions to include.
 
@@ -248,6 +250,11 @@ def compute_token_mask(
         starts = answer_start_positions.unsqueeze(1)  # (batch, 1)
         answer_mask = pos_range >= starts
         mask &= answer_mask
+
+    if exclude_first:
+        mask[:, 0] = False                              # drop first position of each window (sink slot)
+    if content_mask_vocab is not None:                  # keep only word/number tokens (drop delimiters)
+        mask &= content_mask_vocab.to(device)[input_ids]
 
     return mask
 

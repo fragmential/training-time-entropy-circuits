@@ -53,6 +53,7 @@
 
 # %%
 import os, sys
+import importlib
 if os.path.basename(os.getcwd()) == "analysis":
     os.chdir("..")
 sys.path.insert(0, os.getcwd())
@@ -60,6 +61,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 
+import utils.model_registry, utils.accessor
+importlib.reload(utils.model_registry)   # deps first: reload(_lib) alone re-imports cached modules
+importlib.reload(utils.accessor)
+from analysis import experiments_lib as _lib
+importlib.reload(_lib)                   # pick up library edits without restarting the kernel
 from analysis.experiments_lib import _alpha, get_model_label
 
 R = "data/results"
@@ -160,6 +166,33 @@ else:
     caption("alphaReQ over ranks 11-100 of the unembedding spectrum (blue, left axis) and of the "
             "after_final_norm stream (red, right axis). Axes are independent: the levels are not "
             "comparable, the shapes are.")
+
+    # The same figure fitted over the same-width window read from the BOTTOM of each spectrum,
+    # ranks -100 to -11, so it reports the tail's slope instead of the bulk's. The window is
+    # resolved per spectrum against its own positive length, so the head's, the stream's and
+    # the logit's tails are each counted from their own last non-zero direction.
+    TAIL_WINDOW = (-100, -11)
+    fig, axes = plt.subplots(2, 4, figsize=(19, 8))
+    for ax, model in zip(axes.flat, models):
+        x, head, stream, _ = series(model, *TAIL_WINDOW)
+        ln = [ax.plot(x, head, lw=1.8, color="tab:blue", label="unembedding")[0]]
+        ax.tick_params(axis="y", labelcolor="tab:blue")
+        ex = ax.twinx()
+        ln.append(ex.plot(x, stream, lw=1.8, color="tab:red",
+                          label="representation entering it")[0])
+        ex.tick_params(axis="y", labelcolor="tab:red")
+        ax.set(xscale="log", xlabel="tokens seen", title=get_model_label(model))
+        ax.legend(handles=ln, fontsize=7)
+    for ax in axes.flat[len(models):]:
+        ax.axis("off")
+    axes[0, 0].set_ylabel(r"$\alpha_{ReQ}$(unembedding)", color="tab:blue")
+    axes[1, 0].set_ylabel(r"$\alpha_{ReQ}$(unembedding)", color="tab:blue")
+    fig.suptitle(r"$\alpha_{ReQ}$ of each factor over the tail, ranks $-100$ to $-11$ "
+                 r"(counted from the bottom of the spectrum)")
+    plt.tight_layout(); plt.show()
+    caption("The same two curves fitted over ranks -100 to -11, i.e. the 89 directions ending "
+            "eleven short of the smallest, rather than ranks 11-100 from the top. Blue is the "
+            "unembedding, red the after_final_norm stream, axes again independent.")
 
 # %% [markdown]
 # ## 2. Is their sum flat?

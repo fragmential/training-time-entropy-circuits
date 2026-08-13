@@ -10,9 +10,10 @@ model_name:
   - "allenai/OLMo-2-1124-7B"
   - "EleutherAI/pythia-1b-deduped"
   - "EleutherAI/pythia-6.9b-deduped"
+  - "EleutherAI/pythia-410m-deduped"
 
-#              OL1B    OL7B   Py1b    Py6.9b
-batch_size:  [  48,     32,   256,      72]
+#              OL1B    OL7B   Py1b    Py6.9b  Py410m
+batch_size:  [  48,     32,   256,      72,    256]
 num_samples: 16_384
 
 dataset_name: native
@@ -38,6 +39,6 @@ max_layers_per_pass: 0
 collect_format: acts
 storage_format: eigenvalues
 compute_metrics: True
-#               OL1B  OL7B   Py1b  Py6.9b   (drift is 1B-only, like the packed run)
-drift_metrics: [True, False, True, False]
+#               OL1B  OL7B   Py1b  Py6.9b Py410m   (drift is 1B-only, like the packed run)
+drift_metrics: [True, False, True, False, False]
 keep_cached: False

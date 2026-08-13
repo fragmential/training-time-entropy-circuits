@@ -281,9 +281,9 @@ fig.tight_layout()
 # it is the family's edge case and the grid reads better as three Pythias over
 # nanochat plus the two OLMos.
 
-# %% [markdown]
-# GRID = ["pythia-410m-deduped", "pythia-1b-deduped", "pythia-6.9b-deduped",
-#         "nanochat-d12", "OLMo-2-0425-1B", "OLMo-2-1124-7B"]
+# %%
+GRID = ["pythia-410m-deduped", "pythia-1b-deduped", "pythia-6.9b-deduped",
+        "nanochat-d12", "OLMo-2-0425-1B", "OLMo-2-1124-7B"]
 
 # %%
 fig, axes = plt.subplots(2, 3, figsize=(15, 7))
@@ -307,6 +307,228 @@ for ax, model in zip(axes.ravel(), GRID):
     ax.set(xscale="log", xlabel="tokens", ylabel="RankMe", title=get_model_label(model))
 fig.suptitle(r"RankMe of the final stream vs null-space alignment of the last MLP")
 fig.tight_layout()
+
+# %% [markdown]
+# The same grid with a third axis: what zero-ablating the last quarter of the blocks does to
+# the final stream's RankMe (ablated − baseline, from data/results/ablate_blk*), on the
+# checkpoints the two runs share. Each y-axis wears its curve's colour.
+
+# %%
+DEPTH = {"pythia-160m-deduped": 12, "pythia-410m-deduped": 24, "pythia-1b-deduped": 16,
+         "pythia-6.9b-deduped": 32, "OLMo-2-0425-1B": 16, "OLMo-2-1124-7B": 32,
+         "nanochat-d12": 12}
+LAST_QUARTER = {12: "ablate_blk9-11", 16: "ablate_blk12-15",      # the quarter split of
+                24: "ablate_blk18-23", 32: "ablate_blk24-31"}     # ledger_ablation_layers.py
+
+
+def ablation_gap(model, yvar="rankme", leaf=(RANKME_HOOK, "acts_centered")):
+    """(tokens, the metric with the last quarter of blocks zero-ablated − the baseline) over
+    the checkpoints both runs carry; the ablation sweeps are the sparser of the two. yvar
+    picks what is differenced — with matrix_entropy this is a difference of entropies, which
+    is the log of the RankMe RATIO, not the log of the RankMe difference."""
+    cfg = "nanochat_samples" if model == "nanochat-d12" else "block_representations_samples"
+    base, steps = get_ys(cfg, model, leaf, yvar)
+    abl, asteps = get_ys(LAST_QUARTER[DEPTH[model]], model, leaf, yvar)
+    if base is None or abl is None:
+        return None, None
+    b = dict(zip(steps, base))
+    shared = [(s, a) for s, a in zip(asteps, abl) if s in b]
+    return (np.asarray(get_xs_tokens(model, [s for s, _ in shared]), float),
+            np.asarray([a - b[s] for s, a in shared], float))
+
+
+def color_axis(a, color, side="right"):
+    """Tie one y-axis' ticks, label and spine to its curve — three scales need it."""
+    a.tick_params(axis="y", colors=color)
+    a.yaxis.label.set_color(color)
+    a.spines[side].set_color(color)
+
+
+def gap_floor(gaps, margin=0.05):
+    """How far below zero the ablation axis may reach, as a fraction of a panel's own peak.
+    One model (Pythia 410m) ends far below zero and drags its axis down; every other panel
+    had good limits already. So take each panel's would-be autoscaled bottom (data range
+    including the zero line, plus matplotlib's default 5% margin) over its peak, and return
+    the second lowest: the floor is then exactly the deepest any OTHER model goes, and only
+    the one outlier is clipped."""
+    lows = sorted((min(g.min(), 0) - margin * (max(g.max(), 0) - min(g.min(), 0))) / g.max()
+                  for g in gaps if g is not None and g.max() > 0)
+    return lows[1] if len(lows) > 1 else lows[0]
+
+
+GAPS = {m: ablation_gap(m) for m in GRID}
+FLOOR = gap_floor([g for _, g in GAPS.values()])
+
+fig, axes = plt.subplots(2, 3, figsize=(18, 7.5))
+for ax, model in zip(axes.ravel(), GRID):
+    xs, ys = rankme_curve(model)
+    peak_rm = PEAKS[model]["rankme"] if model in PEAKS else None
+    if ys is not None:
+        ax.plot(xs, ys, color="0.35", lw=1.6, label="RankMe")
+        if peak_rm is not None:
+            ax.set_ylim(min(ys) - 0.05 * (peak_rm - min(ys)), peak_rm + 0.05 * (peak_rm - min(ys)))
+    if model in data and data[model]:
+        per_step = data[model][blocks_of(data, model)[0]]
+        tx, ty = series(per_step, lambda r, _e: r.max())
+        twin = ax.twinx()
+        twin.plot(tx, ty, color=COLORS.get(model, "C3"), lw=1.6, label=r"max $\rho$")
+        twin.set(ylim=(0, 1.02), ylabel=r"max $\rho$")
+        twin.axhline(chance(per_step[max(per_step)], 1.0), color=COLORS.get(model, "C3"),
+                     ls=":", lw=0.8)
+        twin.grid(False)                       # one grid (the RankMe axis') for all three
+        color_axis(twin, COLORS.get(model, "C3"))
+    gx, gy = GAPS[model]
+    if gy is None:
+        print(f"{model}: no {LAST_QUARTER[DEPTH[model]]} run — ablation gap left out")
+    else:
+        gap = ax.twinx()
+        gap.spines["right"].set_position(("axes", 1.22))          # its own scale, further out
+        gap.plot(gx, gy, color="tab:red", ls="--", lw=1.6,   # dashed: one model's colour IS red
+                 label="RankMe change under ablation")
+        gap.axhline(0, color="tab:red", ls=":", lw=0.8)
+        gap.set_ylabel("RankMe change (last quarter ablated)")
+        gap.set_ylim(bottom=max(gap.get_ylim()[0], FLOOR * gy.max()))
+        gap.grid(False)
+        color_axis(gap, "tab:red")
+    if model in PEAKS:
+        ax.axvline(PEAKS[model]["tokens"], color="k", lw=0.9, alpha=0.6, zorder=0)
+    ax.set(xscale="log", xlabel="tokens", ylabel="RankMe", title=get_model_label(model))
+fig.suptitle(r"RankMe of the final stream vs null-space alignment of the last MLP, "
+             r"with the last-quarter ablation gap")
+fig.tight_layout()
+fig.subplots_adjust(wspace=0.85, right=0.90)   # room for the offset spine tight_layout misses
+
+# %% [markdown]
+# The same grid with the null-space curve changed from the single most aligned neuron to the
+# layer's whole write mass: rho of the block's MLP write matrix, ||V0^T W||_F / ||W||_F, which
+# is rho_i weighted by each neuron's write norm instead of maximised over neurons. max rho asks
+# whether ANY neuron has found the null space; this asks how much of the layer went there, so
+# it sits an order of magnitude lower and gets the middle axis to itself, scaled to its own
+# range. Its chance level is exactly sqrt(k/d) -- an isotropic W puts k/d of its energy in any
+# k-dimensional subspace -- drawn dotted, as chance lines are throughout this notebook.
+
+# %%
+from matplotlib.lines import Line2D
+
+
+def rho_mass(r, e):
+    """||V0^T W||_F / ||W||_F for the block's whole MLP write matrix: rho computed on the
+    layer's mass rather than on one neuron."""
+    w = e["norm"].numpy()
+    return float(np.sqrt(((r * w) ** 2).sum() / (w ** 2).sum()))
+
+
+def mass_chance(entry):
+    """sqrt(k/d): what rho_mass reads for an isotropic write matrix."""
+    return float(np.sqrt(k_index(entry)[1] / entry["d_model"]))
+
+
+LEGEND = [("0.35", "-", "RankMe"), ("k", "-", r"write mass in $\rho$"),
+          ("tab:red", "--", "change under ablation")]
+
+fig, axes = plt.subplots(2, 3, figsize=(18, 7.5))
+for i, (ax, model) in enumerate(zip(axes.ravel(), GRID)):
+    xs, ys = rankme_curve(model)
+    peak_rm = PEAKS[model]["rankme"] if model in PEAKS else None
+    if ys is not None:
+        ax.plot(xs, ys, color="0.35", lw=1.6)
+        if peak_rm is not None:
+            ax.set_ylim(min(ys) - 0.05 * (peak_rm - min(ys)), peak_rm + 0.05 * (peak_rm - min(ys)))
+    if model in data and data[model]:
+        per_step = data[model][blocks_of(data, model)[0]]
+        color = COLORS.get(model, "C3")
+        twin = ax.twinx()
+        twin.plot(*series(per_step, rho_mass), color=color, lw=1.6)
+        twin.set(ylim=(0, None), ylabel=r"write mass in $\rho$")   # its own range, not max rho's
+        twin.axhline(mass_chance(per_step[max(per_step)]), color=color, ls=":", lw=0.8)
+        twin.grid(False)
+        color_axis(twin, color)
+    gx, gy = GAPS[model]
+    if gy is None:
+        print(f"{model}: no {LAST_QUARTER[DEPTH[model]]} run — ablation gap left out")
+    else:
+        gap = ax.twinx()
+        gap.spines["right"].set_position(("axes", 1.22))
+        gap.plot(gx, gy, color="tab:red", ls="--", lw=1.6)
+        gap.axhline(0, color="tab:red", ls=":", lw=0.8)
+        gap.set_ylabel("RankMe change (last quarter ablated)")
+        gap.set_ylim(bottom=max(gap.get_ylim()[0], FLOOR * gy.max()))
+        gap.grid(False)
+        color_axis(gap, "tab:red")
+    if model in PEAKS:
+        ax.axvline(PEAKS[model]["tokens"], color="k", lw=0.9, alpha=0.6, zorder=0)
+    if i == 0:
+        ax.legend(handles=[Line2D([0], [0], color=c, ls=s, lw=1.6, label=lab)
+                           for c, s, lab in LEGEND], fontsize=7, loc="upper left")
+    ax.set(xscale="log", xlabel="tokens", ylabel="RankMe", title=get_model_label(model))
+fig.suptitle(r"RankMe of the final stream vs the last MLP's write mass in the null space, "
+             r"with the last-quarter ablation gap")
+fig.tight_layout()
+fig.subplots_adjust(wspace=0.85, right=0.90)
+
+# %% [markdown]
+# The same plot in matrix entropy, log(RankMe), which is the quantity the rank ledger is
+# written in and the one that adds across independent directions. The ablation curve is then
+# a difference of entropies -- log(RankMe ablated / RankMe baseline) -- not the log of the
+# RankMe difference, so it reads as the log-factor the last quarter of blocks costs the
+# final stream's effective rank.
+
+# %%
+LEGEND_H = [("0.35", "-", "matrix entropy"), ("k", "-", r"max $\rho$"),
+            ("tab:red", "--", "change under ablation")]
+
+
+def entropy_curve(model, leaf=(RANKME_HOOK, "acts_centered")):
+    """log(RankMe) of the final stream, as stored by compute_metrics."""
+    cfg = "nanochat_samples" if model == "nanochat-d12" else "block_representations_samples"
+    ys, steps = get_ys(cfg, model, leaf, "matrix_entropy")
+    return (None, None) if ys is None else (np.asarray(get_xs_tokens(model, steps), float),
+                                            np.asarray(ys, float))
+
+
+HGAPS = {m: ablation_gap(m, yvar="matrix_entropy") for m in GRID}
+HFLOOR = gap_floor([g for _, g in HGAPS.values()])
+
+fig, axes = plt.subplots(2, 3, figsize=(18, 7.5))
+for i, (ax, model) in enumerate(zip(axes.ravel(), GRID)):
+    xs, ys = entropy_curve(model)
+    peak_h = np.log(PEAKS[model]["rankme"]) if model in PEAKS else None
+    if ys is not None:
+        ax.plot(xs, ys, color="0.35", lw=1.6)
+        if peak_h is not None:
+            ax.set_ylim(min(ys) - 0.05 * (peak_h - min(ys)), peak_h + 0.05 * (peak_h - min(ys)))
+    if model in data and data[model]:
+        per_step = data[model][blocks_of(data, model)[0]]
+        color = COLORS.get(model, "C3")
+        twin = ax.twinx()
+        twin.plot(*series(per_step, lambda r, _e: r.max()), color=color, lw=1.6)
+        twin.set(ylim=(0, 1.02), ylabel=r"max $\rho$")
+        twin.axhline(chance(per_step[max(per_step)], 1.0), color=color, ls=":", lw=0.8)
+        twin.grid(False)
+        color_axis(twin, color)
+    gx, gy = HGAPS[model]
+    if gy is None:
+        print(f"{model}: no {LAST_QUARTER[DEPTH[model]]} run — ablation gap left out")
+    else:
+        gap = ax.twinx()
+        gap.spines["right"].set_position(("axes", 1.22))
+        gap.plot(gx, gy, color="tab:red", ls="--", lw=1.6)
+        gap.axhline(0, color="tab:red", ls=":", lw=0.8)
+        gap.set_ylabel("entropy change (last quarter ablated)")
+        gap.set_ylim(bottom=max(gap.get_ylim()[0], HFLOOR * gy.max()))
+        gap.grid(False)
+        color_axis(gap, "tab:red")
+    if model in PEAKS:
+        ax.axvline(PEAKS[model]["tokens"], color="k", lw=0.9, alpha=0.6, zorder=0)
+    if i == 0:
+        ax.legend(handles=[Line2D([0], [0], color=c, ls=s, lw=1.6, label=lab)
+                           for c, s, lab in LEGEND_H], fontsize=7, loc="upper left")
+    ax.set(xscale="log", xlabel="tokens", ylabel="matrix entropy = log RankMe",
+           title=get_model_label(model))
+fig.suptitle(r"Matrix entropy of the final stream vs null-space alignment of the last MLP, "
+             r"with the last-quarter ablation gap")
+fig.tight_layout()
+fig.subplots_adjust(wspace=0.85, right=0.90)
 
 # %%
 fig, axes = plt.subplots(2, 3, figsize=(15, 7))

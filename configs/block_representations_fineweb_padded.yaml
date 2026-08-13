@@ -1,0 +1,35 @@
+output_dir: data/inferences/block_representations_fineweb_padded
+# Padded (last-token) fineweb with BOTH bfn+afn — the missing direct measurement of the
+# before_final_norm collapse on fineweb (rankme_fineweb_padded stored afn only). Pairs with the
+# packed fineweb run. Reuses the fineweb_5000 text cache (no download). Cheap: bfn/afn only.
+# OL7B dropped (padded-7B is the costly kind and OLMo doesn't collapse anyway).
+
+model_name:
+  - "EleutherAI/pythia-1b-deduped"
+  - "EleutherAI/pythia-6.9b-deduped"
+  - "allenai/OLMo-2-0425-1B"
+
+#            Py1b   Py6.9b  OL1B
+batch_size: [256,    72,     48]
+num_samples: 5000        # reuses fineweb_5000.json cache — no download
+
+dataset_name: fineweb
+seq_len: 512
+max_length: 512
+min_length: 32
+max_checkpoints: 20
+checkpoint_spacing: log
+packing: padded
+token_selection: last
+activation_dtype: bf16
+
+hooks:
+  - before_final_norm
+  - after_final_norm
+
+max_layers_per_pass: 0
+collect_format: acts
+storage_format: eigenvalues
+compute_metrics: True
+drift_metrics: False
+keep_cached: False

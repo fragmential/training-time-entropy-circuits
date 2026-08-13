@@ -40,6 +40,9 @@ FINEWEB_PADDED = "rankme_fineweb_padded"
 TRAINSET_PACKED = "rankme_trainset_packed_4MT"
 BLOCK_SAMPLES = "block_representations_samples_padded"   # padded/last-token raw-sample twin
 PACKED_SAMPLES = "block_representations_samples"         # the packed original, for comparison
+SWAP_PADDED = "block_representations_samples_swap_padded"   # padded swap (cross-tokenization)
+SWAP_PACKED = "block_representations_samples_swap"          # packed swap (1B models only)
+FINEWEB_PACKED = "block_representations_fineweb_packed"     # packed fineweb (bfn+afn)
 
 # %%
 HK = build_hooks()   # hook-name -> (node, metric); machinery lives in experiments_lib
@@ -75,40 +78,77 @@ PAIRINGS = (('', ''), ('attn', 'attn'), ('mlp', 'mlp'), ('attn', 'mlp'))
 
 
 # %% [markdown]
-# ### Padded vs packed: final-stream RankMe
+# ### Padded vs packed: final-stream RankMe (native / swap / fineweb)
 
 # %%
-# Two estimators of the final stream's effective rank over training, per model:
-# LEFT = this padded run (16,384 last-token rows, one per document), RIGHT = the packed run
-# (262,144 tokens, position soup). Same hook (after_final_norm, centered), matched y-ranges,
-# tick labels kept on both panels.
+# Final-stream effective rank (RankMe) over training, padded (last-token, one row per document)
+# vs packed (all tokens), across three datasets:
+#   native  — each model on its own pretraining data (block_representations_samples[_padded]).
+#   swap    — each 1B model on the OTHER family's data, own tokenizer (cross-tokenization control:
+#             pythia<-olmo_mix, olmo<-pile; block_representations_samples_swap[_padded]). 1B only.
+#   fineweb — a shared held-out web corpus (rankme_fineweb_padded [after-norm only] vs the packed
+#             block_representations_fineweb_packed). The padded before-norm panel is intentionally
+#             empty — that run stored after_final_norm only.
+# after_final_norm = post-LayerNorm; before_final_norm = the raw pre-norm residual, centered.
+# NB: Pythia's hard before-norm collapse (RankMe -> single digits) is a LAST-TOKEN effect — one
+# rogue/outlier residual direction dominates the last-token pre-norm variance and LayerNorm
+# divides it out; the packed (all-token) panel dilutes it to a mild dip. The two panels are thus
+# NOT the same phenomenon at two sample sizes (docs/dig_findings.md). Under swap the collapse
+# weakens (the rogue direction is fired by particular last tokens), which the swap row shows.
 import numpy as np
 import matplotlib.pyplot as plt
 
-def _final_rankme_compare(hook='after_final_norm'):
-    panels = ((BLOCK_SAMPLES, 'Padded: 16,384 last-token rows'),
-              (PACKED_SAMPLES, 'Packed: 262,144 tokens'))
+# (regime label, padded cfg, packed cfg, models)
+RANKME_REGIMES = [
+    ('native',  BLOCK_SAMPLES, PACKED_SAMPLES, filter_model_names),
+    ('swap',    SWAP_PADDED,   SWAP_PACKED,    ['pythia-1b-deduped', 'OLMo-2-0425-1B']),
+    ('fineweb', FINEWEB_PADDED, FINEWEB_PACKED, filter_model_names),
+]
+
+def _rankme_curve(ax, src, model, hook):
+    """Plot one model's RankMe(hook, centered) vs tokens; True if data was found, else False."""
+    try:
+        ys, steps = _lib.get_ys(src, model, (hook, 'acts_centered'), 'rankme')
+    except Exception:
+        return False
+    xs = np.asarray(_lib.get_xs_tokens(model, steps), dtype=float)
+    keep = xs > 0   # step 0 has zero tokens, unplottable on log-x
+    if not keep.any():
+        return False
+    ax.plot(xs[keep], np.asarray(ys)[keep], marker='o', ms=3, lw=2, label=get_model_label(model))
+    return True
+
+def _final_rankme_compare(regime, padded_cfg, packed_cfg, models, hook='after_final_norm'):
+    """One 2-panel figure (padded | packed) of final-stream RankMe for a dataset regime. Panels
+    share a y-range; a panel with no data for this hook (e.g. fineweb padded before-norm) is
+    annotated rather than dropped, so missing coverage is visible."""
+    panels = ((padded_cfg, 'padded (last-token rows)'), (packed_cfg, 'packed (all tokens)'))
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
-    for ax, (src, title) in zip(axes, panels):
-        for model in filter_model_names:
-            ys, steps = _lib.get_ys(src, model, (hook, 'acts_centered'), 'rankme')
-            xs = np.asarray(_lib.get_xs_tokens(model, steps), dtype=float)
-            keep = xs > 0   # step 0 has zero tokens, unplottable on log-x
-            ax.plot(xs[keep], np.asarray(ys)[keep], marker='o', ms=3, lw=2,
-                    label=get_model_label(model))
-        ax.set(xscale='log', title=title, xlabel='tokens')
-        ax.set_ylabel(f'RankMe ({hook.replace('_',' ')}, centered)')
+    drawn = False
+    for ax, (src, sub) in zip(axes, panels):
+        here = any(_rankme_curve(ax, src, m, hook) for m in models)
+        drawn = drawn or here
+        if not here:
+            ax.text(0.5, 0.5, f'no {hook.replace("_", " ")} data', ha='center', va='center',
+                    transform=ax.transAxes, fontsize=10, color='gray')
+        ax.set(xscale='log', title=sub, xlabel='tokens')
+        ax.set_ylabel(f'RankMe ({hook.replace("_", " ")}, centered)')
+    if not drawn:
+        plt.close(fig)
+        return
     lo = min(ax.get_ylim()[0] for ax in axes)
     hi = max(ax.get_ylim()[1] for ax in axes)
     for ax in axes:
         ax.set_ylim(lo, hi)
     axes[0].legend(fontsize=9)
-    fig.suptitle('Final-stream RankMe over training: padded (last-token) vs packed (all tokens)')
+    fig.suptitle(f'Final-stream RankMe over training — {regime}: padded vs packed '
+                 f'[{hook.replace("_", " ")}]')
     fig.tight_layout()
     plt.show()
 
-_final_rankme_compare()
-_final_rankme_compare(hook='before_final_norm')
+for _regime, _pad, _pack, _models in RANKME_REGIMES:
+    _final_rankme_compare(_regime, _pad, _pack, _models, hook='after_final_norm')
+    _final_rankme_compare(_regime, _pad, _pack, _models, hook='before_final_norm')
 
 
 # %% [markdown]

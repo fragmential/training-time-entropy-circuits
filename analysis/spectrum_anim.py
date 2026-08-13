@@ -142,24 +142,45 @@ def _scatter_panel(opts):
 
 def _curve_panel(opts):
     """Static training curves with a red line scanning across them, one x per frame — the
-    progress companion to another panel. series=[(xs, ys, color, label, on_twin)]; twinned
-    series share a second y-axis (created once in render, cleared per frame)."""
+    progress companion to another panel. series=[(xs, ys, color, label, axis)]; axis 0 is
+    the main y-axis and 1..n are twins (created once in render, cleared per frame), each
+    with its own scale and its spine pushed further right. twin_ylabel is one label or one
+    per twin; color_axes ties each y-axis's ticks and label to its series' colour, which is
+    what makes more than two scales readable."""
     xlog = opts.get('xlog', True)
-    series = [(np.asarray(xs, dtype=float), np.asarray(ys, dtype=float), c, lab, bool(tw))
+    series = [(np.asarray(xs, dtype=float), np.asarray(ys, dtype=float), c, lab, int(tw))
               for xs, ys, c, lab, tw in opts['series']]
     if xlog:                                    # step 0 sits at tokens=0: unplottable, and it
         series = [(xs[m], ys[m], c, lab, tw)    # would poison the log-space interpolation
                   for xs, ys, c, lab, tw in series if (m := xs > 0).any()]
     x0 = min((s[0].min() for s in series), default=1.0)
     scan = [max(float(x), x0) if xlog else float(x) for x in opts['scan_x']]
+    labels = opts.get('twin_ylabel', '')
     return dict(kind='curve', series=series, scan_x=scan,
                 xlog=xlog, ylog=opts.get('ylog', False),
-                twin=any(s[4] for s in series), scan_color=opts.get('scan_color', 'red'),
+                twin=max((s[4] for s in series), default=0),
+                scan_color=opts.get('scan_color', 'red'), color_axes=opts.get('color_axes', False),
                 xlabel=opts.get('xlabel', 'tokens'), ylabel=opts.get('ylabel', ''),
-                twin_ylabel=opts.get('twin_ylabel', ''), title=opts.get('title'))
+                twin_ylabel=[labels] if isinstance(labels, str) else list(labels),
+                title=opts.get('title'))
 
 
-_PREBUILT = {'scatter': _scatter_panel, 'curve': _curve_panel}
+def _series_panel(opts):
+    """A spectrum whose frames the caller hands in directly (frames=[[(values, color, label), ...]])
+    — for spectra the results backend can't resolve, e.g. singular values of a weight matrix.
+    Same drawer as the resolved spectrum panels; the y-range is pinned over all frames."""
+    frames = [[(np.asarray(a, dtype=float), c, lab) for a, c, lab in f] for f in opts['frames']]
+    ylog = opts.get('ylog', True)
+    v = np.concatenate([a for f in frames for a, _, _ in f])
+    v = v[v > 0] if ylog else v
+    return dict(kind='spectrum', title=opts.get('title'), mode=opts.get('mode', 'line'),
+                xlog=opts.get('xlog', True), ylog=ylog,
+                ylim=opts.get('ylim') or _ylim(v.min(), v.max(), ylog), frames=frames,
+                x0=opts.get('x0', 1), xlabel=opts.get('xlabel', 'Component index'),
+                ylabel=opts.get('ylabel', ''))
+
+
+_PREBUILT = {'scatter': _scatter_panel, 'curve': _curve_panel, 'series': _series_panel}
 
 
 _TICK_NUM = re.compile(r'\d+')
@@ -371,7 +392,7 @@ def _draw_spectrum(ax, p, i):
     bridges = sorted((max(a, 0), b) for a, b in (p.get('dotted_bridges') or []))
     for arr, color, label in p['frames'][i]:
         arr = np.asarray(arr, dtype=float)
-        xs = np.arange(len(arr))
+        xs = np.arange(len(arr)) + p.get('x0', 0)   # x0=1 -> rank, so a log x-axis keeps the top
         if p['mode'] == 'line':
             runs, start = [], 0                     # the solid stretches the bridges leave over
             for a, b in bridges:
@@ -464,13 +485,16 @@ def _draw_scatter(ax, p, i):
 
 
 def _draw_curve(ax, p, i):
-    tw = p.get('_twin')
-    if tw is not None:
-        tw.clear()
-        tw.yaxis.tick_right(); tw.yaxis.set_label_position('right')   # clear() sends both left
+    tws = p.get('_twins') or []
+    for k, t in enumerate(tws):
+        t.clear()
+        t.yaxis.tick_right(); t.yaxis.set_label_position('right')     # clear() sends both left
+        if k:                                    # and it resets the spine offset too
+            t.spines['right'].set_position(('axes', 1 + 0.16 * k))
+        t.grid(False)                            # one grid (the main axis') for all the scales
     x, handles = p['scan_x'][i], []
-    for xs, ys, color, label, on_twin in p['series']:
-        a = tw if on_twin else ax
+    for xs, ys, color, label, axis in p['series']:
+        a = tws[axis - 1] if axis else ax
         handles += a.plot(xs, ys, color=color, lw=1.8, label=label)
         xi = np.log10(xs) if p['xlog'] else xs                # mark where the scan line cuts
         a.plot([x], [np.interp(np.log10(x) if p['xlog'] else x, xi, ys)], 'o',
@@ -479,7 +503,17 @@ def _draw_curve(ax, p, i):
     if p['xlog']: ax.set_xscale('log')
     if p['ylog']: ax.set_yscale('log')
     ax.set_xlabel(p['xlabel'], fontsize=14); ax.set_ylabel(p['ylabel'], fontsize=14)
-    if tw is not None: tw.set_ylabel(p['twin_ylabel'], fontsize=14)
+    for t, lab in zip(tws, p['twin_ylabel']):
+        t.set_ylabel(lab, fontsize=14)
+    if p.get('color_axes'):                    # each scale wears its series' colour
+        axis_color = {}
+        for _, _, c, _, axis in p['series']:
+            axis_color.setdefault(axis, c)
+        for k, a in enumerate([ax] + tws):
+            c = axis_color.get(k)
+            if c is None: continue
+            a.tick_params(axis='y', colors=c); a.yaxis.label.set_color(c)
+            a.spines['right' if k else 'left'].set_color(c)
     ax.legend(handles=handles, labels=[h.get_label() for h in handles],
               loc='lower right', fontsize=9)
     if p['title'] is not None: ax.set_title(p['title'])
@@ -497,6 +531,8 @@ def render(spec, save=None):
     right = 0.88 if any(p['kind'] == 'heatmap' or p.get('twin') or p.get('cmap')
                         or (p['kind'] == 'spectrum' and len(p['frames'][0]) > 12)
                         for p in spec['panels']) else 0.97   # room for colorbar / twin labels
+    twins = max((int(p.get('twin') or 0) for p in spec['panels']), default=0)
+    right -= 0.045 * max(0, twins - 1)                       # offset spines need their own room
     fig.subplots_adjust(left=0.08, right=right, top=0.88, bottom=0.12, hspace=0.35, wspace=0.30)
     n = spec['n']
 
@@ -504,7 +540,7 @@ def render(spec, save=None):
     from matplotlib.colors import Normalize, ListedColormap   # depth-gradient legends (survive per-frame clear)
     for ax, p in zip(axes, spec['panels']):
         if p.get('twin'):                          # once, not per frame: twinx would pile up axes
-            p['_twin'] = ax.twinx()
+            p['_twins'] = [ax.twinx() for _ in range(int(p['twin']))]   # spines offset per frame
         if p['kind'] == 'heatmap' and not p['per_frame']:
             cmap = plt.get_cmap(p['cmap']).copy(); cmap.set_bad('white')
             sm = ScalarMappable(cmap=cmap, norm=Normalize(p['vmin'], p['vmax'])); sm.set_array([])

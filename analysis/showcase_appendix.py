@@ -732,7 +732,7 @@ for sub in ('mlp', 'attn'):
 # ## H. Layer ablation: full inference with block writes zeroed (RQ1c.2) — BLIND
 #
 # The ablated runs (data/results/ablate_*): per model the four L/4 quarter-chunks, the
-# middle half, and the pythia carriers (blk3 at 1b; blk4-5 at 6.9b), each a full
+# middle half, and the pythia carriers (blk3 at 1b; blk3-4 at 6.9b), each a full
 # collection with all metrics on ~38 checkpoints. Baseline = the unablated packed sweep.
 #
 # Captions are descriptive only — no interpretation until cross-checked.

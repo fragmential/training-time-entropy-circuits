@@ -1,0 +1,37 @@
+output_dir: data/inferences/block_representations_fineweb_packed
+# Packed (all-token) fineweb collection to pair with the existing padded fineweb
+# (rankme_fineweb_padded): completes a padded-vs-packed comparison on a THIRD dataset (fineweb).
+# collect.py streams fineweb and packs per model tokenizer on the fly (line 854-855) — no
+# prebuilt mix needed. Reuses the fineweb_2000 text cache (no download); ~1M packed tokens per
+# model (checkpoint loading dominates wall time, so token count barely matters). Cheap: bfn/afn
+# only, no block hooks, no crosses/ledger — just the final-stream RankMe for the figure.
+
+model_name:
+  - "EleutherAI/pythia-1b-deduped"
+  - "EleutherAI/pythia-6.9b-deduped"
+  - "allenai/OLMo-2-0425-1B"
+  - "allenai/OLMo-2-1124-7B"
+
+#            Py1b   Py6.9b  OL1B   OL7B
+batch_size: [256,    72,     48,    32]
+num_samples: 2000        # texts to stream+pack (reuses fineweb_2000.json cache — no download)
+
+dataset_name: fineweb
+seq_len: 512
+min_length: 32
+max_checkpoints: 20
+checkpoint_spacing: log
+packing: packed
+token_selection: all
+activation_dtype: bf16
+
+hooks:
+  - before_final_norm
+  - after_final_norm
+
+max_layers_per_pass: 0
+collect_format: acts
+storage_format: eigenvalues
+compute_metrics: True
+drift_metrics: False
+keep_cached: False

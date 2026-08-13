@@ -1,0 +1,44 @@
+output_dir: data/inferences/content_tokens
+# before/after-final-norm only, on INTERIOR CONTENT tokens: excludes the first position of each
+# 512-window (attention-sink slot), the last position (no next-token target, 'all' default), and
+# delimiter tokens (anything that isn't a word or number — punctuation/whitespace). Packed native
+# training data per model, minimal metrics, eigenvalues storage. Standard settings otherwise.
+
+model_name:
+  - "EleutherAI/pythia-410m-deduped"
+  - "EleutherAI/pythia-1b-deduped"
+  - "EleutherAI/pythia-6.9b-deduped"
+  - "nanochat-d12"
+  - "allenai/OLMo-2-0425-1B"
+  - "allenai/OLMo-2-1124-7B"
+
+#            Py410m  Py1b   Py6.9b  nanochat  OL1B   OL7B
+batch_size: [ 256,    256,     72,     128,     48,    32]
+max_tokens: 262_144
+
+packed_data_path:
+  EleutherAI/*: data/mixes/pile_30M_512.pt
+  allenai/*: data/mixes/olmo_mix_30M_512.pt
+  nanochat-d12: data/mixes/fineweb_edu_nanochat_1M_512.pt
+
+seq_len: 512
+min_length: 32
+max_checkpoints: 30
+checkpoint_spacing: log
+packing: packed
+token_selection: all
+exclude_first: true
+content_only: true
+activation_dtype: bf16
+
+hooks:
+  - before_final_norm
+  - after_final_norm
+
+max_layers_per_pass: 0
+collect_format: acts
+storage_format: eigenvalues
+compute_metrics: True
+metrics_skip: [block_ledger, incremental_overlap, block_block_coupling, block_residual_coupling, ablation_contribution, eigendirection_attribution]
+drift_metrics: False
+keep_cached: False

@@ -800,6 +800,24 @@ def _block_ledger(node: Node) -> dict | None:
             "interference": s_next - s_mix, "w": w, "s": s, "s_mix": s_mix, "s_next": s_next}
 
 
+def _block_write_compound(node: Node) -> dict | None:
+    """RankMe of a block's COMPOUND residual update = attn.out + mlp.out (sample-space sum) —
+    the combined write both sub-layers deposit into the stream this block, as one signal.
+    Order-independent, so it holds for parallel Pythia and sequential OLMo alike.
+
+    Returns: rankme, matrix_entropy, true_rankme (of the summed write) and trace (its energy).
+    """
+    a, m = node.get("attn.out.acts"), node.get("mlp.out.acts")
+    if not isinstance(a, View) or not isinstance(m, View) \
+            or not (g := _comps(a.samples, m.samples, a.mean, m.mean)):
+        return None
+    cov = prefer_gpu(lambda X, mu: X.T @ X / X.shape[0] - torch.outer(mu, mu))
+    eig = eigvalsh_descending(cov(g[0].float() + g[1].float(), g[2].float() + g[3].float()))
+    rm = rankme_metrics(eig)
+    return {"rankme": rm["rankme"], "matrix_entropy": rm["matrix_entropy"],
+            "true_rankme": rm["true_rankme"], "trace": float(eig.clamp(min=0).sum())}
+
+
 def _overlap_chi(node: Node) -> dict | None:
     """Model-wide AGGREGATE subspace-overlap χ of all block outputs (M-component mixture
     entropy minus variance-weighted block entropies), over the root's blk*.{attn,mlp}.out
@@ -939,6 +957,7 @@ METRICS = [
     _Metric("gen_block_vs_residual",   {"node": ""}, _gen_block_vs_residual,   node_re=r"blk\d+\.(attn|mlp)\.out$"),
     _Metric("incremental_overlap",     {"node": ""}, _incremental_overlap,     node_re=r"blk\d+\.(attn|mlp)\.out$"),
     _Metric("block_ledger",            {"node": ""}, _block_ledger,            node_re=r"blk\d+$"),
+    _Metric("block_write_compound",    {"node": ""}, _block_write_compound,    node_re=r"blk\d+$"),
     _Metric("mean_migration",          {"node": ""}, _mean_migration,          node_re=r"blk\d+\.(attn|mlp)\.out$"),
     _Metric("overlap_chi",             {"node": ""}, _overlap_chi,             node_re=r"^$"),
     _Metric("block_block_coupling",    {"node": ""}, _block_block_coupling,    node_re=r"^$"),

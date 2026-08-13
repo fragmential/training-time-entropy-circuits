@@ -120,9 +120,11 @@ def _rankme(evs: np.ndarray) -> float:
 
 def _alpha(evs: np.ndarray, k0: int = 32, k1: int = 300) -> float:
     """Stringer-style weighted log-log slope over eigenvalue ranks [k0, k1) (0-based).
-    k1 <= 0 counts back from the end of the positive spectrum (e.g. -20 = drop last 20)."""
+    k1 <= 0 and k0 < 0 count back from the end of the positive spectrum, so (-100, -11) is
+    the window of the same width read from the tail rather than from the head."""
     lam = np.asarray(evs, float); lam = lam[lam > 0]
     k1 = min(k1, len(lam)) if k1 > 0 else len(lam) + k1
+    k0 = k0 if k0 >= 0 else max(0, len(lam) + k0)
     r = np.arange(k0, k1) + 1.0
     x = np.stack([-np.log(r), np.ones_like(r)], 1)
     w = (1.0 / r)[:, None]
