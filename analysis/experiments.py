@@ -441,7 +441,7 @@ for model in MODELS_LC:
                             baseline_src=(CFG_BS(model), ('blk0.attn.in', 'acts_centered'),
                                           'ΔS(embedding stream)', 'matrix_entropy'),
                             total_src=(CFG_BS(model), ('before_final_norm', 'acts_centered'),
-                                       'S(bfn) − S(emb)', 'matrix_entropy'))
+                                       'S(bfn) − Sf(emb)', 'matrix_entropy'))
 grid_show()
 
 # %%

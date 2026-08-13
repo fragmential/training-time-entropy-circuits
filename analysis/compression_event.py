@@ -127,19 +127,7 @@ def even_directions(k, d, seed=0):
     return _rot(X, d, seed)
 
 def run(counts, d, steps=3000, lr=0.25, wd=0.0, init="flat", init_std=0.1,
-        flat_jitter=0.02, delta=1e-3, seed=0):
-    """Single-layer toy (free features theta, linear head W), full-batch GD on CE.
-    init='flat': rank-1 shared direction + jitter. init='iid': isotropic. init='clustered':
-    classes with n>1 are commons clustered on random orthogonal directions with aligned W
-    columns; n=1 classes are singletons coincident at the origin with zero W columns
-    (delta jitter breaks the symmetry — the canonical construction generalized).
-    init='simplex': same construction but the common centers are equidistant simplex-ETF
-    vertices instead of orthogonal axes (needs only d >= n_com - 1, and matches the
-    neural-collapse geometry the classes converge to). init='even': common centers are the
-    maximally-even spherical code of n_com points (see even_directions) — a convex regular
-    polytope wherever one exists at (n_com, d), else a Thomson-energy minimiser; the general
-    case for n_com > d+1 where equidistant is impossible. Tracks RankMe, the full feature
-    spectrum, and per-class + total loss."""
+        flat_jitter=0.02, delta=1e-3, seed=0, com_threshold=2):
     torch.manual_seed(seed)
     N, C = sum(counts), len(counts)
     y = torch.repeat_interleave(torch.arange(C), torch.tensor(counts))
@@ -151,7 +139,7 @@ def run(counts, d, steps=3000, lr=0.25, wd=0.0, init="flat", init_std=0.1,
         theta = init_std * torch.randn(N, d)
         W = init_std * torch.randn(d, C)
     elif init in ("clustered", "simplex", "even"):
-        n_com = sum(n > 1 for n in counts)
+        n_com = sum(n >= com_threshold for n in counts)
         if init == "clustered":
             # orthogonal cluster centers (one axis per common): needs d >= n_com
             dirs = torch.linalg.qr(torch.randn(d, n_com))[0].T
@@ -191,14 +179,14 @@ def run(counts, d, steps=3000, lr=0.25, wd=0.0, init="flat", init_std=0.1,
     return dict(rm=np.array(rm), lams=torch.stack(lams).numpy(), loss_c=np.array(loss_c),
                 loss=np.array(loss_tot), theta=theta.detach().numpy(), y=y.numpy())
 
-def loss_panel(ax, r, counts, cols=None):
+def loss_panel(ax, r, counts, cols=None, log=True):
     C = len(counts)
     cols = cols or [cm.viridis(1 - i / max(C - 1, 1)) for i in range(C)]
     for c in range(C):
         ax.plot(r['loss_c'][:, c], color=cols[c], lw=0.9,
                 label=f'class {c} (n={counts[c]})' if C <= 6 else None)
     ax.plot(r['loss'], color='k', lw=1.8, label='total')
-    ax.set(xlabel='step', ylabel='CE loss', xscale='log', yscale='log')
+    ax.set(xlabel='step', ylabel='CE loss', xscale='log', yscale='log' if log else 'linear')
     ax.legend(fontsize=7)
     return cols
 
@@ -289,23 +277,58 @@ plt.show()
 # canonical ~0.01-scale kick remains (measured, next section).
 
 # %%
-COUNTS_B, D_B = (32,) * 4 + (1,) * 12, 3
-rb = run(COUNTS_B, D_B, steps=50000, init="clustered")
-tr = int(rb['rm'][:3000].argmin())
+COUNTS_B, D_B = (20,) * 4 + (1,) * 80, 4
+rb = run(COUNTS_B, D_B, steps=40000, lr=0.5, init="clustered", com_threshold=2, flat_jitter=0.03, delta=0.005)
+tr = int(rb['rm'][:4000].argmin())
 print(f"B: start {rb['rm'][0]:.2f} -> trough {rb['rm'][tr]:.2f} @ {tr} -> final {rb['rm'][-1]:.2f}")
 
+# %%
 fig, (b0, b1) = plt.subplots(1, 2, figsize=(11, 4.2))
 b0.plot(rb['rm'], color='steelblue', lw=1.5)
 b0.axvline(tr, color='gray', lw=0.8, ls=':')
 b0.set(title='RankMe: drop (warmup) → plateau → late singleton forks', xlabel='step',
        ylabel='RankMe', xscale='log')
-loss_panel(b1, rb, COUNTS_B)
+loss_panel(b1, rb, COUNTS_B, log=False)
+b1.axvline(tr, color='gray', lw=0.8, ls=':')
+b1.set_title('per-class loss (dark = common, light = singleton) + total')
+plt.show()
+
+# %%
+COUNTS_B, D_B = (2,) * 2 + (1,) * 2, 2
+rb = run(COUNTS_B, D_B, steps=4000, lr=0.5, init="clustered", com_threshold=3, flat_jitter=0.03, delta=0.005)
+tr = int(rb['rm'][:4000].argmin())
+print(f"B: start {rb['rm'][0]:.2f} -> trough {rb['rm'][tr]:.2f} @ {tr} -> final {rb['rm'][-1]:.2f}")
+
+# %%
+fig, (b0, b1) = plt.subplots(1, 2, figsize=(11, 4.2))
+b0.plot(rb['rm'], color='steelblue', lw=1.5)
+b0.axvline(tr, color='gray', lw=0.8, ls=':')
+b0.set(title='RankMe: drop (warmup) → plateau → late singleton forks', xlabel='step',
+       ylabel='RankMe', xscale='log')
+loss_panel(b1, rb, COUNTS_B, log=False)
+b1.axvline(tr, color='gray', lw=0.8, ls=':')
+b1.set_title('per-class loss (dark = common, light = singleton) + total')
+plt.show()
+
+# %%
+COUNTS_B, D_B = (3,) * 2 + (1,) * 2, 2
+rb = run(COUNTS_B, D_B, steps=10000, lr=0.5, init="clustered", com_threshold=3, flat_jitter=0.03, delta=0.005)
+tr = int(rb['rm'][:4000].argmin())
+print(f"B: start {rb['rm'][0]:.2f} -> trough {rb['rm'][tr]:.2f} @ {tr} -> final {rb['rm'][-1]:.2f}")
+
+# %%
+fig, (b0, b1) = plt.subplots(1, 2, figsize=(11, 4.2))
+b0.plot(rb['rm'], color='steelblue', lw=1.5)
+b0.axvline(tr, color='gray', lw=0.8, ls=':')
+b0.set(title='RankMe: drop (warmup) → plateau → late singleton forks', xlabel='step',
+       ylabel='RankMe', xscale='log')
+loss_panel(b1, rb, COUNTS_B, log=False)
 b1.axvline(tr, color='gray', lw=0.8, ls=':')
 b1.set_title('per-class loss (dark = common, light = singleton) + total')
 plt.show()
 
 # %% [markdown]
-# ## Why not all three phases in one single-layer run
+# ## Why not all three phases in one single-layer run: because claude is STUPID that's why. I did it easily
 #
 # Tried and failed, systematically (2–3 seeds each): borderline init scales between
 # "drops first" and "rises first"; low-rank subspace inits (k = 3…8, d = 16/32); junk

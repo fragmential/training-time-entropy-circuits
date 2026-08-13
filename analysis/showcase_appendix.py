@@ -742,7 +742,7 @@ QUARTERS = {12: ['blk0-2', 'blk3-5', 'blk6-8', 'blk9-11', 'blk3-8'],
             16: ['blk0-3', 'blk4-7', 'blk8-11', 'blk12-15', 'blk4-11'],
             24: ['blk0-5', 'blk6-11', 'blk12-17', 'blk18-23', 'blk6-17'],
             32: ['blk0-7', 'blk8-15', 'blk16-23', 'blk24-31', 'blk8-23']}
-CARRIER = {'pythia-1b-deduped': 'blk3', 'pythia-6.9b-deduped': 'blk4-5'}
+CARRIER = {'pythia-1b-deduped': 'blk3', 'pythia-6.9b-deduped': 'blk3-4'}
 
 def interventions(model):
     return QUARTERS[NB[model]] + ([CARRIER[model]] if model in CARRIER else [])
@@ -915,3 +915,105 @@ for term in ('quality', 'delta_s'):
         caption(f'Per-block {term} term over training for {model} (colorbar = block depth): '
                 f'left the unablated sweep, right the run with {tag}\'s writes zeroed. '
                 f'Descriptive only.')
+
+# %% [markdown]
+# ## I. Through the final norm: the depth profile packed vs padded (§D extended)
+#
+# **Question.** §D's profile stops at `before_final_norm`, where padded pythia sits at
+# single digits — the basis for "the padded view ends with the output stream crushed".
+# But the layerwise-RankMe animations carry one more leaf, `after_final_norm`, and the
+# curve rises again there. Does the padded crush survive the final norm, or is it a
+# one-leaf, pre-norm event?
+#
+# **Scope.** Only the four models with a padded twin
+# (`block_representations_samples_padded`); 160m/410m are packed-only, so a 410m animation
+# is showing packed data whatever the source constant says.
+
+# %%
+# Leaf set + final-checkpoint extractor for §I (no plots here). Same leaves as the
+# layerwise animations: per-block stream entries, then both sides of the final norm.
+PROFILE_MODELS = {'pythia-1b-deduped': 16, 'pythia-6.9b-deduped': 32,
+                  'OLMo-2-0425-1B': 16, 'OLMo-2-1124-7B': 32}
+NORM_X = (1.10, 1.22)                      # bfn / afn, set off past the block axis
+
+def depth_profile_final(cfg, model, L):
+    """Centered stream RankMe by depth at the final checkpoint, blocks then the norm pair."""
+    res, steps = _lib.load_results(cfg, model)
+    fin = res[steps[-1]]
+    leaves = [f'blk{k}.attn.in' for k in range(L)] + ['before_final_norm', 'after_final_norm']
+    return np.array([fin.get(lf, {}).get('acts_centered', {}).get('rankme', np.nan)
+                     for lf in leaves])
+
+# %%
+fig, axes = plt.subplots(1, 2, figsize=(13.5, 4.8), sharey=True)
+for ax, cfg, title in ((axes[0], BLOCK_SAMPLES, 'packed all-token'),
+                       (axes[1], PADDED, 'padded last-token')):
+    for i, (model, L) in enumerate(PROFILE_MODELS.items()):
+        ys = depth_profile_final(cfg, model, L)
+        xs = np.concatenate([np.linspace(0, 1, L), NORM_X])
+        c = plt.get_cmap('tab10')(i)
+        ax.semilogy(xs[:L], ys[:L], marker='o', ms=3.5, lw=2, color=c,
+                    ls='--' if 'pythia' in model else '-', label=get_model_label(model))
+        ax.semilogy(xs[L:], ys[L:], marker='D', ms=6, lw=2, color=c,
+                    ls='--' if 'pythia' in model else '-')
+    ax.axvline(np.mean((1, NORM_X[0])), color='gray', lw=0.8, ls=':')
+    ax.set_xticks([0, 0.5, 1, *NORM_X], ['0', '0.5', '1', 'bfn', 'afn'])
+    ax.set(xlabel='relative depth', title=title)
+axes[0].set_ylabel('stream RankMe (centered)')
+axes[0].legend(fontsize=8, loc='lower left')
+fig.suptitle('Depth profile at the final checkpoint, through the final norm (dashed = pythia)')
+plt.tight_layout(); plt.show()
+caption('Diamonds = the two final-norm leaves, set off past the block axis. The padded '
+        'crush is a ONE-LEAF, pre-norm event and the final norm undoes it: pythia-1b runs '
+        '101 (blk15 in) → 9 (bfn) → 100 (afn), pythia-6.9b 144 → 8 → 142, so the last '
+        'block writes the collapse and the norm removes it — §D\'s profile stops exactly '
+        'at its bottom. Packed pythia has no crush at all (1b 102 → 194 → 264; 6.9b 127 → '
+        '260 → 555). OLMo-2 is flat through the norm in both geometries. Note also the '
+        'mid-stack valley is far shallower padded (1b: 888 → 2 packed vs 468 → 11 padded), '
+        'so "same valley, same depth" holds for position, not magnitude. Caveats as §D: '
+        'padded N/d ≈ 8 distorts levels (§E), and packed vs padded are different measured '
+        'objects — compare shapes, not levels.')
+
+# %% [markdown]
+# ## J. Token selection: packed all-token vs padded last-token vs content tokens
+#
+# The same centered-stream RankMe read on three collections that differ only in which token
+# positions enter the covariance: the main packed sweep (every position), the padded twin
+# (one last token per document), and `data/results/content_tokens`. The content-token run
+# carries three leaves only — both sides of the final norm and the residual entering the
+# middle block — so the middle is `blk{L/2}.attn.in`. nanochat-d12 has no padded twin.
+
+# %%
+# §J helpers (no plots): the three token selections and the three depths they share.
+CONTENT = 'content_tokens'
+MID = lambda m: f'blk{NB[m] // 2}.attn.in'         # residual entering the middle block
+LEAF_TITLES = {'after_final_norm': 'after final norm',
+               'before_final_norm': 'before final norm',
+               'middle': 'mid-stack residual (into block L/2)'}
+
+def selection_grid(leaf, ylog=False, ablations=False):
+    """Centered RankMe of one leaf over training, one panel per model, three token selections.
+    ablations=True adds the §H carrier-ablated packed run to the two models that have one."""
+    _lib.grid_start(ncols=3, figsize=(16, 8), savefig=False, xvar='tokens',
+                    title=f'Stream RankMe, {LEAF_TITLES[leaf]} — packed vs padded vs content tokens')
+    for model in ALL6:
+        node = MID(model) if leaf == 'middle' else leaf
+        tag = CARRIER.get(model) if ablations else None
+        srcs = [(CFG(model), (node, 'acts_centered'), 'packed all-token'),
+                (PADDED, (node, 'acts_centered'), 'padded last-token'),
+                (CONTENT, (node, 'acts_centered'), 'content tokens'),
+                (f'ablate_{tag}', (node, 'acts_centered'), f'packed, − {tag}')]
+        # colour comes from the source index, so absent sources are disabled, not dropped
+        off = [i for i, have in ((1, model != 'nanochat-d12'), (3, tag)) if not have]
+        _lib.plot_group('rankme', srcs, [model], title=get_model_label(model),
+                        color_palette='tab10', ylog=ylog, legend_max=5, disable_didx=off)
+    _lib.grid_show()
+
+# %%
+selection_grid('after_final_norm')
+
+# %%
+selection_grid('before_final_norm')
+
+# %%
+selection_grid('middle', ablations=True)

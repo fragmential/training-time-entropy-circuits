@@ -8,7 +8,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.5
 #   kernelspec:
-#     display_name: representation-geometry
+#     display_name: representation-geometry (3.14.6.final.0)
 #     language: python
 #     name: python3
 # ---
@@ -144,16 +144,21 @@ plt.tight_layout()
 
 # %%
 fig, ax = plt.subplots(figsize=(8, 4.5))
-for name, peak in (('160m', 6e-4), ('1b', 3e-4), ('6.9b', 1.2e-4)):
+for name, peak in (('1b', 3.0e-4), ('6.9b', 1.2e-4)):
     t = np.geomspace(1e6, PYTHIA_TOTAL_TOKENS, 3000)
     ax.plot(t, pythia_lr(t, peak), label=f'pythia-{name}')
 for name, (peak, s1_end) in OLMO.items():
     t = np.geomspace(1e7, s1_end, 3000)
     ax.plot(t, olmo_lr(t, peak), label=name)
 t = np.geomspace(1e6, D12_TOTAL_TOKENS, 3000)
-ax.plot(t, 0.02 * nanochat_multiplier(t), label='nanochat-d12 (matrix/Muon)')
+for (name, lr) in D12_GROUP_LR.items():
+    ax.plot(toks, lr * nanochat_multiplier(toks), label=f'nanochat - {name.split(' ')[0]}')
 ax.set(xscale='log', yscale='log', xlabel='pretraining tokens', ylabel='learning rate',
-       title='LR schedules across families (log–log)')
-ax.legend(fontsize=9)
+       title='LR schedules across families', ylim=(10**-7.5, 10**0.2))
+ax.legend(fontsize=9, loc='upper right')
 ax.grid(alpha=0.3, which='both')
 plt.tight_layout()
+plt.savefig(f'figures/learning_rates.pdf', bbox_inches='tight')
+
+#FIGURE J
+# I already have this plot in

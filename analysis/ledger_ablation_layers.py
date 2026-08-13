@@ -141,3 +141,23 @@ ledger_pair('OLMo-2-0425-1B', 10)
 
 # %%
 ledger_pair('OLMo-2-1124-7B', 16)
+
+# %% [markdown]
+# ## OLMo-2: the middle four layers, no ablation
+#
+# Both models in one figure, each panel the baseline ledger stack summed over that model's
+# four central blocks (1B: blk6-9, 7B: blk14-17).
+
+# %%
+OLMO = ['OLMo-2-0425-1B', 'OLMo-2-1124-7B']
+mid4 = lambda L: list(range(L // 2 - 2, L // 2 + 2))     # the four blocks straddling mid-depth
+
+grid_start(ncols=len(OLMO), figsize=(13, 4.5), sharex=True, emb=False, zero_line=True,
+           title='Ledger contributions of the middle four layers — OLMo-2, no ablation',
+           savedir='ledger_ablation_layers/olmo_middle4')
+for j, model in enumerate(OLMO):
+    layers = mid4(NB[model])
+    plot_ledger_stack(model, CFG(model), blocks=layers,
+                      title=f'{model} — blk{layers[0]}-{layers[-1]}',
+                      ylabel='rank entropy' if j == 0 else None, legend=7 if j == 0 else None)
+grid_show()

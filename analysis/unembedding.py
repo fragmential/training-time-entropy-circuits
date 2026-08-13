@@ -8,7 +8,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.5
 #   kernelspec:
-#     display_name: representation-geometry (3.14.6.final.0)
+#     display_name: representation-geometry (3.14.0)
 #     language: python
 #     name: python3
 # ---
@@ -734,7 +734,7 @@ OVERLAY_METRICS = {
                        'tail_matrix_entropy'),
 }
 
-def rankme_overlay(metric='RankMe'):
+def rankme_overlay(metric='RankMe', top=1):
     """Per model: `metric` of the unembedding spectrum (blue, left) vs the same statistic on
     the after_final_norm stream covariance (red, twin right), each solid = full spectrum,
     dashed = with the top eigendirection dropped. x is shared as in alpha_overlay (nanochat
@@ -750,14 +750,14 @@ def rankme_overlay(metric='RankMe'):
         twins.append(ex)
         lines = []
         for drop1, ls, lbl in ((False, '-', 'full spectrum'),
-                               (True, '--', 'top-1 dropped')):
+                               (True, '--', f'top-{top} dropped')):
             hv = np.asarray([head_fn(per_step[s][1:] if drop1 else per_step[s]) for s in steps])
             ok = (xs > 0) & np.isfinite(hv)
             lines.append(ax.plot(xs[ok], hv[ok], ls, lw=1.8, color='tab:blue',
                                  label=f'unembedding, {lbl}')[0])
             sv, ssteps = _lib.get_ys(cfg_of(model), model, AFN_HOOK,
                                      tail_var if drop1 else full_var,
-                                     {'k': 1} if drop1 else {})
+                                     {'k': top} if drop1 else {})
             if share:
                 x_vals.append(xs[ok])
             if sv is None:
@@ -830,7 +830,7 @@ caption('Blue (left axis): RankMe of the unembedding singular-value-squared spec
         'excepted. Descriptive only.')
 
 # %%
-rankme_overlay('matrix entropy')
+rankme_overlay('matrix entropy', top=10)
 caption('The same figure in matrix entropy (Shannon entropy of the normalized eigenvalue '
         'spectrum) instead of RankMe: blue (left axis) the unembedding sv² spectrum, red '
         '(right axis) the centered after_final_norm stream covariance, solid = full spectrum, '

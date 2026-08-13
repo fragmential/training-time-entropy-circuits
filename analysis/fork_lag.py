@@ -8,7 +8,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.5
 #   kernelspec:
-#     display_name: Python 3
+#     display_name: representation-geometry (3.14.6.final.0)
 #     language: python
 #     name: python3
 # ---
@@ -43,7 +43,7 @@ from IPython.display import HTML
 
 SW = torch.load('data/results/toy/appendix_sweeps.pt', weights_only=True)
 
-RX = '-0.5'                                    # one of '0', '-0.1', '-0.25', '-0.5'
+RX = '-0.25'                                    # one of '0', '-0.1', '-0.25', '-0.5'
 r = SW['rx'][RX]
 
 # %% [markdown]
@@ -57,7 +57,7 @@ r = SW['rx'][RX]
 import math
 from toy.appendix_sweeps import run, _init
 
-ROT_DEG = 90
+ROT_DEG = 0
 
 def rot(x, deg):
     a = math.radians(deg)
@@ -143,6 +143,11 @@ def _draw1(t):
 anim1 = animation.FuncAnimation(fig1, _draw1, frames=range(0, T, STRIDE), interval=60)
 plt.close(fig1)
 HTML(anim1.to_jshtml())
+#FIGURE F3
+# alternate version of this: snapshots at rx -0.25: 190, 216, 300
+# + measure angle of principal axes change between 190 vs 300
+# + maybe plot "fig4-style" plot except splice at 190 at show how the eigenvalues and rankme would continue if the axes got fixed at 190
+# also maybe snapshots at rx -0.1: 190, 274
 
 # %% [markdown]
 # ## Animation 2 — velocities, colored by their effect on RankMe

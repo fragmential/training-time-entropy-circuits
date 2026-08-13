@@ -394,25 +394,6 @@ caption('The same map at the midpoint of the residual stack — the input to blo
         'the end (the sink direction dominates the raw residual, before the final norm '
         'rescales it), where OLMo-2 stays in the hundreds.')
 
-# %%
-grid_start(ncols=C3_LAYOUT[1], figsize=C3_LAYOUT[0], pad=C3_PAD,
-           savegroup='Band alpha map', savedir='full training, early residual',
-           title='Band alpha map — full training, early residual')
-for model in SPEC6:
-    _lib.plot_alpha_bands(model, cfg_of(model),
-                          hook=(f'blk1.attn.in', 'acts_centered'),
-                          rows=slice(None), bands=slice(1,None), vlim=None,
-                          n_bands=C3_BANDS[0], ratio=C3_BANDS[1], include_init=False,
-                          orient=C3_LAYOUT[2], side=C3_SIDE, cmap=C3_CMAP, fs=C3_FS,
-                          fit_style=C3_FIT, title=get_model_label(model))
-grid_show()
-caption('The same map at the midpoint of the residual stack — the input to block L/2, which '
-        'is what the first half has written and the second half reads. Read against the two '
-        'final-stream maps above: the band structure here is what the back half inherits. '
-        'Note the RankMe strips: the pythias\' mid-stack stream is at single-digit RankMe by '
-        'the end (the sink direction dominates the raw residual, before the final norm '
-        'rescales it), where OLMo-2 stays in the hundreds.')
-
 # %% [markdown]
 # ### The same three maps without any banding: the spectrum itself
 # The α maps above summarise each band by one fitted slope. These three plot the eigenvalues
@@ -678,6 +659,77 @@ caption('The decomposition summed over blocks, one panel per model: ΔS = χ (gr
 
 #FIGURE B3
 
+# %%
+# Thesis rendering of the same stack: prose term names, one shared legend, no figure title.
+LEDGER_TERMS = (('chi', 'overlap', 'tab:green'),
+                ('quality', 'block-intrinsic entropy', 'tab:red'),
+                ('interference', 'interference', 'tab:purple'))
+LS_FS, LS_FIG = 15, (12.5, 6.4)
+
+def ledger_panel(ax, model, fs=LS_FS, emb=True, xlabel=True, ylabel=True, total_lw=2.5,
+                 legend=None):
+    """One model's block-summed ledger stack on `ax`. legend: fontsize, for standalone use —
+    in the grid the legend is shared and drawn once under the whole figure."""
+    plt.sca(ax)
+    src, L = cfg_of(model), n_blocks[model]
+    steps = _lib.get_ys(src, model, ('blk0', 'block_ledger'), 'chi')[1]
+    xs = np.asarray(_lib.get_xs_tokens(model, steps), float)
+    keep = xs > 0
+    stack = [(lab, np.asarray(np.sum([_lib.get_ys(src, model, (f'blk{l}', 'block_ledger'), t)[0]
+                                      for l in range(L)], 0), float)[keep], c)
+             for t, lab, c in LEDGER_TERMS]
+    gx, tot = _lib.signed_stack(xs[keep], stack)
+    ax.plot(gx, tot, 'k', lw=total_lw, label=r'$\Delta S$ total')
+    if emb:
+        es, esteps = _lib.get_ys(src, model, ('blk0.attn.in', 'acts_centered'), 'matrix_entropy')
+        exs = np.asarray(_lib.get_xs_tokens(model, esteps), float)
+        ek = exs > 0
+        ax.plot(exs[ek], np.asarray(es, float)[ek], color='0.4', ls=':', lw=1.5,
+                label=r'$S_0$ (embedding)')
+    ax.set_xscale('log')
+    ax.set_title(get_model_label(model), fontsize=fs)
+    ax.tick_params(labelsize=fs - 3)
+    if ylabel: ax.set_ylabel(r'$\Delta S$', fontsize=fs)
+    if xlabel: ax.set_xlabel('Pretraining tokens', fontsize=fs)
+    if legend: ax.legend(fontsize=legend)
+
+def ledger_stack_fig(models, ncols=3, figsize=LS_FIG, fs=LS_FS, legend_ncol=5,
+                     panel_legend=False, savegroup='Ledger contributions', savedir='thesis'):
+    """Grid of ledger_panel with one horizontal legend under the whole figure; also writes
+    each panel out on its own. Outer labels only — inner panels stay clean."""
+    nrows = -(-len(models) // ncols)
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize, squeeze=False)
+    for i, model in enumerate(models):
+        ledger_panel(axes.flat[i], model, fs=fs, xlabel=i >= len(models) - ncols,
+                     ylabel=i % ncols == 0)
+    for ax in axes.flat[len(models):]:
+        ax.set_visible(False)
+    handles, labels = axes.flat[0].get_legend_handles_labels()
+    fig.tight_layout(rect=(0, 0.075, 1, 1))
+    fig.legend(handles, labels, loc='lower center', ncol=legend_ncol, fontsize=fs,
+               frameon=False, bbox_to_anchor=(0.5, 0.0))
+    plt.show()
+    if savedir:
+        from pathlib import Path
+        outdir = Path('analysis/figures') / _lib._safe_name(savegroup) / _lib._safe_name(savedir)
+        outdir.mkdir(parents=True, exist_ok=True)
+        fig.savefig(outdir / '_grid.pdf', bbox_inches='tight')
+        panel = (figsize[0] / ncols, figsize[1] / nrows)
+        for i, model in enumerate(models):
+            sf, sax = plt.subplots(figsize=panel)
+            ledger_panel(sax, model, fs=fs, legend=fs - 4 if panel_legend else None)
+            sf.tight_layout()
+            sf.savefig(outdir / f'{i}_{_lib._safe_name(model, "_")}.pdf', bbox_inches='tight')
+            plt.close(sf)
+
+# %%
+ledger_stack_fig(SPEC6)
+caption('The decomposition summed over blocks, one panel per model: ΔS = overlap (green) + '
+        'block-intrinsic entropy (red) + interference (purple); black = the total, the '
+        'depth-differential log RankMe. Positive parts stack up from zero, negative down. '
+        'Dotted gray = S₀, the embedding stream\'s own entropy, the base the black difference '
+        'is measured from. Same data as the figure above, laid out for the thesis.')
+
 # %% [markdown]
 # ### Layer decomposition of the quality term
 # The "carrying blocks" row of the ledger claim, shown rather than asserted: one line per block's own
@@ -827,7 +879,7 @@ emb_style = lambda n: dict(src_colors={n: '0.25'}, src_ls={n: ':'}, src_lw={n: 4
 
 # %%
 for model in ('OLMo-2-0425-1B',):
-    half = n_blocks[model]
+    half = n_blocks[model] // 2
     for sub in ('mlp', 'attn'):
         srcs = [*write_srcs((sub,), range(half)), EMB_SRC]
         style = emb_style(len(srcs) - 1)
@@ -868,28 +920,19 @@ for model in ('OLMo-2-0425-1B',):
 for model in ('OLMo-2-0425-1B',):
     half = n_blocks[model] // 2
     for start in (0, 1):
-        for stack in (False, True):
-            grid_start(ncols=3, sharey=True, savegroup='Sink write trajectory',
-                       savedir=f'{get_model_label(model)} — sublayer ΔS'
-                               f'{" stack" if stack else ""} from blk{start}',
-                       title=f'Per-write sub-step ΔS{" (stacked)" if stack else ""} — '
-                             f'{get_model_label(model)}'
-                             + (f', from blk{start}' if start else ''))
-            for subs in (('attn',), ('mlp',), ('attn', 'mlp')):
-                _lib.plot_sub_ds_depth(model, BLOCK_SAMPLES, range(start, half), subs=subs,
-                                       stack=stack, title=' + '.join(subs) + ' writes')
-            grid_show()
-    caption('The same blocks\' ΔS write by write, shared y within each grid; black is the sum '
-            'over the panel\'s writes. Rows 1–2 start at blk0, dotted = S(embedding stream); '
-            'rows 3–4 drop blk0 — off the scale of the rest — and take the stream it writes out '
-            '(blk1\'s input) as the dotted reference instead. Rows 2 and 4 sign-stack the same '
-            'writes (positives up, negatives down, in depth order, so a block\'s attn and mlp '
-            'bands are adjacent and share its colour); the black total is unchanged, the '
-            'stack shows which writes it is built from. Both dotted lines are drawn against '
-            'their own first checkpoint: a stream the writes are added into has no ΔS of its own.')
-
-# %% [markdown]
-# safe buffer to not accidentally clear the next cell's outputs
+        grid_start(ncols=3, sharey=True, savegroup='Sink write trajectory',
+                   savedir=f'{get_model_label(model)} — sublayer ΔS from blk{start}',
+                   title=f'Per-write sub-step ΔS — {get_model_label(model)}'
+                         + (f', from blk{start}' if start else ''))
+        for subs in (('attn',), ('mlp',), ('attn', 'mlp')):
+            _lib.plot_sub_ds_depth(model, BLOCK_SAMPLES, range(start, half), subs=subs,
+                                   title=' + '.join(subs) + ' writes')
+        grid_show()
+    caption('The same blocks\' ΔS write by write, shared y; black is the sum over the panel\'s '
+            'writes. Top: all of them, dotted = S(embedding stream). Bottom: blk0 dropped — off '
+            'the scale of the rest — with the stream it writes out (blk1\'s input) as the '
+            'dotted reference instead. Both dotted lines are drawn against their own first '
+            'checkpoint: a stream the writes are added into has no ΔS of its own.')
 
 # %%
 # rogue_hist, step by step: (1) load the RAW per-token activations of blk3.mlp's output
