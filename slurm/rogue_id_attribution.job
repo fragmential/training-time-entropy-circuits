@@ -1,0 +1,16 @@
+#!/bin/bash
+# Reduce the block_rogue_id raw acts + packed mix + tokenizer to data/results/rogue_id_attribution.pt,
+# so showcase.py §4 draws from data/results alone. Tokenizer comes from the /projects HF cache -- no
+# anonymous hub round-trip. GPU because the run stored raw samples (covariance + eigh derived here).
+#SBATCH --partition=gpu_h100
+#SBATCH --gpus=1
+#SBATCH --job-name=rogue_id_attr
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --time=01:00:00
+#SBATCH --output=slurm/logs/rogue_id_attr_%j.out
+set -euo pipefail
+cd "$SLURM_SUBMIT_DIR" || exit 1
+export HF_HOME="/projects/prjs1815/hf_cache"
+export HF_HUB_OFFLINE=1
+time uv run oneoff_scripts/rogue_id_attribution.py

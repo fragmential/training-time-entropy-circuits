@@ -892,29 +892,22 @@ for model in ('OLMo-2-0425-1B',):
 # safe buffer to not accidentally clear the next cell's outputs
 
 # %%
-# rogue_hist, step by step: (1) load the RAW per-token activations of blk3.mlp's output
-# (block_rogue_id run, final ckpt; rows = the 262k packed-mix token positions, in order);
-# (2) project each centered row onto the write's TOP eigendirection -> one scalar per token
-# ("how strongly this token activates the sink direction", i.e. (x − μ)·v1 with v1 the top
-# centered eigenvector of the write — defined above); (3) recover each row's token id
-# from the packed mix (deterministic order); (4) histogram |projection|, newline-bearing
-# tokens vs all others. The separated red tail IS the token-attribution evidence.
-# (First run downloads the pythia tokenizer -> the HF warning; afterwards it's cached.)
+# Steps (1)-(3) are precomputed by oneoff_scripts/rogue_id_attribution.py, so this notebook
+# reads data/results only — no raw acts, no packed mix, no tokenizer. What the script does:
+# (1) load the RAW per-token activations of blk3.mlp's output (block_rogue_id run, final ckpt;
+# rows = the 262k packed-mix token positions, in order); (2) project each centered row onto the
+# write's TOP eigendirection -> one scalar per token ("how strongly this token activates the
+# sink direction", i.e. (x − μ)·v1 with v1 the top centered eigenvector of the write — defined
+# above); (3) recover each row's token id from the packed mix (deterministic order) and flag
+# the newline-bearing ones. Here: (4) histogram |projection|, newline-bearing tokens vs all
+# others. The separated red tail IS the token-attribution evidence.
 import torch
-from utils.accessor import DataAccessor
-from transformers import AutoTokenizer
 
-def rogue_hist(model, step=143000):
-    acc = DataAccessor(f'data/inferences/block_rogue_id/{model}/step{step}.pt')
-    v = acc['blk3.mlp.out'].acts
-    score = (v.samples.float() - v.mean.float()) @ v.eigvecs_centered[:, 0].float()
-    ids = torch.load('data/mixes/pile_30M_512.pt')[:, :511].reshape(-1)[:len(score)]
-    tok = AutoTokenizer.from_pretrained(f'EleutherAI/{model}')
-    uniq = torch.unique(ids)
-    toks = tok.convert_ids_to_tokens(uniq.tolist())     # one vectorized call, not 50k decodes
-    nl = {int(i) for i, t in zip(uniq, toks) if 'Ċ' in t or '\n' in t}   # 'Ċ' = byte-level \n
-    is_nl = torch.tensor([int(t) in nl for t in ids])
-    is_p0 = (torch.arange(len(score)) % 511) == 0                        # window-start rows
+ROGUE_ID = torch.load('data/results/rogue_id_attribution.pt', weights_only=False)
+
+def rogue_hist(model):
+    a = ROGUE_ID[model]
+    score, is_nl, is_p0 = a['score'], a['is_newline'], a['is_pos0']   # is_pos0 = window-start rows
     plt.figure(figsize=(7, 4))
     for m, lbl, c in ((~is_nl & ~is_p0, 'other tokens', 'tab:gray'),
                       (is_nl & ~is_p0, 'newline tokens', 'tab:red'),
@@ -938,19 +931,11 @@ caption('Histogram of each token row\'s |projection onto the sink direction| (lo
 # (text, docs/dig_findings.md): the best linear INPUT predictor of the score is unaligned with
 # the raw newline embedding (cos −0.013) — the spike is constructed by the MLP, not echoed
 # from the token embedding.
-def rogue_ranking(model, step=143000, top=20):
-    acc = DataAccessor(f'data/inferences/block_rogue_id/{model}/step{step}.pt')
-    v = acc['blk3.mlp.out'].acts
-    score = (v.samples.float() - v.mean.float()) @ v.eigvecs_centered[:, 0].float()
-    ids = torch.load('data/mixes/pile_30M_512.pt')[:, :511].reshape(-1)[:len(score)]
-    tok = AutoTokenizer.from_pretrained(f'EleutherAI/{model}')
-    uniq, inv, counts = torch.unique(ids, return_inverse=True, return_counts=True)
-    s_abs = score.abs()
-    mean_abs = torch.zeros(len(uniq)).index_add_(0, inv, s_abs) / counts
-    var = (torch.zeros(len(uniq)).index_add_(0, inv, s_abs.square()) / counts - mean_abs.square())
-    keep = counts >= 20
-    order = torch.argsort(mean_abs.masked_fill(~keep, -1), descending=True)[:top].tolist()
-    decoded = tok.batch_decode([[int(uniq[i])] for i in order])
+def rogue_ranking(model, top=20, min_n=20):
+    ty = ROGUE_ID[model]['types']                    # per token TYPE: decoded, mean/var of |proj|, n
+    mean_abs, var, counts = ty['mean_abs'], ty['var_abs'], ty['count']
+    order = torch.argsort(mean_abs.masked_fill(counts < min_n, -1), descending=True)[:top].tolist()
+    decoded = [ty['token'][i] for i in order]
     vals = [float(mean_abs[i]) for i in order]
     ns = [int(counts[i]) for i in order]
     ci = [1.96 * float(var[i].clamp(min=0).sqrt()) / n ** 0.5 for i, n in zip(order, ns)]
