@@ -979,6 +979,23 @@ def plot_layer_contribution(model, sources, xvar='tokens', yvar='trace', title=N
     plt.show()
 
 
+EMB_DELTA_C = 'tab:blue'                # the embedding's own move, as a stack component
+EXP_C = 'tab:brown'                     # the e^ΔS twin axis (line, ticks and label together)
+
+def emb_delta_series(source, model, block=0, xvar='tokens'):
+    """(x, S(stream into blk`block`) − its value at the first plotted checkpoint) — how much
+    the stream the blocks write into has itself moved since the start of training, on the ΔS
+    scale rather than its own several-nats-higher absolute one. block 0 is the embedding.
+    None when the node is missing."""
+    es, steps = get_ys(source, model, (f'blk{block}.attn.in', 'acts_centered'), 'matrix_entropy')
+    if es is None:
+        return None
+    x = np.asarray(XVAR_FNS[xvar](model, steps), float)
+    keep = x > 0                                         # step 0 is off a log axis anyway
+    y = np.asarray(es, float)[keep]
+    return x[keep], y - y[0]
+
+
 def signed_stack(xs, series, alpha=0.55):
     """Sign-aware stack of `series` = [(label, values, color), ...]: positives stack up from
     zero, negatives down. The x-grid is refined with each series' zero crossings (interpolated
@@ -1005,16 +1022,22 @@ def signed_stack(xs, series, alpha=0.55):
 # sign-stacked over training (positives up from zero, negatives down); black = ΔS total.
 @griddable
 def plot_ledger_stack(model, source, n_blocks=None, blocks=None, xvar='tokens', title=None,
-                      ylabel='rank entropy', legend=8, emb=True, zero_line=False,
-                      total_lw=2.5, emb_lw=1.5):
+                      ylabel='rank entropy', legend=8, emb=True, emb_delta=False,
+                      exp_axis=False, zero_line=False, total_lw=2.5, emb_lw=1.5, exp_lw=1.8):
     """One model's ledger stack from results dir `source`, summed over `blocks` (an explicit
     list of block indices) or the first `n_blocks`. The x-grid is refined with each
     term's sign crossings (interpolated in log-x, where the drawn segments are straight) so
     each fill closes vertically at zero instead of drawing a twisted quadrilateral across
     the opposite stack when a term changes sign. emb: dotted gray S(embedding stream), the
-    base of the black depth-differential (only meaningful for a whole-depth stack). legend:
-    fontsize, or None to skip (grids with a shared legend put it on one panel only). A
-    missing source turns the panel off."""
+    base of the black depth-differential (only meaningful for a whole-depth stack).
+    emb_delta: stack the embedding's own change since the first checkpoint as a fourth
+    component (`emb_delta_series`), and add the dashed total that includes it — the solid
+    black stays the three-term ΔS total, so panels remain comparable with emb_delta off.
+    exp_axis: the same total exponentiated — the factor on effective rank (e^S is RankMe) —
+    dotted on a linear right-hand twin, where a 25% rank loss reads as 0.75 instead of as
+    0.29 of a nat. Its own axis: line, ticks and label share EXP_C, and its 1.0 is NOT
+    aligned to the left axis' 0. legend: fontsize, or None to skip (grids with a shared
+    legend put it on one panel only). A missing source turns the panel off."""
     blocks = list(range(n_blocks)) if blocks is None else list(blocks)
     probe, steps = get_ys(source, model, (f'blk{blocks[0]}', 'block_ledger'), 'chi')
     if probe is None:
@@ -1026,10 +1049,17 @@ def plot_ledger_stack(model, source, n_blocks=None, blocks=None, xvar='tokens', 
     xs = np.asarray(XVAR_FNS[xvar](model, steps), float)
     keep = xs > 0                                        # step 0 is off a log axis anyway
     xs, terms = xs[keep], {k: np.asarray(v, float)[keep] for k, v in terms.items()}
-    gx, tot = signed_stack(xs, [(n, terms[n], c) for n, c in
-                                (('chi', 'tab:green'), ('quality', 'tab:red'),
-                                 ('interference', 'tab:purple'))])
-    plt.plot(gx, tot, 'k', lw=total_lw, label='ΔS total')
+    series = [(n, terms[n], c) for n, c in (('chi', 'tab:green'), ('quality', 'tab:red'),
+                                            ('interference', 'tab:purple'))]
+    ed = emb_delta_series(source, model, 0, xvar) if emb_delta else None
+    if ed is not None:                                   # onto the ledger's own x-grid
+        ed = np.interp(np.log(xs), np.log(ed[0]), ed[1])
+        series.insert(0, ('Δ embedding', ed, EMB_DELTA_C))   # bottom band, the stack sits on it
+    gx, tot = signed_stack(xs, series)
+    ledger_tot = tot if ed is None else tot - np.interp(np.log(gx), np.log(xs), ed)
+    plt.plot(gx, ledger_tot, 'k', lw=total_lw, label='ΔS total')
+    if ed is not None:
+        plt.plot(gx, tot, 'k', ls='--', lw=0.7 * total_lw, label='ΔS total + Δ embedding')
     if zero_line:                                        # the pivot the signed fills close on
         plt.axhline(0, color='gray', lw=0.8)
     if emb:
@@ -1039,6 +1069,16 @@ def plot_ledger_stack(model, source, n_blocks=None, blocks=None, xvar='tokens', 
             ek = exs > 0
             plt.plot(exs[ek], np.asarray(es, float)[ek], color='0.4', ls=':', lw=emb_lw,
                      label='S(embedding stream)')
+    if exp_axis:
+        ax = plt.gca()
+        elabel = f'exp(ΔS total{" + Δ embedding" if ed is not None else ""})'
+        ax.plot([], [], color=EXP_C, ls=':', lw=exp_lw, label=elabel)     # legend proxy
+        ax2 = ax.twinx()
+        ax2.plot(gx, np.exp(tot), color=EXP_C, ls=':', lw=exp_lw)
+        ax2.set_ylabel(r'$\exp(\Delta S$)', color=EXP_C)
+        ax2.tick_params(axis='y', colors=EXP_C)
+        ax2.grid(False)
+        plt.sca(ax)                                      # twinx steals the current axes
     plt.xscale('log')
     plt.xlabel({'steps': 'step'}.get(xvar, xvar))
     if ylabel:
@@ -1221,13 +1261,9 @@ def plot_sub_ds_depth(model, source, blocks, subs=('attn', 'mlp'), lines=True, s
         plt.plot(xs, tot, 'k', lw=total_lw, label=r'$\sum \Delta S$')
     ref_label = ref_label or ('embedding' if blocks[0] == 0 else f'into blk{blocks[0]}')
     if emb:
-        es, esteps = get_ys(source, model, (f'blk{blocks[0]}.attn.in', 'acts_centered'),
-                            'matrix_entropy')
-        if es is not None:
-            ex = np.asarray(XVAR_FNS[xvar](model, esteps), float)
-            ek = ex > 0
-            ey = np.asarray(es, float)[ek]
-            plt.plot(ex[ek], ey - ey[0], color='0.35', ls=':', lw=ref_lw,
+        ed = emb_delta_series(source, model, blocks[0], xvar)
+        if ed is not None:
+            plt.plot(*ed, color='0.35', ls=':', lw=ref_lw,
                      label=f'{ref_label}, Δ vs first ckpt')
     plt.axhline(0, color='gray', lw=0.8)
     plt.xscale('log')
@@ -1754,6 +1790,76 @@ def submatrix(M, labels, rows='', cols=''):
     Returns (M', row_labels, col_labels) — e.g. rows='attn', cols='mlp'."""
     ri, ci = ([i for i, l in enumerate(labels) if k in l] for k in (rows, cols))
     return np.asarray(M)[np.ix_(ri, ci)], [labels[i] for i in ri], [labels[i] for i in ci]
+
+
+_TICK_NUM = re.compile(r'\d+')
+
+
+def axis_ticks(labels, style='label', every=1):
+    """(positions, texts) for one matrix axis. style='label' keeps the label verbatim
+    ('mlp 3', '3.attn'), 'number' keeps its first integer (the depth index); every=n
+    labels one tick in n, so the survivors can carry a readable font size."""
+    if not labels:
+        return None
+    if style not in ('label', 'number'):
+        raise ValueError(f"tick_style must be 'label' or 'number', got {style!r}")
+    pos = list(range(0, len(labels), max(1, int(every))))
+    if style == 'number':
+        texts = [(m.group() if (m := _TICK_NUM.search(labels[i])) else labels[i]) for i in pos]
+    else:
+        texts = [labels[i] for i in pos]
+    return pos, texts
+
+
+def matrix_spec(frames, labels, opts):
+    """dynamic=True -> symmetric range from the off-diagonal max; per_frame picks whether
+    that range is recomputed each frame (full contrast) or pinned once (stable colorbar).
+    pair=(rows, cols) label-substring-selects a submatrix (e.g. ('attn', 'mlp')); the
+    diagonal is only hidden (self-pairs) when rows == cols.
+    Ticks: tick_style ('label'|'number'), tick_every (label one tick in n), tick_fontsize,
+    tick_rotation (default: upright for bare numbers, 90° for full labels).
+    Shared by the animations and by static grids — one frame is just a series of length 1."""
+    rows, cols = opts.get('pair') or ('', '')
+    labels2 = labels
+    if labels and (rows or cols):
+        sub = [submatrix(f, labels, rows, cols) for f in frames]
+        frames, labels, labels2 = [s[0] for s in sub], sub[0][1], sub[0][2]
+    hide_diag = opts.get('hide_diag', rows == cols)
+    dynamic, per_frame = opts.get('dynamic', True), opts.get('per_frame', False)
+    vmin, vmax = opts.get('vmin', -1), opts.get('vmax', 1)
+    if dynamic and not per_frame:                       # pin one global symmetric range
+        off = np.concatenate([f[~np.eye(len(f), dtype=bool)] if hide_diag else f.ravel()
+                              for f in frames])
+        v = np.nanmax(np.abs(off)); vmin, vmax = -v, v
+    style, every = opts.get('tick_style', 'label'), opts.get('tick_every', 1)
+    return dict(kind='heatmap', frames=frames, labels=labels, labels2=labels2,
+                hide_diag=hide_diag, per_frame=dynamic and per_frame,
+                cmap=opts.get('cmap', 'coolwarm'), vmin=vmin, vmax=vmax,
+                xticks=axis_ticks(labels2 or labels, style, every),
+                yticks=axis_ticks(labels, style, every),
+                tick_fontsize=opts.get('tick_fontsize', 6),
+                tick_rotation=opts.get('tick_rotation', 0 if style == 'number' else 90),
+                title=opts.get('title'))
+
+
+def draw_matrix(ax, p, i=0):
+    """Draw frame i of a matrix_spec on `ax`."""
+    M = np.array(p['frames'][i], dtype=float)
+    if p['hide_diag']: np.fill_diagonal(M, np.nan)     # self-pairs -> white
+    vmin, vmax = p['vmin'], p['vmax']
+    if p['per_frame']:                                   # recompute symmetric range this frame
+        v = np.nanmax(np.abs(M)); vmin, vmax = -v, v     # NaN diagonal already excluded
+    cmap = plt.get_cmap(p['cmap']).copy(); cmap.set_bad('white')
+    im = ax.imshow(M, cmap=cmap, vmin=vmin, vmax=vmax)
+    ax.grid(False)              # seaborn's grid (kernel-side) draws through cell centres
+    ax.set_anchor('C')          # square aspect shrinks the box -> centre it (else pins right)
+    fs, rot = p.get('tick_fontsize', 6), p.get('tick_rotation', 90)
+    if xt := p.get('xticks'):
+        ax.set_xticks(xt[0]); ax.set_xticklabels(xt[1], rotation=rot, fontsize=fs)
+    if yt := p.get('yticks'):
+        ax.set_yticks(yt[0]); ax.set_yticklabels(yt[1], fontsize=fs)
+    if p['title'] is not None: ax.set_title(p['title'])
+    return im
 
 
 def block_mean_cos(model, sources, step=None):           # block×block cosine-of-means matrix at a step

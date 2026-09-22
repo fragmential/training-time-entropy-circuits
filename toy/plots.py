@@ -200,8 +200,9 @@ def _save(fig: Figure, name: str) -> None:
     os.makedirs(FIGURES, exist_ok=True)
     fig.tight_layout()
     fig.savefig(f"{FIGURES}/{name}.png", dpi=180)
+    fig.savefig(f"{FIGURES}/{name}.pdf")          # vector copy, for the thesis
     plt.close(fig)
-    print(f"saved {FIGURES}/{name}.png")
+    print(f"saved {FIGURES}/{name}.png + .pdf")
 
 
 def main() -> None:

@@ -1,0 +1,36 @@
+output_dir: data/inferences/spike_direction_depth
+# Eigenvectors of the residual covariance at EVERY residual read point, final checkpoint
+# only. Needed for the depth table of experiments section 4.6.2: the variance carried along
+# the blk3 spike direction and along the final residual's leading direction, at each depth,
+# with the cosine between each reference direction and the local leading direction. The
+# samples sweeps persist eigenvalues only, and final_stream_svd carries eigenvectors at the
+# two final leaves alone, so neither can supply the per-depth eigenvectors.
+#
+# Accumulation mode (cov -> cov_svd), so memory is 19 leaves x 2048^2 fp64 ~ 0.6 GB rather
+# than the samples-mode cost. One checkpoint, one model: minutes on a GPU node.
+
+model_name: "EleutherAI/pythia-1b-deduped"
+
+batch_size: 256
+max_tokens: 262_144          # matches the main configuration
+
+packed_data_path: data/mixes/pile_30M_512.pt
+
+seq_len: 512
+min_length: 32
+checkpoints: "final"
+packing: packed
+token_selection: all
+activation_dtype: bf16
+
+hooks:
+  - blk*.attn.in             # residual 0 (embedding output) through residual L-1
+  - blk3.mlp.out             # the spike write, whose top direction is the reference
+  - before_final_norm        # residual L
+  - after_final_norm
+
+max_layers_per_pass: 0
+collect_format: cov
+storage_format: cov_svd      # eigenvectors, which the table's cosines need
+compute_metrics: False
+keep_cached: True

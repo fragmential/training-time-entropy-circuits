@@ -186,50 +186,19 @@ _PREBUILT = {'scatter': _scatter_panel, 'curve': _curve_panel, 'series': _series
 _TICK_NUM = re.compile(r'\d+')
 
 
-def _axis_ticks(labels, style, every):
-    """(positions, texts) for one matrix axis. style='label' keeps the label verbatim
-    ('mlp 3', '3.attn'), 'number' keeps its first integer (the depth index); every=n
-    labels one tick in n, so the survivors can carry a readable font size."""
-    if not labels:
-        return None
-    if style not in ('label', 'number'):
-        raise ValueError(f"tick_style must be 'label' or 'number', got {style!r}")
-    pos = list(range(0, len(labels), max(1, int(every))))
-    if style == 'number':
-        texts = [(m.group() if (m := _TICK_NUM.search(labels[i])) else labels[i]) for i in pos]
-    else:
-        texts = [labels[i] for i in pos]
-    return pos, texts
+# The matrix helpers live in experiments_lib now: one implementation, used both by these
+# animations and by the static grids. Injected backend first (configure() may override), with
+# a direct import as the fallback so older configure() calls keep working.
+def _matrix_fn(name):
+    try:
+        return _bk(name)
+    except RuntimeError:
+        from analysis import experiments_lib
+        return getattr(experiments_lib, name)
 
 
-def _matrix_spec(frames, labels, opts):
-    """dynamic=True -> symmetric range from the off-diagonal max; per_frame picks whether
-    that range is recomputed each frame (full contrast) or pinned once (stable colorbar).
-    pair=(rows, cols) label-substring-selects a submatrix (e.g. ('attn', 'mlp')); the
-    diagonal is only hidden (self-pairs) when rows == cols.
-    Ticks: tick_style ('label'|'number'), tick_every (label one tick in n), tick_fontsize,
-    tick_rotation (default: upright for bare numbers, 90° for full labels)."""
-    rows, cols = opts.get('pair') or ('', '')
-    labels2 = labels
-    if labels and (rows or cols):
-        sub = [_bk('submatrix')(f, labels, rows, cols) for f in frames]
-        frames, labels, labels2 = [s[0] for s in sub], sub[0][1], sub[0][2]
-    hide_diag = opts.get('hide_diag', rows == cols)
-    dynamic, per_frame = opts.get('dynamic', True), opts.get('per_frame', False)
-    vmin, vmax = opts.get('vmin', -1), opts.get('vmax', 1)
-    if dynamic and not per_frame:                       # pin one global symmetric range
-        off = np.concatenate([f[~np.eye(len(f), dtype=bool)] if hide_diag else f.ravel()
-                              for f in frames])
-        v = np.nanmax(np.abs(off)); vmin, vmax = -v, v
-    style, every = opts.get('tick_style', 'label'), opts.get('tick_every', 1)
-    return dict(kind='heatmap', frames=frames, labels=labels, labels2=labels2,
-                hide_diag=hide_diag, per_frame=dynamic and per_frame,
-                cmap=opts.get('cmap', 'coolwarm'), vmin=vmin, vmax=vmax,
-                xticks=_axis_ticks(labels2 or labels, style, every),
-                yticks=_axis_ticks(labels, style, every),
-                tick_fontsize=opts.get('tick_fontsize', 6),
-                tick_rotation=opts.get('tick_rotation', 0 if style == 'number' else 90),
-                title=opts.get('title'))
+_axis_ticks = lambda labels, style, every: _matrix_fn('axis_ticks')(labels, style, every)
+_matrix_spec = lambda frames, labels, opts: _matrix_fn('matrix_spec')(frames, labels, opts)
 
 
 def _materialize(panels, ncols, fps, model, xvar, prog_bar, suptitle, figsize, smooth=0, peak=3,
@@ -438,21 +407,7 @@ def _draw_strip(ax, p, i):
 
 
 def _draw_heatmap(ax, p, i):
-    M = np.array(p['frames'][i], dtype=float)
-    if p['hide_diag']: np.fill_diagonal(M, np.nan)     # self-pairs -> white
-    vmin, vmax = p['vmin'], p['vmax']
-    if p['per_frame']:                                   # recompute symmetric range this frame
-        v = np.nanmax(np.abs(M)); vmin, vmax = -v, v     # NaN diagonal already excluded
-    cmap = plt.get_cmap(p['cmap']).copy(); cmap.set_bad('white')
-    ax.imshow(M, cmap=cmap, vmin=vmin, vmax=vmax)
-    ax.grid(False)              # seaborn's grid (kernel-side) draws through cell centres
-    ax.set_anchor('C')          # square aspect shrinks the box -> centre it (else pins right)
-    fs, rot = p.get('tick_fontsize', 6), p.get('tick_rotation', 90)
-    if xt := p.get('xticks'):
-        ax.set_xticks(xt[0]); ax.set_xticklabels(xt[1], rotation=rot, fontsize=fs)
-    if yt := p.get('yticks'):
-        ax.set_yticks(yt[0]); ax.set_yticklabels(yt[1], fontsize=fs)
-    if p['title'] is not None: ax.set_title(p['title'])
+    return _matrix_fn('draw_matrix')(ax, p, i)
 
 
 def _draw_field(ax, arrows, color, width):

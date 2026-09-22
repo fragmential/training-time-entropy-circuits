@@ -31,7 +31,7 @@ import matplotlib.pyplot as plt
 from analysis import experiments_lib as _lib
 importlib.reload(_lib)
 from analysis.experiments_lib import (plot_layer_contribution, plot_ledger_stack,
-                                      grid_start, grid_show)
+                                      grid_start, grid_show, get_model_label)
 
 NB = {'pythia-160m-deduped': 12, 'pythia-410m-deduped': 24, 'pythia-1b-deduped': 16,
       'pythia-6.9b-deduped': 32, 'OLMo-2-0425-1B': 16, 'OLMo-2-1124-7B': 32,
@@ -72,7 +72,8 @@ def ledger_fig(model, ablate):
 # pythia-1b (16 blocks), blk3 (the carrier) ablated. Rows: the penultimate layer's
 # contributions (blk14), the final layer's (blk15), the last quarter's (blk12-15).
 # Left baseline, right ablated.
-ledger_fig('pythia-1b-deduped', 'blk3')
+for model, blks in CARRIER.items():
+    ledger_fig(model, blks)
 # FIGURE B2?.?
 # Not sure where, but this needs to be in. The pythia 6.9b carrier (blk3-4) is now included
 # via the ABLATIONS loop below.
@@ -152,13 +153,73 @@ ledger_pair('OLMo-2-1124-7B', 16)
 # %%
 OLMO = ['OLMo-2-0425-1B', 'OLMo-2-1124-7B']
 mid4 = lambda L: list(range(L // 2 - 2, L // 2 + 2))     # the four blocks straddling mid-depth
-
+not_mid4 = lambda L : mid4(L) if L==16 else list(range(7,16))
 grid_start(ncols=len(OLMO), figsize=(13, 4.5), sharex=True, emb=False, zero_line=True,
            title='Ledger contributions of the middle four layers — OLMo-2, no ablation',
            savedir='ledger_ablation_layers/olmo_middle4')
 for j, model in enumerate(OLMO):
-    layers = mid4(NB[model])
+    layers = not_mid4(NB[model])
     plot_ledger_stack(model, CFG(model), blocks=layers,
                       title=f'{model} — blk{layers[0]}-{layers[-1]}',
                       ylabel='rank entropy' if j == 0 else None, legend=7 if j == 0 else None)
 grid_show()
+
+# %%
+OLMO = ['OLMo-2-0425-1B', 'OLMo-2-1124-7B']
+first_half = lambda L: list(range(L // 2))     # the four blocks straddling mid-depth
+first_threequarters = lambda L: list(range(L // 4 * 3))
+# not_mid4 = lambda L : mid4(L) if L==16 else list(range(7,16))
+grid_start(ncols=len(OLMO), figsize=(13, 4.5), sharex=True, emb=False, emb_delta=True,
+           exp_axis=True, zero_line=True,
+           title='Ledger contributions of the middle four layers — OLMo-2, no ablation',
+           savedir='ledger_ablation_layers/olmo_middle4')
+for j, model in enumerate(OLMO):
+    layers = first_threequarters(NB[model])
+    plot_ledger_stack(model, CFG(model), blocks=layers,
+                      title=f'{model} — blk{layers[0]}-{layers[-1]}',
+                      ylabel='rank entropy' if j == 0 else None, legend=7 if j == 0 else None)
+grid_show()
+
+# %% [markdown]
+# ## pythia-1b: packed vs content-only tokens, baseline vs the L4 ablation
+#
+# Full depth, so the Δ-embedding band and the e^ΔS ratio axis both read as the whole
+# model's rank budget. The packed sweep with and without L4's writes (blk3 in code indexing —
+# pythia-1b's carrier), then the same baseline on interior content tokens only
+# (data/results/content_tokens_full). There is no ablated content-token run, so the ablation
+# and the token filter are read one at a time, against the shared packed baseline.
+
+# %%
+PY1B, ABL = 'pythia-1b-deduped', 'blk3'            # blk3 = L4 in the thesis' 1-indexed blocks
+CONTENT = 'content_tokens_full'
+# Three panels, one row: there is no ablated content-token run, so the ablation is read off the
+# packed pair and the content sweep only says whether the baseline ledger survives the token filter.
+PANELS = [('packed — baseline', CFG(PY1B)), ('packed — − L4', f'ablate_{ABL}'),
+          ('content tokens — baseline', CONTENT)]
+grid_start(ncols=3, sharey=True, pad=1.6, emb_delta=True, exp_axis=True, zero_line=True,
+           title='pythia-1b ledger over full depth — packed vs content tokens, baseline vs − L4',
+           savedir='ledger_ablation_layers/py1b_content_L4')
+for j, (label, cfg) in enumerate(PANELS):
+    plot_ledger_stack(PY1B, cfg, n_blocks=NB[PY1B], title=label,
+                      ylabel='rank entropy' if j == 0 else None, legend=8 if j == 0 else None)
+grid_show()
+
+# %% [markdown]
+# ## All six models, full depth: packed baseline vs the content-token sweep
+#
+# One figure per model, the whole ledger summed over every block — so the black ΔS total is
+# the measured depth differential S(before_final_norm) − S(embedding), and the brown ratio
+# axis is what that differential does to effective rank. Same panel as showcase §3, plus the
+# Δ-embedding band and the e^ΔS axis.
+
+# %%
+ALL6 = ['pythia-410m-deduped', 'pythia-1b-deduped', 'pythia-6.9b-deduped',
+        'nanochat-d12', 'OLMo-2-0425-1B', 'OLMo-2-1124-7B']
+
+for model in ALL6:
+    grid_start(ncols=2, emb_delta=True, exp_axis=True, zero_line=True,
+               title=f'Ledger contributions, packed vs content tokens — {get_model_label(model)}',
+               savedir=f'ledger_ablation_layers/baseline_vs_content_{model}')
+    plot_ledger_stack(model, CFG(model), NB[model], title='packed')
+    plot_ledger_stack(model, CONTENT, NB[model], title='content tokens')
+    grid_show()
