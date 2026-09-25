@@ -1,0 +1,46 @@
+output_dir: data/inferences/block_representations_samples
+# block_representations, samples-mode: raw acts at every block boundary of EVERY layer
+# (no head slices / raw_out), crosses computed in-memory by inline metrics, saved tiny as
+# eigenvalues. Token budgets sized to ~104 GB CPU RAM of bf16 samples per model.
+
+model_name:
+  - "allenai/OLMo-2-0425-1B"
+  - "allenai/OLMo-2-1124-7B"
+  - "EleutherAI/pythia-1b-deduped"
+  - "EleutherAI/pythia-6.9b-deduped"
+  - "EleutherAI/pythia-160m-deduped"
+  - "EleutherAI/pythia-410m-deduped"
+
+#            OL1B    OL7B   Py1b    Py6.9b  Py160m   Py410m
+batch_size: [  48,     32,   256,      72,     256,     256]
+# Peak RSS ≈ samples + resolver caches (+ drift: prev spill in RAM-tmpfs $TMPDIR + prev
+# caches — hence drift is 1B-only; at 7B scale the spill alone is ~85 GB of the share).
+max_tokens: [262_144, 81_920, 262_144, 98_304, 262_144, 262_144]
+
+packed_data_path:
+  allenai/*: data/mixes/olmo_mix_30M_512.pt
+  EleutherAI/*: data/mixes/pile_30M_512.pt
+
+seq_len: 512
+min_length: 32
+max_checkpoints: 50
+checkpoint_spacing: log
+packing: packed
+token_selection: all
+activation_dtype: bf16
+
+hooks:
+  - blk*.attn.in           # residual into attn sub-block
+  - blk*.attn.out          # attention's contribution to residual
+  - blk*.mlp.in            # OLMo-2 only: residual into MLP sub-block
+  - blk*.mlp.out           # MLP's contribution to residual
+  - before_final_norm
+  - after_final_norm
+
+max_layers_per_pass: 0
+collect_format: acts
+storage_format: eigenvalues
+compute_metrics: True
+#               OL1B  OL7B   Py1b  Py6.9b Py160m Py410m
+drift_metrics: [True, False, True, False, False, False]
+keep_cached: False

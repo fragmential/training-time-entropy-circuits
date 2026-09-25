@@ -65,7 +65,7 @@ MODELS=(${MODELS_STR})
 MODEL_NAME="\${MODELS[\$SLURM_ARRAY_TASK_ID]}"
 export HF_HOME="/projects/prjs1815/hf_cache"
 
-cd "\$HOME/Tracing-representation-geometry-reproduction" || exit 1
+cd "\$SLURM_SUBMIT_DIR" || exit 1
 
 echo "Config directory: ${CONFIG_DIR}"
 echo "Model: \$MODEL_NAME"

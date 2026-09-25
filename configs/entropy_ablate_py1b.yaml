@@ -1,0 +1,67 @@
+output_dir: data/inferences/entropy_ablate
+# Causal check on the null-space neurons: mean-ablate the top-n neurons of the last two
+# blocks' MLPs and measure what moves in the final stream. Ranked three ways at matched n --
+# rho (null-space composition), wnorm (||w_out||), random -- so "high rho matters" can be
+# separated from "you removed n big writers" and from "you removed any n neurons".
+# One output dir per intervention: data/inferences/entropy_ablate_blk<b>_<rank><n>/<model>.
+# rank/n=0 is the untouched baseline every other run is differenced against.
+# Metrics: RankMe/alpha at before_final_norm and after_final_norm, trace at the two mlp.out
+# leaves (for the share of the block's output the set carries), and the vocabulary-entropy
+# lens (the paper's functional claim). Ablation is exact: a down-projection's input IS the
+# post-nonlinearity activation vector, and the forward pass is re-run per intervention, so
+# the penultimate block's effect propagates through the last block as it should.
+
+model_name: "EleutherAI/pythia-1b-deduped"
+batch_size: 256
+max_tokens: 65_536
+packed_data_path: data/mixes/pile_30M_512.pt
+
+seq_len: 512
+min_length: 32
+max_checkpoints: 20
+checkpoint_spacing: log
+packing: packed
+token_selection: all
+activation_dtype: bf16
+
+hooks:
+  - blk15.mlp.out
+  - blk14.mlp.out
+  - before_final_norm
+  - after_final_norm
+
+max_layers_per_pass: 0
+collect_format: acts
+storage_format: eigenvalues
+compute_metrics: True
+vocab_entropy: True
+drift_metrics: False
+keep_cached: False  # snapshots accumulate past the project quota otherwise
+
+ablate_mode: mean
+ablate_neurons:
+  - {block: -1, rank: rho, n: 0}      # untouched baseline
+  - {block: -1, rank: rho, n: 4}
+  - {block: -1, rank: rho, n: 16}
+  - {block: -1, rank: rho, n: 64}
+  - {block: -1, rank: rho, n: 256}
+  - {block: -1, rank: wnorm, n: 4}
+  - {block: -1, rank: wnorm, n: 16}
+  - {block: -1, rank: wnorm, n: 64}
+  - {block: -1, rank: wnorm, n: 256}
+  - {block: -1, rank: random, n: 4}
+  - {block: -1, rank: random, n: 16}
+  - {block: -1, rank: random, n: 64}
+  - {block: -1, rank: random, n: 256}
+  - {block: -2, rank: rho, n: 4}
+  - {block: -2, rank: rho, n: 16}
+  - {block: -2, rank: rho, n: 64}
+  - {block: -2, rank: rho, n: 256}
+  - {block: -2, rank: wnorm, n: 4}
+  - {block: -2, rank: wnorm, n: 16}
+  - {block: -2, rank: wnorm, n: 64}
+  - {block: -2, rank: wnorm, n: 256}
+  - {block: -2, rank: random, n: 4}
+  - {block: -2, rank: random, n: 16}
+  - {block: -2, rank: random, n: 64}
+  - {block: -2, rank: random, n: 256}

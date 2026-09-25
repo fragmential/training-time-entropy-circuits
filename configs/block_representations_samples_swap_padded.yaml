@@ -1,0 +1,39 @@
+output_dir: data/inferences/block_representations_samples_swap_padded
+# Padded (last-token) twin of block_representations_samples_swap: the dataset-swap control in
+# padded mode. Each 1B model runs per-document on the OTHER family's native dataset, tokenized
+# with its OWN tokenizer (pythia<-olmo_mix, olmo<-pile) — identical text content, model variable
+# isolated. Reuses the native-padded text caches (olmo_mix_16384_s42, pile_..._16384_s42) so
+# there is NO download and N matches the native padded run. Cheap: bfn/afn only, no block hooks,
+# no crosses/ledger — just the final-stream RankMe needed to extend the padded-vs-packed figure
+# to swapped data.
+
+model_name:
+  - "EleutherAI/pythia-1b-deduped"
+  - "allenai/OLMo-2-0425-1B"
+
+#             Py1b   OL1B
+batch_size: [ 256,    48]
+num_samples: 16_384
+
+#              Py1b <- olmo_mix        OL1B <- pile   (the swap: each takes the OTHER's dataset)
+dataset_name: ["olmo_mix", "pile_deduped_eleutherai"]
+text_shuffle_seed: 42
+seq_len: 512
+max_length: 512
+min_length: 32
+max_checkpoints: 20
+checkpoint_spacing: log
+packing: padded
+token_selection: last
+activation_dtype: bf16
+
+hooks:
+  - before_final_norm
+  - after_final_norm
+
+max_layers_per_pass: 0
+collect_format: acts
+storage_format: eigenvalues
+compute_metrics: True
+drift_metrics: False
+keep_cached: False

@@ -4,7 +4,6 @@ import json
 import os
 import torch
 from functools import partial
-from typing import Optional
 from datasets import load_dataset
 
 
@@ -15,6 +14,7 @@ from datasets import load_dataset
 # (hf_repo, default_kwargs) — all loaders follow load_dataset(repo, **kwargs, split=split, streaming=streaming)
 _REGISTRY = {
     "fineweb":                ("HuggingFaceFW/fineweb", {"name": "sample-10BT"}),
+    "fineweb_edu_100b":       ("karpathy/fineweb-edu-100b-shuffle", {}),
     "wikitext":               ("wikitext", {"name": "wikitext-103-raw-v1"}),
     "sciq":                   ("sciq", {}),
     "pile":                   ("EleutherAI/the_pile_deduplicated", {}),
@@ -24,6 +24,22 @@ _REGISTRY = {
     "dolmino":                ("allenai/dolmino-mix-1124", {"name": "dclm"}),
     "tulu_sft":               ("allenai/tulu-3-sft-mixture", {}),
     "lam":                    ("lama", {"name": "trex"}),
+    # RQ2 task populations
+    "open_web_math":          ("open-web-math/open-web-math", {}),
+    "gsm8k":                  ("openai/gsm8k", {"name": "main"}),
+    "quotes":                 ("jstet/quotes-500k", {}),
+    "pythia_memorized":       ("EleutherAI/pythia-memorized-evals", {}),  # served via prebuilt text cache
+    "pythia_memorized_a":     ("EleutherAI/pythia-memorized-evals", {}),  # disjoint halves (prebuilt caches)
+    "pythia_memorized_b":     ("EleutherAI/pythia-memorized-evals", {}),  # for split-half coherence
+    "merullo_memorized_olmo": ("allenai/OLMo-2-0425-1B", {}),  # Merullo et al mem set; prebuilt cache
+    "merullo_memorized_olmo_a": ("allenai/OLMo-2-0425-1B", {}),  # disjoint halves (split-half)
+    "merullo_memorized_olmo_b": ("allenai/OLMo-2-0425-1B", {}),
+    "pythia_memorized_69b":   ("EleutherAI/pythia-memorized-evals", {}),  # deduped.6.9b (prebuilt cache)
+    "pythia_memorized_69b_a": ("EleutherAI/pythia-memorized-evals", {}),  # disjoint halves (prebuilt caches)
+    "pythia_memorized_69b_b": ("EleutherAI/pythia-memorized-evals", {}),  # for split-half coherence
+    "merullo_memorized_olmo7b": ("allenai/OLMo-2-1124-7B", {}),  # Merullo et al 7B mem set; prebuilt cache
+    "merullo_memorized_olmo7b_a": ("allenai/OLMo-2-1124-7B", {}),  # disjoint halves (split-half)
+    "merullo_memorized_olmo7b_b": ("allenai/OLMo-2-1124-7B", {}),
 }
 
 AVAILABLE_DATASETS = sorted(_REGISTRY)
@@ -52,7 +68,8 @@ def load_and_cache_texts(
     tokenizer,
     dataset_name: str,
     content_key: str = "text",
-    max_bytes: Optional[int] = None,
+    max_bytes: int | None = None,
+    shuffle_seed: int | None = None,
 ) -> list:
     """Load dataset texts, filtering by minimum token length. Caches to disk.
 
@@ -61,6 +78,8 @@ def load_and_cache_texts(
         max_bytes: If set, stop collecting once total UTF-8 byte count of accepted texts
                    exceeds this value. Overrides num_samples as the stopping criterion.
                    Example: 80_000_000 ≈ 20M tokens, matching the reference K-FAC repo.
+        shuffle_seed: If set, shuffle the stream (buffered) before taking texts — without it
+                   the texts are the HEAD of the dataset, not a representative sample.
     """
     os.makedirs("data/filtered_texts", exist_ok=True)
     if max_bytes is not None:
@@ -69,6 +88,8 @@ def load_and_cache_texts(
         cache_key = f"{dataset_name}_{mb_str}MB"
     else:
         cache_key = f"{dataset_name}_{num_samples}"
+    if shuffle_seed is not None:
+        cache_key += f"_s{shuffle_seed}"
     cache_path = os.path.join("data", "filtered_texts", f"{cache_key}.json")
     if os.path.exists(cache_path):
         with open(cache_path) as f:
@@ -78,10 +99,12 @@ def load_and_cache_texts(
 
     from tqdm import tqdm
     dataset = dataset_loader_fn()
+    if shuffle_seed is not None:
+        dataset = dataset.shuffle(seed=shuffle_seed, buffer_size=10_000)
     texts = []
     total_bytes = 0
     for seq in tqdm(dataset, desc="Filtering"):
-        text = seq[content_key]
+        text = "\n".join(seq[k] for k in content_key.split("+"))   # "question+answer" joins fields
         if tokenizer(text, return_tensors="pt").input_ids.shape[-1] > min_length:
             if max_bytes is not None:
                 doc_bytes = len(text.encode("utf-8"))
@@ -148,12 +171,14 @@ def pad_and_tokenize(texts: list, tokenizer, max_length: int) -> dict:
 
 def compute_token_mask(
     input_ids: torch.Tensor,
-    attention_mask: Optional[torch.Tensor] = None,
+    attention_mask: torch.Tensor | None = None,
     token_selection: str = "all",
     skip_positions: int = 0,
-    boundary_token_ids: Optional[list] = None,
-    answer_start_positions: Optional[torch.Tensor] = None,
-) -> torch.BoolTensor:
+    boundary_token_ids: list | None = None,
+    answer_start_positions: torch.Tensor | None = None,
+    exclude_first: bool = False,
+    content_mask_vocab: torch.Tensor | None = None,
+) -> torch.Tensor:
     """Compute a boolean mask selecting which token positions to include.
 
     Args:
@@ -226,13 +251,18 @@ def compute_token_mask(
         answer_mask = pos_range >= starts
         mask &= answer_mask
 
+    if exclude_first:
+        mask[:, 0] = False                              # drop first position of each window (sink slot)
+    if content_mask_vocab is not None:                  # keep only word/number tokens (drop delimiters)
+        mask &= content_mask_vocab.to(device)[input_ids]
+
     return mask
 
 
 def compute_labels(
     input_ids: torch.Tensor,
-    attention_mask: Optional[torch.Tensor] = None,
-    answer_start_positions: Optional[torch.Tensor] = None,
+    attention_mask: torch.Tensor | None = None,
+    answer_start_positions: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Compute next-token prediction labels from input_ids.
 

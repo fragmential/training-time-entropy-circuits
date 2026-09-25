@@ -6,9 +6,9 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.19.3
+#       jupytext_version: 1.19.5
 #   kernelspec:
-#     display_name: representation-geometry
+#     display_name: representation-geometry (3.14.6.final.0)
 #     language: python
 #     name: python3
 # ---
@@ -24,7 +24,7 @@ from analysis import experiments_lib as _lib
 importlib.reload(_lib)
 from analysis.experiments_lib import (
     grid_start, grid_show, plot_group, plot_spectrum, plot_layer_contribution,
-    plot_heatmap, block_mean_cos, build_hooks, get_model_label,
+    plot_heatmap, block_mean_cos, build_hooks, get_model_label, submatrix, plot_wo_topk,
 )
 
 # %%
@@ -34,7 +34,9 @@ FINEWEB_PADDED = "rankme_fineweb_padded"
 TRAINSET_PACKED = "rankme_trainset_packed_4MT"
 # KF_ARXIV = "kfac_small_arxiv"
 KF_SMALL = "kfac_small_shuffled"
-BLOCK_REPR = "block_representations"
+# BLOCK_REPR_PARTIAL = "block_representations"   # layer-subset run, superseded by the all-layer redo
+BLOCK_REPR = "block_representations_all"
+BLOCK_SAMPLES = "block_representations_samples"   # raw-sample runs (crosses computed inline)
 
 # %%
 HK = build_hooks()   # hook-name -> (node, metric); machinery lives in experiments_lib
@@ -163,12 +165,12 @@ mlp_gbd15 = lambda model: mlp_ts(['down'], [measured[model][-1]], ['GB'])
 mlp_gbd0 = lambda model: mlp_ts(['down'], [measured[model][0]], ['GB'])
 
 
-# --- block_representations runs: measured layers + sub-block boundary shorthands ---
+# --- block_representations_all runs: every layer + sub-block boundary shorthands ---
 measured_br = {
-    'pythia-1b-deduped':   [0, 1, 3, 5, 8, 10, 13, 15],
-    'pythia-6.9b-deduped': [0, 1, 5, 10, 15, 21, 26, 31],
-    'OLMo-2-0425-1B':      [0, 1, 3, 5, 8, 10, 13, 15],
-    'OLMo-2-1124-7B':      [0, 1, 5, 10, 15, 21, 26, 31],
+    'pythia-1b-deduped':   list(range(16)),
+    'pythia-6.9b-deduped': list(range(32)),
+    'OLMo-2-0425-1B':      list(range(16)),
+    'OLMo-2-1124-7B':      list(range(32)),
 }
 
 def bnd_(src):
@@ -186,7 +188,8 @@ mlp_out  = lambda model, ms=['Au']: bnd_br('MO', measured_br[model], ms)
 
 # Per-OV-head shorthand. which='slice' (pre-W_o, d_head) or 'contrib' (post-W_o, d_model,
 # derived). tail ∈ {Au,Ac,Gu,Gc,GB}; blk/h/tail accept an int/str or a list; blk=None ->
-# all measured_br[model] layers. (Heads live in the block_representations runs.)
+# all measured_br[model] layers. (block_representations_all has heads for the 1Bs only —
+# the 7Bs ran the boundary-only _all_7b variant; use BLOCK_REPR_PARTIAL's source for 7B heads.)
 _HEAD_METRIC = {'AU': 'acts_uncentered', 'AC': 'acts_centered',
                 'GU': 'grads_uncentered', 'GC': 'grads_centered', 'GB': 'gen'}
 
@@ -236,24 +239,23 @@ plot_group('rankme_center_diff', data_sources_2[:1], filter_model_names)
 plot_group('rankme_center_prop', data_sources_2[:1], filter_model_names)
 grid_show()
 
-grid_start(ncols=2, title='Final residual Trace and Mean interaction', omit_step0=False)
-plot_group('trace', data_sources_5[:1], filter_model_names, title='Before final norm, uncentered')
-plot_group('trace', data_sources_5[1:], filter_model_names, title='After final norm, uncentered')
+# grid_start(ncols=2, title='Final residual Trace and Mean interaction', omit_step0=False)
+# plot_group('trace', data_sources_5[:1], filter_model_names, title='Before final norm, uncentered')
+# plot_group('trace', data_sources_5[1:], filter_model_names, title='After final norm, uncentered')
 
-plot_group('trace', data_sources_3[:1], filter_model_names, title='Before final norm, centered')
-plot_group('trace', data_sources_3[1:], filter_model_names, title='After final norm, centered')
+# plot_group('trace', data_sources_3[:1], filter_model_names, title='Before final norm, centered')
+# plot_group('trace', data_sources_3[1:], filter_model_names, title='After final norm, centered')
 
-plot_group('mean_norm', data_sources_5[:1], filter_model_names, title='Before final norm')
-plot_group('mean_norm', data_sources_5[1:], filter_model_names, title='After final norm')
+# plot_group('mean_norm', data_sources_5[:1], filter_model_names, title='Before final norm')
+# plot_group('mean_norm', data_sources_5[1:], filter_model_names, title='After final norm')
 
-plot_group('mean_frac', data_sources_5[:1], filter_model_names, title='Before final norm')
-plot_group('mean_frac', data_sources_5[1:], filter_model_names, title='After final norm')
+# plot_group('mean_frac', data_sources_5[:1], filter_model_names, title='Before final norm')
+# plot_group('mean_frac', data_sources_5[1:], filter_model_names, title='After final norm')
 
-# plot_group('mean_ratio', data_sources_5[:1], filter_model_names, title='Before final norm', disable_midx=[1])
-# plot_group('mean_ratio', data_sources_5[1:], filter_model_names, title='After final norm', disable_midx=[1])
+# # plot_group('mean_ratio', data_sources_5[:1], filter_model_names, title='Before final norm', disable_midx=[1])
+# # plot_group('mean_ratio', data_sources_5[1:], filter_model_names, title='After final norm', disable_midx=[1])
 
-grid_show()
-
+# grid_show()
 
 # %% [markdown]
 # ### Block Means
@@ -319,8 +321,8 @@ def _meancov_grid(model, title, bnd):
     plot_group('pr_weighted', u, [model], ylog=True)
     plot_group('centroid_idx', u, [model])
     plot_group('centroid_idx_weighted', u, [model])
-    plot_spectrum('profile', u, [model], xlog=False, ylog=True, title='Final-ckpt profile $p_j$')
-    plot_spectrum('profile_weighted', u, [model], xlog=False, ylog=True, title='Final-ckpt weighted profile')
+    plot_spectrum('profile', u, [model], xlog=False, ylog=True, smooth=22, peak=3, title='Final-ckpt profile $p_j$')
+    plot_spectrum('profile_weighted', u, [model], xlog=False, ylog=True, smooth=22, peak=3, title='Final-ckpt weighted profile')
     grid_show()
 
 for model in filter_model_names:
@@ -361,8 +363,8 @@ def _blkres_grid(model, title, bnd):
     plot_group('pr_weighted', u, [model], ylog=True)
     plot_group('centroid_idx', u, [model])
     plot_group('centroid_idx_weighted', u, [model])
-    plot_spectrum('profile', u, [model], xlog=False, ylog=True, title='Final-ckpt profile $p_j$')
-    plot_spectrum('profile_weighted', u, [model], xlog=False, ylog=True, title='Final-ckpt weighted profile')
+    plot_spectrum('profile', u, [model], xlog=False, ylog=True, smooth=22, peak=3, title='Final-ckpt profile $p_j$')
+    plot_spectrum('profile_weighted', u, [model], xlog=False, ylog=True, smooth=22, peak=3, title='Final-ckpt weighted profile')
     grid_show()
 
 for model in filter_model_names:
@@ -384,6 +386,117 @@ grid_start(ncols=2, title='Layer contribution')
 for model in ['pythia-1b-deduped', 'pythia-6.9b-deduped', 'OLMo-2-0425-1B', 'OLMo-2-1124-7B']:
     plot_layer_contribution(model, layer_outs(model), title=get_model_label(model))
 grid_show()
+
+# %%
+# R_over_r layer contribution: each write's share of the FINAL stream's energy
+# (tr Cov(c_k, r) / tr Σ_r — coupling to the rest of the stream included; the gap to 1.0 is
+# the embedding stream's share). Signed by definition, positive in practice: r contains c_k,
+# so a write must be cancelled by more than its own energy to go negative.
+# All samples-run models (nanochat lives in its own config)
+MODELS_LC = ['pythia-160m-deduped', 'pythia-410m-deduped', 'pythia-1b-deduped',
+             'pythia-6.9b-deduped', 'OLMo-2-0425-1B', 'OLMo-2-1124-7B', 'nanochat-d12']
+NB_BS = {'pythia-160m-deduped': 12, 'pythia-410m-deduped': 24, 'pythia-1b-deduped': 16,
+         'pythia-6.9b-deduped': 32, 'OLMo-2-0425-1B': 16, 'OLMo-2-1124-7B': 32,
+         'nanochat-d12': 12}
+CFG_BS = lambda m: 'nanochat_samples' if m == 'nanochat-d12' else BLOCK_SAMPLES
+
+_rr_srcs = lambda model: [(CFG_BS(model), (f'blk{l}.{s}.out', 'block_residual_coupling'), f'{s} {l}')
+                          for l in range(NB_BS[model]) for s in ('attn', 'mlp')]
+_tr_srcs = lambda model: [(CFG_BS(model), (f'blk{l}.{s}.out', 'acts_uncentered'), f'{s} {l}')
+                          for l in range(NB_BS[model]) for s in ('attn', 'mlp')]
+_ledger_srcs = lambda model: [(CFG_BS(model), (f'blk{l}', 'block_ledger'), f'blk {l}')
+                              for l in range(NB_BS[model])]
+
+
+
+# %%
+
+grid_start(ncols=2, title='Layer contribution — share of final-stream energy (R over r)')
+for model in MODELS_LC:
+    plot_layer_contribution(model, _rr_srcs(model), yvar='R_over_r', normalize=False,
+                            title=get_model_label(model), remainder_label='embedding (residual)')
+grid_show()
+
+# %%
+# Share of residual energy from just the traces: uncentered write traces normalized over
+# writes + the embedding stream; gray dashed = the embedding's share.
+grid_start(ncols=2, title='Layer contribution — share of residual energy (trace)')
+for model in MODELS_LC:
+    plot_layer_contribution(model, _tr_srcs(model), yvar='trace', normalize=True,
+                            title=get_model_label(model),
+                            baseline_src=(CFG_BS(model), ('blk0.attn.in', 'acts_uncentered'), 'embedding'))
+grid_show()
+
+# %%
+# Ledger-based layer contribution: each block's signed ΔS_k (= χ + quality + interference —
+# overlap and cross terms INCLUDED, unlike the gross-energy stack above). Positives stack up,
+# negatives down; the net stack height is log RankMe(final) − log RankMe(embeddings).
+# Dotted gray = S(embedding stream) as its change from the first step (0 at t0), so it sits
+# on the stack's scale rather than at its own absolute offset. Black = the measured depth
+# differential S(before_final_norm) − S(embedding), which the signed stack should sum to.
+grid_start(ncols=2, title='Layer contribution — rank-entropy ledger (signed ΔS)')
+for model in MODELS_LC:
+    plot_layer_contribution(model, _ledger_srcs(model), yvar='delta_s', normalize=False,
+                            title=get_model_label(model), baseline_ls=':', baseline_delta=True,
+                            baseline_src=(CFG_BS(model), ('blk0.attn.in', 'acts_centered'),
+                                          'ΔS(embedding stream)', 'matrix_entropy'),
+                            total_src=(CFG_BS(model), ('before_final_norm', 'acts_centered'),
+                                       'S(bfn) − Sf(emb)', 'matrix_entropy'))
+grid_show()
+
+# %%
+# The same stacks per ledger term: ΔS_k split into its χ / quality / interference parts.
+for term in ('chi', 'quality', 'interference'):
+    grid_start(ncols=2, title=f'Layer contribution — rank-entropy ledger ({term})')
+    for model in MODELS_LC:
+        plot_layer_contribution(model, _ledger_srcs(model), yvar=term, normalize=False,
+                                title=get_model_label(model))
+    grid_show()
+
+# %% [markdown]
+# #### Ledger contribution stacks (Exp 4.8, showcase implementation — sign-crossing fills)
+# Dotted gray = the embedding stream's own entropy S_emb(t), the base the black
+# depth-differential is measured against.
+
+# %%
+grid_start(ncols=2, title='Ledger contribution stacks')
+for model in MODELS_LC:
+    _lib.plot_ledger_stack(model, CFG_BS(model), NB_BS[model],
+                           title=get_model_label(model))
+grid_show()
+
+# %% [markdown]
+# #### Per-block ledger terms over training (showcase formatting): ΔS, quality, overlap
+
+# %%
+def term_per_block(models, term):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from matplotlib.cm import ScalarMappable
+    fig, axes = plt.subplots(2, 4, figsize=(19, 8))
+    for ax, model in zip(axes.flat, models):
+        L = NB_BS[model]
+        for l in range(L):
+            ys, steps = _lib.get_ys(CFG_BS(model), model, (f'blk{l}', 'block_ledger'), term)
+            xs = np.asarray(_lib.get_xs_tokens(model, steps), float)
+            keep = xs > 0
+            ax.plot(xs[keep], np.asarray(ys, float)[keep], lw=1.5,
+                    color=plt.get_cmap('viridis')(l / (L - 1)))
+        ax.axhline(0, color='gray', lw=0.8)
+        ax.set(xscale='log', xlabel='tokens', title=get_model_label(model))
+        plt.colorbar(ScalarMappable(cmap='viridis'), ax=ax, pad=0.01,
+                     ticks=[]).set_label(f'block (0 → {L - 1})', fontsize=8)
+    for ax in axes.flat[len(models):]:
+        ax.axis('off')
+    axes[0, 0].set_ylabel(f'per-block {term}')
+    axes[1, 0].set_ylabel(f'per-block {term}')
+    fig.suptitle(f'{term} ledger term per block')
+    plt.tight_layout(); plt.show()
+
+import numpy as np
+import matplotlib.pyplot as plt
+for _term in ('delta_s', 'quality', 'chi'):
+    term_per_block(MODELS_LC, _term)
 
 
 # %% [markdown]
@@ -462,269 +575,247 @@ for model in filter_model_names:
 # Pairwise cosine between block-output means at the final checkpoint (block×block),
 # ordered by depth (attn, mlp per layer). Diagonal hidden; symmetric dynamic colour
 # range. Off-diagonal structure shows which layers' mean directions co-align.
-grid_start(ncols=2, title='Block-mean cosine (final ckpt)', savefig=False)
-for model in filter_model_names:
-    outs = layer_outs(model)
-    plot_heatmap(block_mean_cos(model, outs), labels=[s[2] for s in outs], title=get_model_label(model),
-                 hide_diag=True, dynamic=True)
-grid_show()
+# One grid per sub-block pairing: all×all, attn×attn, mlp×mlp, attn×mlp.
+PAIRINGS = (('', ''), ('attn', 'attn'), ('mlp', 'mlp'), ('attn', 'mlp'))
 
-
-# %% [markdown]
-# ### K-FAC up/gate
-
-# %%
-
-#############################################################################
-
-for model in filter_model_names:
-    grid_start(ncols=2, title=f'K-FAC up — {model}') #, disable_didx=[1,3,5,7] if 'pythia' in model else [])
-    plot_group('trace', mlp_kf(model)[::2], [model], ylog=True)
-    plot_group('log_det', mlp_kf(model)[::2], [model])
-    plot_group('rankme', mlp_kf(model)[::2], [model])
-    plot_group('peak_eigval', mlp_kf(model)[::2], [model], ylog=True)
+for rows, cols in PAIRINGS:
+    grid_start(ncols=2, title=f'Block-mean cosine ({rows or "all"}×{cols or "all"}, final ckpt)', savefig=False)
+    for model in filter_model_names:
+        outs = layer_outs(model)
+        M, rl, cl = submatrix(block_mean_cos(model, outs), [s[2] for s in outs], rows, cols)
+        plot_heatmap(M, labels=rl, labels2=cl, title=get_model_label(model),
+                     hide_diag=rows == cols, dynamic=True)
     grid_show()
 
 
 # %% [markdown]
-# ### K-FAC down
+# ### Samples run: block↔block coupling (Exp 4.1)
 
 # %%
+# block_representations_samples (BLOCK_SAMPLES, defined with the constants up top).
+n_blocks_bs = {'pythia-1b-deduped': 16, 'pythia-6.9b-deduped': 32,
+               'OLMo-2-0425-1B': 16, 'OLMo-2-1124-7B': 32}
+bs_out = lambda model, family: [(BLOCK_SAMPLES, (f'blk{l}.{s}.out', family), f'{s} {l}')
+                                for l in range(n_blocks_bs[model]) for s in ('attn', 'mlp')]
+bs_blk = lambda model: [(BLOCK_SAMPLES, (f'blk{l}', 'block_ledger'), f'blk {l}')
+                        for l in range(n_blocks_bs[model])]
+
+# %%
+# Pairwise block-output coupling at the final checkpoint: CKA (shared subspace, unsigned),
+# signed trace (net reinforce/cancel, energy-weighted), mean per-token cosine (democratic).
+# Covariance-level counterpart of the block-mean cosine heatmaps above.
+def _coupling_heatmaps(model, rows='', cols='', step=None):
+    bb = lambda y: _lib.get_y(BLOCK_SAMPLES, model, ('', 'block_block_coupling'), y, step)
+    labels = [l.removeprefix('blk').removesuffix('.out') for l in bb('leaves')]
+    grid_start(ncols=3, title=f'Block↔block coupling ({rows or "all"}×{cols or "all"}, final ckpt) — {get_model_label(model)}')
+    for y, kw in (('cka', dict(vmin=0, vmax=1)), ('signed_trace', dict(dynamic=True)), ('mean_cos', dict(dynamic=True))):
+        M, rl, cl = submatrix(bb(y), labels, rows, cols)
+        plot_heatmap(M, labels=rl, labels2=cl, title=y, hide_diag=rows == cols, **kw)
+    grid_show()
 
 for model in filter_model_names:
-    grid_start(ncols=2, title=f'K-FAC down — {model}')
-    plot_group('trace', mlp_kfd(model), [model], ylog=True)
-    plot_group('log_det', mlp_kfd(model), [model])
-    plot_group('rankme', mlp_kfd(model), [model])
-    plot_group('peak_eigval', mlp_kfd(model), [model], ylog=True)
+    for rows, cols in PAIRINGS:
+        _coupling_heatmaps(model, rows, cols)
+
+# %% [markdown]
+# ### Rank ledger (Exp 4.2)
+
+# %%
+# Exact per-block ledger of the residual's rank entropy (docs/ledger.md):
+# ΔS_k = χ_k (overlap) + quality_k (spectral quality of the writes) + interference_k (pure
+# cross-covariance effect); Σ_k ΔS_k telescopes to log RankMe(final) − log RankMe(emb).
+def _ledger_grid(model):
+    blks = bs_blk(model)
+    grid_start(ncols=2, title=f'Rank ledger — {get_model_label(model)}')
+    for y in ('delta_s', 'chi', 'quality', 'interference'):
+        plot_group(y, blks, [model], color_palette='gradient', title=y)
+    grid_show()
+
+for model in filter_model_names:
+    _ledger_grid(model)
+
+# %% [markdown]
+# ### Block↔final coupling over training (Exp 4.3)
+
+# %%
+# Signed/unsigned coupling of each block output against the final residual (centered crosses):
+# signed share of the final trace, reinforce/cancel at the write point, CKA, mean cosine.
+def _coupling_grid(model):
+    outs = bs_out(model, 'block_residual_coupling')
+    grid_start(ncols=2, title=f'Block↔final coupling — {get_model_label(model)}')
+    for y in ('R_over_r', 'tr_P', 'cka_cr', 'cos_cr'):
+        plot_group(y, outs, [model], color_palette='gradient', title=y)
+    grid_show()
+
+for model in filter_model_names:
+    _coupling_grid(model)
+
+# %% [markdown]
+# ### Ablation, overlap, drift (Exp 4.4)
+
+# %%
+# Leave-one-out RankMe effect of each write, per-step overlap fraction χ_k/H(w), and
+# checkpoint-to-checkpoint drift (CKA over shared tokens; absent at the first checkpoint).
+DRIFT_MODELS = {'pythia-1b-deduped', 'OLMo-2-0425-1B'}   # drift_metrics ran on the 1Bs only
+
+def _abl_drift_grid(model):
+    grid_start(ncols=2, title=f'Ablation / overlap / drift — {get_model_label(model)}')
+    plot_group('delta_rankme', bs_out(model, 'ablation_contribution'), [model], color_palette='gradient')
+    plot_group('chi_frac', bs_out(model, 'incremental_overlap'), [model], color_palette='gradient')
+    if model in DRIFT_MODELS:
+        plot_group('cka_drift', bs_out(model, 'cka_drift'), [model], color_palette='gradient')
+        plot_group('rankme', bs_out(model, 'geneig_drift'), [model], color_palette='gradient', title='gen-eig drift RankMe')
+    grid_show()
+
+for model in filter_model_names:
+    _abl_drift_grid(model)
+
+# %% [markdown]
+# ### Head-removed final RankMe (Exp 4.5)
+
+# %%
+# Head-removed RankMe + windowed alphaReQ (compression propagates down-spectrum with decaying
+# amplitude; docs/dig_findings.md), for the final stream AND the stream entering the last
+# block — is the head phenomenon written by the last block?
+# Deep band (512, -20): the compression front NEVER reaches it — it flattens monotonically
+# through all of training (no tail fall-off either; band metrics are invariant to head growth).
+KS = (0, 1, 2, 8, 32, 128, 512)
+WINDOWS = ((11, 100), (32, 128), (128, 512), (512, -20))
+_pen = lambda model: f'blk{n_blocks_bs[model] - 1}.attn.in'   # penultimate stream: entering the last block
+_tail = lambda leaf: [(BLOCK_SAMPLES, (leaf, 'acts_centered'), f'k={k}', ('tail_rankme', {'k': k})) for k in KS]
+_alpha_w = lambda leaf: [(BLOCK_SAMPLES, (leaf, 'acts_centered'), f'{k0}-{k1}', ('alpha_window', {'k0': k0, 'k1': k1}))
+                         for k0, k1 in WINDOWS]
+
+# 'Without top-3' = additive leave-one-out estimate now; the exact joint_ablation
+# series joins automatically once a run carries it (docs/next_run_additions.md #3).
+
+for model in filter_model_names:
+    grid_start(ncols=2, title=f'Head-removed RankMe / bulk alpha — {get_model_label(model)}')
+    plot_group('tail_rankme', _tail('before_final_norm'), [model], color_palette='gradient', title='final stream')
+    plot_group('tail_rankme', _tail(_pen(model)), [model], color_palette='gradient', title='stream before last block')
+    plot_group('alpha_window', _alpha_w('before_final_norm'), [model], color_palette='gradient', title='final stream')
+    plot_group('alpha_window', _alpha_w(_pen(model)), [model], color_palette='gradient', title='stream before last block')
+    plot_wo_topk(BLOCK_SAMPLES, model, 'rankme')
+    plot_wo_topk(BLOCK_SAMPLES, model, 'alpha')
     grid_show()
 
 # %% [markdown]
-# ### Up-proj and Gate-proj inputs and outputs
+# ### Sub-block ledger (Exp 4.6, OLMo only)
 
 # %%
-
-for model in filter_model_names:
-    grid_start(ncols=2, title=f'Up-proj inputs — {model}')
-    plot_group('trace', mlp_au(model)[::3], [model], ylog=True)
-    plot_group('log_det', mlp_au(model)[::3], [model])
-    plot_group('peak_eigval', mlp_ac(model)[::3], [model], ylog=True)
-    plot_spectrum('eigvals', mlp_ac(model)[::3], [model], title="Final Checkpoint Eigvals")
-    plot_group('mean_norm', mlp_au(model)[::3], [model])
-    plot_group('mean_frac', mlp_au(model)[::3], [model])
-    plot_group('rankme', mlp_au(model)[::3], [model], title="Uncentered Covariance RankMe")
-    plot_group('rankme', mlp_ac(model)[::3], [model], title="Centered Covariance Rankme")
-    plot_group('rankme_center_diff', mlp_ac(model)[::3], [model])
-    plot_group('rankme_center_prop', mlp_ac(model)[::3], [model])
-    # plot_spectrum(('histogram', dict(bins=128)), mlp_ac(model)[::3], [model], title="Final Checkpoint Histogram", ylog=False)
+# Per-residual-write ledger: the block ledger's two sequential sub-steps (attn into stream,
+# then mlp), assembled notebook-side from incremental_overlap's stored entropies via the
+# sub_* virtual hooks. OLMo-only — Pythia's parallel sub-blocks have no sequential sub-steps.
+def _sub_ledger_grid(model):
+    subs = bs_out(model, 'incremental_overlap')
+    grid_start(ncols=2, title=f'Sub-block ledger — {get_model_label(model)}')
+    for y in ('sub_delta_s', 'chi', 'sub_quality', 'sub_interference'):
+        plot_group(y, subs, [model], color_palette='gradient', title=y)
     grid_show()
 
 for model in filter_model_names:
-    grid_start(ncols=2, title=f'Up-proj outputs — {model}')
-    plot_group('trace', mlp_bu(model)[::3], [model], ylog=True)
-    plot_group('log_det', mlp_bu(model)[::3], [model])
-    plot_group('peak_eigval', mlp_bc(model)[::3], [model], ylog=True)
-    plot_spectrum('eigvals', mlp_bc(model)[::3], [model], title="Final Checkpoint Eigvals")
-    plot_group('mean_norm', mlp_bu(model)[::3], [model])
-    plot_group('mean_frac', mlp_bu(model)[::3], [model])
-    plot_group('rankme', mlp_bu(model)[::3], [model], title="Uncentered Covariance RankMe")
-    plot_group('rankme', mlp_bc(model)[::3], [model], title="Centered Covariance Rankme")
-    plot_group('rankme_center_diff', mlp_bc(model)[::3], [model])
-    plot_group('rankme_center_prop', mlp_bc(model)[::3], [model])
-    grid_show()
-
-for model in filter_model_names[2:]:
-    grid_start(ncols=2, title=f'Gate-proj outputs — {model}')
-    plot_group('trace', mlp_bu(model)[1::3], [model], ylog=True)
-    plot_group('log_det', mlp_bu(model)[1::3], [model])
-    plot_group('peak_eigval', mlp_bc(model)[1::3], [model], ylog=True)
-    plot_spectrum('eigvals', mlp_bc(model)[1::3], [model], title="Final Checkpoint Eigvals")
-    plot_group('mean_norm', mlp_bu(model)[1::3], [model])
-    plot_group('mean_frac', mlp_bu(model)[1::3], [model])
-    plot_group('rankme', mlp_bu(model)[1::3], [model], title="Uncentered Covariance RankMe")
-    plot_group('rankme', mlp_bc(model)[1::3], [model], title="Centered Covariance Rankme")
-    plot_group('rankme_center_diff', mlp_bc(model)[1::3], [model])
-    plot_group('rankme_center_prop', mlp_bc(model)[1::3], [model])
-    grid_show()
-
+    if 'OLMo' in model:
+        _sub_ledger_grid(model)
 
 # %% [markdown]
-# ### Down-proj inputs and outputs
+# ### Write means vs their covariance (Exp 4.7)
 
 # %%
-
-for model in filter_model_names:
-    grid_start(ncols=2, title=f'Down-proj inputs — {model}')
-    plot_group('trace', mlp_au(model)[2::3], [model], ylog=True)
-    plot_group('log_det', mlp_au(model)[2::3], [model])
-    plot_group('peak_eigval', mlp_ac(model)[2::3], [model], ylog=True)
-    plot_spectrum('eigvals', mlp_ac(model)[2::3], [model], title="Final Checkpoint Eigvals")
-    plot_group('mean_norm', mlp_au(model)[2::3], [model])
-    plot_group('mean_frac', mlp_au(model)[2::3], [model])
-    plot_group('rankme', mlp_au(model)[2::3], [model], title="Uncentered Covariance RankMe")
-    plot_group('rankme', mlp_ac(model)[2::3], [model], title="Centered Covariance Rankme")
-    plot_group('rankme_center_diff', mlp_ac(model)[2::3], [model])
-    plot_group('rankme_center_prop', mlp_ac(model)[2::3], [model])
+# mean_frac = ||mu||²/tr (bias-like-ness of a write), top_overlap = |<mû, v1_centered>|,
+# migration = centered-tail ↔ uncentered-top eigvec overlap. Pythia's rogue write is
+# variance-like (mean_frac → 0.003); OLMo's late writes are mean-heavy (mean_frac 0.4–0.6);
+# migration ≈ 0 everywhere (docs/dig_findings.md).
+def _mean_grid(model):
+    grid_start(ncols=2, title=f'Write means vs covariance — {get_model_label(model)}')
+    plot_group('mean_frac', bs_out(model, 'acts_centered'), [model], color_palette='gradient', ylog=True)
+    plot_group('top_overlap', bs_out(model, 'acts_mean_metrics'), [model], color_palette='gradient')
+    plot_group('rayleigh_normed', bs_out(model, 'acts_mean_metrics'), [model], color_palette='gradient')
+    plot_group('migration', bs_out(model, 'mean_migration'), [model], color_palette='gradient')
     grid_show()
 
 for model in filter_model_names:
-    grid_start(ncols=2, title=f'Down-proj outputs — {model}')
-    plot_group('trace', mlp_bu(model)[2::3], [model], ylog=True)
-    plot_group('log_det', mlp_bu(model)[2::3], [model])
-    plot_group('peak_eigval', mlp_bc(model)[2::3], [model], ylog=True)
-    plot_spectrum('eigvals', mlp_bc(model)[2::3], [model], title="Final Checkpoint Eigvals")
-    plot_group('mean_norm', mlp_bu(model)[2::3], [model])
-    plot_group('mean_frac', mlp_bu(model)[2::3], [model])
-    plot_group('rankme', mlp_bu(model)[2::3], [model], title="Uncentered Covariance RankMe")
-    plot_group('rankme', mlp_bc(model)[2::3], [model], title="Centered Covariance Rankme")
-    plot_group('rankme_center_diff', mlp_bc(model)[2::3], [model])
-    plot_group('rankme_center_prop', mlp_bc(model)[2::3], [model])
-    grid_show()
-
+    _mean_grid(model)
 
 # %% [markdown]
-# ### Sampled-gradients
+# ### Rogue write anatomy (Exp 4.9, Pythia)
 
 # %%
-
-for model in filter_model_names:
-    grid_start(ncols=2, title=f'Up-proj sampled gradients (loss wrt model\'s own samples) — {model}',
-            disable_didx=[]) # omit l0 bc it's too noisy
-    plot_group('trace', mlp_gu(model)[::3], [model], ylog=True)
-    plot_group('log_det', mlp_gu(model)[::3], [model])
-    plot_group('peak_eigval', mlp_gc(model)[::3], [model], ylog=True)
-    plot_spectrum('eigvals', mlp_gc(model)[::3], [model], title="Final Checkpoint Eigvals")
-    # plot_group('mean_norm', mlp_gu(model)[::3], [model])
-    # plot_group('mean_frac', mlp_gu(model)[::3], [model])
-    # plot_group('rankme', mlp_gu(model)[::3], [model], title="Uncentered Covariance RankMe")
-    plot_group('rankme', mlp_gc(model)[::3], [model], title="Centered Covariance Rankme")
-    # plot_group('rankme_center_diff', mlp_gc(model)[::3], [model])
-    # plot_group('rankme_center_prop', mlp_gc(model)[::3], [model])
-    grid_show()
-
-for model in filter_model_names[2:]:
-    grid_start(ncols=2, title=f'Gate-proj sampled gradients (loss wrt model\'s own samples) — {model}',
-            disable_didx=[]) # omit l0 bc it's too noisy
-    plot_group('trace', mlp_gu(model)[1::3], [model], ylog=True)
-    plot_group('log_det', mlp_gu(model)[1::3], [model])
-    plot_group('peak_eigval', mlp_gc(model)[1::3], [model], ylog=True)
-    plot_spectrum('eigvals', mlp_gc(model)[1::3], [model], title="Final Checkpoint Eigvals")
-    # plot_group('mean_norm', mlp_gu(model)[1::3], [model])
-    # plot_group('mean_frac', mlp_gu(model)[1::3], [model])
-    # plot_group('rankme', mlp_gu(model)[1::3], [model], title="Uncentered Covariance RankMe")
-    plot_group('rankme', mlp_gc(model)[1::3], [model], title="Centered Covariance Rankme")
-    # plot_group('rankme_center_diff', mlp_gc(model)[1::3], [model])
-    # plot_group('rankme_center_prop', mlp_gc(model)[1::3], [model])
+# (a) blk3.mlp's write collapses to rank ~1 at the RankMe peak and then grows in energy —
+# vs its neighbor writes. (b) Token-level evidence from the block_rogue_id raw samples
+# (final ckpt): projections onto the write's top centered direction, newline tokens vs rest
+# (38/40 top spikes are \n variants; docs/dig_findings.md).
+def _rogue_traj(model):
+    outs = [(BLOCK_SAMPLES, (f'blk{l}.mlp.out', 'acts_centered'), f'mlp {l}') for l in (1, 3, 5)]
+    grid_start(ncols=2, title=f'Rogue write trajectory — {get_model_label(model)}')
+    plot_group('rankme', outs, [model], color_palette='gradient', ylog=True, title='write RankMe (centered)')
+    plot_group('trace', outs, [model], color_palette='gradient', ylog=True, title='write trace')
     grid_show()
 
 for model in filter_model_names:
-    grid_start(ncols=2, title=f'Down-proj sampled gradients (loss wrt model\'s own samples) — {model}',
-            disable_didx=[]) # omit l0 bc it's too noisy
-    plot_group('trace', mlp_gu(model)[2::3], [model], ylog=True)
-    plot_group('log_det', mlp_gu(model)[2::3], [model])
-    plot_group('peak_eigval', mlp_gc(model)[2::3], [model], ylog=True)
-    plot_spectrum('eigvals', mlp_gc(model)[2::3], [model], title="Final Checkpoint Eigvals")
-    # plot_group('mean_norm', mlp_gu(model)[2::3], [model])
-    # plot_group('mean_frac', mlp_gu(model)[2::3], [model])
-    # plot_group('rankme', mlp_gu(model)[2::3], [model], title="Uncentered Covariance RankMe")
-    plot_group('rankme', mlp_gc(model)[2::3], [model], title="Centered Covariance Rankme")
-    # plot_group('rankme_center_diff', mlp_gc(model)[2::3], [model])
-    # plot_group('rankme_center_prop', mlp_gc(model)[2::3], [model])
-    grid_show()
+    if 'pythia' in model:
+        _rogue_traj(model)
+
+# %%
+# Heavier cell: loads raw samples + the packed mix + tokenizer.
+import torch as _t
+from utils.accessor import DataAccessor as _DA
+
+def _rogue_scatter(model, step=143000):
+    import matplotlib.pyplot as plt
+    from transformers import AutoTokenizer
+    acc = _DA(f'data/inferences/block_rogue_id/{model}/step{step}.pt')
+    v = acc['blk3.mlp.out'].acts
+    score = (v.samples.float() - v.mean.float()) @ v.eigvecs_centered[:, 0].float()
+    ids = _t.load('data/mixes/pile_30M_512.pt')[:, :511].reshape(-1)[:len(score)]
+    tok = AutoTokenizer.from_pretrained(f'EleutherAI/{model}')
+    uniq = _t.unique(ids)
+    nl_ids = {int(t) for t in uniq if '\n' in tok.decode([int(t)])}
+    is_nl = _t.tensor([int(t) in nl_ids for t in ids])
+    plt.figure(figsize=(7, 4))
+    for m, lbl, c in ((~is_nl, 'other tokens', 'tab:gray'), (is_nl, 'newline tokens', 'tab:red')):
+        plt.hist(score[m].abs().numpy(), bins=120, log=True, alpha=0.6, color=c, label=lbl)
+    plt.xlabel('|projection onto rogue direction|'); plt.ylabel('token count (log)')
+    plt.title(f'Who carries the rogue direction — {get_model_label(model)}, final ckpt')
+    plt.legend(); plt.show()
 
 for model in filter_model_names:
-    grid_start(ncols=2, title=f'"Whole layer K-FAC" up A x down G — {model}')
-    plot_group('trace', mlp_lkf(model), [model], ylog=True)
-    plot_group('log_det', mlp_lkf(model), [model])
-    plot_group('rankme', mlp_lkf(model), [model])
-    plot_group('alpha', mlp_lkf(model), [model])
-    grid_show()
-
-#############################################################################
-
+    if 'pythia' in model:
+        _rogue_scatter(model)
 
 # %% [markdown]
-# ### Final Residuals
+# ### Cancellation, head-targeting, and write concentration (Exp 4.10)
 
 # %%
-
-#############################################################################
-
-
-
-# ####        #        #        #        #        #        #        ####
-# ####                          Magnitudes                          ####
-# ####        #        #        #        #        #        #        ####
-
-# grid_start(ncols=2, title='Up-proj A, G, B magnitudes — OL1B')
-# plot_group('trace', mlp_magu_u[::3], ['OLMo-2-0425-1B'], title='trace up A', ylog=True)
-# plot_group('log_det', mlp_magu_u[::3], ['OLMo-2-0425-1B'], title='log-det up A')
-# plot_group('trace', mlp_magu_u[2::3], ['OLMo-2-0425-1B'], title='trace up G', ylog=True)
-# plot_group('log_det', mlp_magu_u[2::3], ['OLMo-2-0425-1B'], title='log-det up G')
-# plot_group('trace', mlp_magu_u[1::3], ['OLMo-2-0425-1B'], title='trace up B', ylog=True)
-# plot_group('log_det', mlp_magu_u[1::3], ['OLMo-2-0425-1B'], title='log-det up B')
-# grid_show()
-
-# grid_start(ncols=2, title='Down-proj A, G, B magnitudes — OL1B')
-# plot_group('trace', mlp_magd_u[::3], ['OLMo-2-0425-1B'], title='trace down A', ylog=True)
-# plot_group('log_det', mlp_magd_u[::3], ['OLMo-2-0425-1B'], title='log-det down A')
-# plot_group('trace', mlp_magd_u[2::3], ['OLMo-2-0425-1B'], title='trace down G', ylog=True)
-# plot_group('log_det', mlp_magd_u[2::3], ['OLMo-2-0425-1B'], title='log-det down G')
-# plot_group('trace', mlp_magd_u[1::3], ['OLMo-2-0425-1B'], title='trace down B', ylog=True)
-# plot_group('log_det', mlp_magd_u[1::3], ['OLMo-2-0425-1B'], title='log-det down B')
-# grid_show()
-
-for model in filter_model_names:
-    grid_start(ncols=3, title=f'Residual A, G Covariance (uncentered) — {model}')
-    plot_group('trace', res_fn_u[::2], [model], ylog=True)
-    plot_group('log_det', res_fn_u[::2], [model])
-    plot_group('peak_eigval', res_fn_u[::2], [model], ylog=True)
-    plot_group('trace', res_fn_u[1::2], [model], ylog=True, disable_didx=[])
-    plot_group('log_det', res_fn_u[1::2], [model], disable_didx=[])
-    plot_group('peak_eigval', res_fn_u[1::2], [model], ylog=True, disable_didx=[])
-    grid_show()
+# (a) signed trace of each early write vs the LAST write over training — Pythia's late blocks
+# learn to cancel the rogue (→ -0.65); OLMo's late writes stay mutually aligned.
+# (b) eigendirection head-mass of the last write (share of |contrib| in the top-32 final
+# directions) — Pythia's goes 0.26→0.92 (toy-like selection bias, H1.3).
+# (c) write concentration: top-eigval share of each mlp write at the final ckpt — the
+# Pythia-vs-OLMo contrast (rogue flag ~95-99% vs diffuse ~10%).
+def _cancellation_headmass(model):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    L = n_blocks_bs[model]
+    mats, steps = _lib.get_ys(BLOCK_SAMPLES, model, ('', 'block_block_coupling'), 'signed_trace')
+    leaves = _lib.get_y(BLOCK_SAMPLES, model, ('', 'block_block_coupling'), 'leaves', steps[0])
+    xs = _lib.get_xs_tokens(model, steps)
+    last = leaves.index(f'blk{L - 1}.mlp.out')
+    fig, axes = plt.subplots(1, 3, figsize=(16, 4))
+    fig.suptitle(f'Cancellation / head-mass / concentration — {get_model_label(model)}')
+    for l in (1, 3, 5, L // 2):
+        i = leaves.index(f'blk{l}.mlp.out')
+        axes[0].plot(xs, [m[i, last] for m in mats], marker='o', lw=2, label=f'mlp {l} ~ mlp {L-1}')
+    axes[0].set(xscale='log', title='signed trace vs last write', xlabel='tokens'); axes[0].legend(fontsize=8)
+    for l in (0, L // 2, L - 1):
+        cs, ss = _lib.get_ys(BLOCK_SAMPLES, model, (f'blk{l}.mlp.out', 'eigendirection_attrib'), 'contrib')
+        hm = [float(np.abs(c[:32]).sum() / np.abs(c).sum()) for c in cs]
+        axes[1].plot(_lib.get_xs_tokens(model, ss), hm, marker='o', lw=2, label=f'mlp {l}')
+    axes[1].set(xscale='log', ylim=(0, 1), title='head-mass (top-32 share)', xlabel='tokens'); axes[1].legend(fontsize=8)
+    share = [_lib.get_y(BLOCK_SAMPLES, model, (f'blk{l}.mlp.out', 'acts_centered'), 'eigenspectrum', None)[0]
+             for l in range(L)]
+    axes[2].bar(range(L), share, color='tab:red' if 'pythia' in model else 'tab:blue')
+    axes[2].set(ylim=(0, 1), title='top-eigval share per mlp write (final)', xlabel='block')
+    plt.show()
 
 for model in filter_model_names:
-    grid_start(ncols=3, title=f'Residual A, G Covariance (centered) — {model}')
-    plot_group('trace', res_fn_c[::2], [model], ylog=True)
-    plot_group('log_det', res_fn_c[::2], [model])
-    plot_group('peak_eigval', res_fn_c[::2], [model], ylog=True)
-    plot_group('trace', res_fn_c[1::2], [model], ylog=True, disable_didx=[])
-    plot_group('log_det', res_fn_c[1::2], [model], disable_didx=[])
-    plot_group('peak_eigval', res_fn_c[1::2], [model], ylog=True, disable_didx=[])
-    grid_show()
-
-for model in filter_model_names:
-    grid_start(ncols=3, title=f'Residual A RankMe centering difference — {model}')
-    plot_group('rankme', res_fn_c[::2], [model])
-    plot_group('rankme_center_diff', res_fn_c[::2], [model])
-    plot_group('rankme_center_prop', res_fn_c[::2], [model])
-
-    # G is naturally centered
-    # plot_group('rankme', res_fn_c[1::2], [model])
-    # plot_group('rankme_center_diff', res_fn_c[1::2], [model])
-    # plot_group('rankme_center_prop', res_fn_c[1::2], [model])
-    grid_show()
-
-
-# grid_start(ncols=2, title='Residual A x G Covariance — OL1B')
-# plot_group('trace', res_afnk, ['OLMo-2-0425-1B'], ylog=True)
-# plot_group('log_det', res_afnk, ['OLMo-2-0425-1B'])
-# plot_group('trace', res_bfnk, ['OLMo-2-0425-1B'], ylog=True)
-# plot_group('log_det', res_bfnk, ['OLMo-2-0425-1B'])
-# grid_show()
-
-
-# %%
-
-# Down-proj output (B) alpha — measured layers, one subplot per model
-grid_start(ncols=2, title='Down-proj output (B) alpha')
-for model in filter_model_names:
-    plot_group('alpha', mlp_bc(model)[2::3], [model], title=get_model_label(model))
-grid_show()
-
-
-# %% [markdown]
-#
-
-# %%
+    _cancellation_headmass(model)

@@ -1,0 +1,36 @@
+output_dir: data/inferences/block_rogue_id_midstack
+# Mid-stack deposit test for the blk3.mlp rogue direction: same protocol as block_rogue_id
+# (original pile mix, raw acts, final checkpoint) but stream inputs spanning depth. Excludes
+# the scenario where the deposit lives mid-stack and later blocks remove it before
+# before_final_norm. ~2 GB per acts leaf x 7 leaves ~ 14 GB.
+
+model_name:
+  - "EleutherAI/pythia-1b-deduped"
+
+batch_size: [256]
+max_tokens: [262_144]
+
+packed_data_path:
+  EleutherAI/*: data/mixes/pile_30M_512.pt
+
+seq_len: 512
+min_length: 32
+checkpoints: "final"
+packing: packed
+token_selection: all
+activation_dtype: bf16
+
+hooks:
+  - blk3.mlp.out       # the rogue write itself
+  - blk4.attn.in       # stream right after the rogue block
+  - blk6.attn.in
+  - blk9.attn.in
+  - blk12.attn.in
+  - blk15.attn.in
+  - before_final_norm
+
+max_layers_per_pass: 0
+collect_format: acts
+storage_format: acts   # persist raw samples — the whole point
+compute_metrics: False
+keep_cached: False

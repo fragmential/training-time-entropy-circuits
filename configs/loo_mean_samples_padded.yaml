@@ -1,0 +1,52 @@
+output_dir: data/inferences/loo_mean_samples_padded
+# Mean-ablation LOO twin of loo_samples_padded.yaml: computes loo_mean (subtract each write's
+# writes) for every block, the four L/4 chunks, and the middle half — but on independent
+# rows (padded, last token per document, native shuffled text). nanochat-d12 excluded
+# (no padded data). Distinct output_dir; does not touch the packed loo_samples run.
+
+model_name:
+  - "allenai/OLMo-2-0425-1B"
+  - "allenai/OLMo-2-1124-7B"
+  - "EleutherAI/pythia-1b-deduped"
+  - "EleutherAI/pythia-6.9b-deduped"
+  - "EleutherAI/pythia-160m-deduped"
+  - "EleutherAI/pythia-410m-deduped"
+
+#              OL1B    OL7B   Py1b    Py6.9b  Py160m   Py410m
+batch_size:  [  48,     32,   256,      72,     256,     256]
+num_samples: 16_384
+
+dataset_name: native
+text_shuffle_seed: 42
+seq_len: 512
+max_length: 512
+min_length: 32
+max_checkpoints: 20
+checkpoint_spacing: log
+packing: padded
+token_selection: last
+activation_dtype: bf16
+
+hooks:
+  - blk*.attn.out          # attention's contribution to residual
+  - blk*.mlp.out           # MLP's contribution to residual
+  - before_final_norm
+  - after_final_norm
+
+max_layers_per_pass: 0
+collect_format: acts
+storage_format: eigenvalues
+compute_metrics: True
+drift_metrics: False
+loo_groups: auto
+metrics_skip:
+  - loo   # this run computes loo_mean only
+  - block_ledger
+  - incremental_overlap
+  - block_block_coupling
+  - block_residual_coupling
+  - ablation_contribution
+  - eigendirection_attrib
+  - gen_block_vs_residual
+  - mean_migration
+keep_cached: False

@@ -4,9 +4,8 @@
 # In-place by default; --output-dir writes results to <output-dir>/<model_name>/ instead.
 # Examples:
 #   ./slurm/storage.sh convert --to cov_svd --input data/inferences/full_limited
-#   ./slurm/storage.sh convert --to cov_svd --input data/inferences/full_limited --output-dir data/inferences/full_limited_svd
-#   ./slurm/storage.sh project --onto both --input data/inferences/full_limited/pythia-31m-deduped
-#   ./slurm/storage.sh set-filter --token-selection last --input data/inferences/full_limited
+#   ./slurm/storage.sh convert --to eigenvalues --input data/inferences/full_limited --output-dir data/inferences/full_limited_eig
+#   ./slurm/storage.sh project --onto-file data/inferences/full_limited/pythia-31m-deduped/step143000.pt --input data/inferences/full_limited/pythia-31m-deduped
 
 set -euo pipefail
 
@@ -31,48 +30,32 @@ if [ -z "$INPUT_PATH" ]; then
     echo "Error: --input <path> is required" >&2; exit 1
 fi
 
-# Loud, layered warnings when a `convert` discards data (irreversible if in-place)
+# Loud warnings when a `convert` discards data (irreversible if in-place)
 CMD="${CMD_ARGS[0]:-}"
-TO_FMT=""
+TO_FMT=""; MATERIALIZE=""
 for ((j=0; j<${#CMD_ARGS[@]}; j++)); do
-    [ "${CMD_ARGS[$j]}" = "--to" ] && [ $((j+1)) -lt ${#CMD_ARGS[@]} ] && TO_FMT="${CMD_ARGS[$((j+1))]}"
+    [ "${CMD_ARGS[$j]}" = "--to" ] && TO_FMT="${CMD_ARGS[$((j+1))]:-}"
+    [ "${CMD_ARGS[$j]}" = "--materialize" ] && MATERIALIZE="${CMD_ARGS[$((j+1))]:-}"
 done
 if [ "$CMD" = "convert" ]; then
-    BASE_FMT="${TO_FMT%%+*}"
-    BASE_FMT="${BASE_FMT%%-*}"
     WARNED=0
 
-    # Warning 1: eigvals keeps only eigenvalues -> covariances are gone
-    if [ "$BASE_FMT" = "eigvals" ] || [ "$BASE_FMT" = "eigenvalues" ]; then
+    # eigenvalues keeps only eigenvalues -> covariances + eigenvectors are gone
+    if [ "$TO_FMT" = "eigenvalues" ] || [ "$TO_FMT" = "eigvals" ]; then
         cat >&2 <<'EOF'
 
-WARNING:  --to eigvals  DESTROYS the COVARIANCE MATRICES
-Only eigenvalues are kept; the full A/G covariances and eigenvectors
-are discarded  ->  no reconstruction, no reprojection onto other bases.
+WARNING:  --to eigenvalues  DISCARDS the COVARIANCES and EIGENVECTORS
+Only eigenvalues are kept  ->  no reconstruction, no reprojection onto other bases.
 EOF
         WARNED=1
     fi
 
-    # Warning 2: explicit negative overrides for B factor / means
-    if [[ "$TO_FMT" == *"-b"* ]] && [[ "$TO_FMT" == *"-m"* ]]; then
+    # negative --materialize overrides drop derived families (B = MLP-out acts, O = head contrib)
+    if [[ "$MATERIALIZE" == *"-b"* ]] || [[ "$MATERIALIZE" == *"-o"* ]]; then
         cat >&2 <<'EOF'
 
-WARNING:  -b and -m explicitly drop the B FACTOR and MEANS where they
-would otherwise be preserved by default.
-EOF
-        WARNED=1
-    elif [[ "$TO_FMT" == *"-b"* ]]; then
-        cat >&2 <<'EOF'
-
-WARNING:  -b explicitly drops the B FACTOR where it would otherwise be
-preserved by default.
-EOF
-        WARNED=1
-    elif [[ "$TO_FMT" == *"-m"* ]]; then
-        cat >&2 <<'EOF'
-
-WARNING:  -m explicitly drops MEANS where they would otherwise be preserved
-by default. Centered spectra and some B derivations may become impossible.
+WARNING:  --materialize -b / -o drops the derived B (MLP-out) / O (head-contrib)
+families where they would otherwise be preserved.
 EOF
         WARNED=1
     fi
@@ -111,6 +94,8 @@ echo "Input: $INPUT_PATH | $N model dir(s)"
 DIRS_STR=$(printf '%q ' "${MODEL_DIRS[@]}")
 QUOTED_ARGS=$(printf ' %q' "${CMD_ARGS[@]}")
 
+WORKERS_ARG=""; [ "$CMD" != "info" ] && WORKERS_ARG="--workers 16"
+
 sbatch --array=0-$((N-1)) <<EOF
 #!/bin/bash
 #SBATCH --partition=gpu_a100
@@ -126,14 +111,14 @@ MODEL_DIR="\${MODEL_DIRS[\$SLURM_ARRAY_TASK_ID]}"
 OUTPUT_BASE="${OUTPUT_BASE}"
 export HF_HOME="/projects/prjs1815/hf_cache"
 
-cd "\$HOME/Tracing-representation-geometry-reproduction" || exit 1
+cd "\$SLURM_SUBMIT_DIR" || exit 1
 export OMP_NUM_THREADS=1
 echo "Processing: \$MODEL_DIR"
 if [ -n "\$OUTPUT_BASE" ]; then
     OUT_DIR="\$OUTPUT_BASE/\$(basename "\$MODEL_DIR")"
     echo "Output: \$OUT_DIR"
-    time uv run python -m utils.accessor${QUOTED_ARGS} --input "\$MODEL_DIR" --output-dir "\$OUT_DIR" --workers 16
+    time uv run python -m utils.accessor${QUOTED_ARGS} --input "\$MODEL_DIR" --output-dir "\$OUT_DIR" ${WORKERS_ARG}
 else
-    time uv run python -m utils.accessor${QUOTED_ARGS} --input "\$MODEL_DIR" --workers 16
+    time uv run python -m utils.accessor${QUOTED_ARGS} --input "\$MODEL_DIR" ${WORKERS_ARG}
 fi
 EOF

@@ -1,0 +1,26 @@
+output_dir: data/inferences/rq2_general_packed_n62k_large
+# N-matched packed null for the OLMo-2-7B memorized population: Merullo 7B set is 554 seqs
+# x 112 tok = 62,046 tokens; null matched at 62,464 (61x1024, cf. n73k for the 650-seq 1B set).
+model_name:
+  - "EleutherAI/pythia-6.9b-deduped"
+  - "allenai/OLMo-2-1124-7B"
+
+batch_size: [4, 2]   # 7B with retained graph (:both): VRAM estimator underestimates backward 2-3x
+max_tokens: 62_464
+dataset_name: native
+text_shuffle_seed: 46
+packing: packed
+token_selection: all
+seq_len: 512
+min_length: 32
+checkpoints: "final"
+
+hooks:
+  - blk*.attn.in:both
+  - blk*.mlp.up.in:both
+  - before_final_norm:both
+
+max_layers_per_pass: 0
+storage_format: cov_svd
+compute_metrics: True
+keep_cached: True   # concurrent same-model legs: a finishing job must not delete the cache under the others

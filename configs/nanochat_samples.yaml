@@ -1,0 +1,37 @@
+output_dir: data/inferences/nanochat_samples
+# block_representations_samples, nanochat edition: raw acts at every block boundary
+# (no head slices / raw_out), crosses computed in-memory by inline metrics, saved tiny
+# as eigenvalues. Schedule + token budget match the samples sweep (50 log-spaced
+# checkpoints past step 512, all 21 early ones included; 262_144 tokens like the 1B
+# models). Mix pre-tokenized with the rustbpe tokenizer (fineweb-edu, same 1998 chunks
+# as the cov-mode nanochat run). At d=768 the samples are ~20 GB in bf16.
+
+model_name: "nanochat-d12"
+
+batch_size: 128    # the 65536-vocab logits tensor dominates VRAM (bs*512*65536)
+
+packed_data_path: data/mixes/fineweb_edu_nanochat_1M_512.pt
+
+max_tokens: 262_144
+seq_len: 512
+min_length: 32
+max_checkpoints: 50
+checkpoint_spacing: log
+packing: packed
+token_selection: all
+activation_dtype: bf16
+
+hooks:
+  - blk*.attn.in           # residual into attn sub-block (ln1 input)
+  - blk*.attn.out          # attention's contribution to residual
+  - blk*.mlp.in            # mid-block residual (ln2 input)
+  - blk*.mlp.out           # MLP's contribution to residual
+  - before_final_norm
+  - after_final_norm
+
+max_layers_per_pass: 0
+collect_format: acts
+storage_format: eigenvalues
+compute_metrics: True
+drift_metrics: False
+keep_cached: False

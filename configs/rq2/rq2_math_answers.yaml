@@ -1,0 +1,28 @@
+output_dir: data/inferences/rq2_math_answers
+# RQ2 T_math answer-slot: GSM8K question+answer, padded/last = the answer position.
+# (train split has only ~7.5k rows; the loader takes what passes min_length.)
+model_name:
+  - "EleutherAI/pythia-1b-deduped"
+  - "allenai/OLMo-2-0425-1B"
+
+batch_size: [32, 16]   # backward-pass runs: retained graph ~3x forward VRAM
+num_samples: 16_384
+dataset_name: gsm8k
+dataset_content_key: question+answer
+max_length: 512
+text_shuffle_seed: 42
+packing: padded
+token_selection: last
+seq_len: 512
+min_length: 32
+checkpoints: "final"
+
+hooks:
+  - blk*.attn.in:both
+  - blk*.mlp.up.in:both
+  - before_final_norm:both
+
+max_layers_per_pass: 0
+storage_format: cov_svd
+compute_metrics: True
+keep_cached: True   # concurrent same-model legs: a finishing job must not delete the cache under the others

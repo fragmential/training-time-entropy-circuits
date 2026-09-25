@@ -1,0 +1,28 @@
+#!/bin/bash
+# Where the last block's compressing and decompressing units write, across the whole
+# unembedding spectrum. One array task per model; steps come from the ablation-curve file so
+# the groups match its `solo` ranking exactly.
+#
+# Submit with:  sbatch --array=0-5 slurm/compression_routes.job
+#SBATCH --partition=gpu_h100
+#SBATCH --gpus=1
+#SBATCH --job-name=comp_routes
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --time=04:00:00
+#SBATCH --output=slurm/logs/comp_routes_%A_%a.out
+
+set -euo pipefail
+cd "$SLURM_SUBMIT_DIR" || exit 1
+export HF_HOME="/projects/prjs1815/hf_cache"
+
+MODELS=(nanochat-d12 pythia-410m-deduped pythia-1b-deduped OLMo-2-0425-1B \
+        OLMo-2-1124-7B pythia-6.9b-deduped)
+BATCH=(128 64 64 48 16 16)
+MODEL="${MODELS[$SLURM_ARRAY_TASK_ID]}"
+
+echo "Model: $MODEL"
+time uv run oneoff_scripts/compression_routes.py \
+    --models "['$MODEL']" \
+    --batch_size "${BATCH[$SLURM_ARRAY_TASK_ID]}" \
+    --out_path "data/results/compression_routes_${MODEL}.pt"

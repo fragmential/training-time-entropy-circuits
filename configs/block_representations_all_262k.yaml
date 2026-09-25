@@ -1,0 +1,37 @@
+output_dir: data/inferences/block_representations_all_262k
+# Token-budget ablation: block_representations_all on the 1B models at the SAMPLES-config
+# budget (262144 tokens) — how much do rankme/alpha move between 1.2M and 262k tokens?
+
+model_name:
+  - "allenai/OLMo-2-0425-1B"
+  - "EleutherAI/pythia-1b-deduped"
+
+batch_size: [48, 256]
+
+packed_data_path:
+  allenai/*: data/mixes/olmo_mix_30M_512.pt
+  EleutherAI/*: data/mixes/pile_30M_512.pt
+
+max_tokens: 262_144
+seq_len: 512
+min_length: 32
+max_checkpoints: 30
+checkpoint_spacing: sqrt
+packing: packed
+token_selection: all
+
+hooks:
+  - blk*.attn.in           # residual into attn sub-block
+  - blk*.attn.head*.slice  # attention's per-head pre-W_o slices
+  - blk*.attn.out          # attention's contribution to residual
+  - blk*.attn.raw_out      # OLMo-2 only: pre-post-norm attn output
+  - blk*.mlp.in            # OLMo-2 only: residual into MLP sub-block
+  - blk*.mlp.out           # MLP's contribution to residual
+  - blk*.mlp.raw_out       # OLMo-2 only: pre-post-norm MLP output
+  - before_final_norm
+  - after_final_norm
+
+max_layers_per_pass: 0
+storage_format: eigenvalues
+compute_metrics: True
+keep_cached: False

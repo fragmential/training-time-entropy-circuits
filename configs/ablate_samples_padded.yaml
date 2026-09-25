@@ -1,0 +1,44 @@
+output_dir: data/inferences/ablate_padded_base   # OVERRIDE per intervention: --output_dir data/inferences/ablate_padded_<tag>
+# Padded (last-token) twin of ablate_samples.yaml: layer-ablation sweep with chosen blocks'
+# residual writes zeroed during the forward pass, full metrics (ledger included) on the
+# ablated model. Independent rows (padded, last token per document, native shuffled text).
+# nanochat-d12 excluded (no padded data). Model order matches slurm/ablate.sh's IDX map.
+# Supply per submission:  --ablate "[0,1,2,3]" --output_dir data/inferences/ablate_padded_q1
+
+model_name:
+  - "allenai/OLMo-2-0425-1B"
+  - "allenai/OLMo-2-1124-7B"
+  - "EleutherAI/pythia-1b-deduped"
+  - "EleutherAI/pythia-6.9b-deduped"
+  - "EleutherAI/pythia-160m-deduped"
+  - "EleutherAI/pythia-410m-deduped"
+
+#              OL1B    OL7B   Py1b    Py6.9b  Py160m   Py410m
+batch_size:  [  48,     32,   256,      72,     256,     256]
+num_samples: 16_384
+
+dataset_name: native
+text_shuffle_seed: 42
+seq_len: 512
+max_length: 512
+min_length: 32
+max_checkpoints: 30
+checkpoint_spacing: log
+packing: padded
+token_selection: last
+activation_dtype: bf16
+
+hooks:
+  - blk*.attn.in           # residual into attn sub-block
+  - blk*.attn.out          # attention's contribution to residual
+  - blk*.mlp.in            # OLMo-2 only: residual into MLP sub-block
+  - blk*.mlp.out           # MLP's contribution to residual
+  - before_final_norm
+  - after_final_norm
+
+max_layers_per_pass: 0
+collect_format: acts
+storage_format: eigenvalues
+compute_metrics: True
+drift_metrics: False
+keep_cached: False

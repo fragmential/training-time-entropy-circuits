@@ -1,0 +1,29 @@
+#!/bin/bash
+# Splits the mid-stack residual stream into the part predictable from the current token and
+# the part that is not, and tracks the rank of each over training. The two accounts of
+# mid-stack compression disagree about which term carries it.
+#
+# Submit with:  sbatch --array=0-2 slurm/context_vs_identity.job
+# keep_cached stays TRUE: nothing here may delete a revision another job is reading.
+#SBATCH --partition=gpu_h100
+#SBATCH --gpus=1
+#SBATCH --job-name=ctx_id
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --time=08:00:00
+#SBATCH --output=slurm/logs/ctx_id_%A_%a.out
+
+set -euo pipefail
+cd "$SLURM_SUBMIT_DIR" || exit 1
+export HF_HOME="/projects/prjs1815/hf_cache"
+
+MODELS=("nanochat-d12" "EleutherAI/pythia-1b-deduped" "allenai/OLMo-2-0425-1B")
+BATCH=(64 32 24)
+MODEL="${MODELS[$SLURM_ARRAY_TASK_ID]}"
+SHORT="${MODEL##*/}"
+
+echo "Model: $MODEL"
+time uv run oneoff_scripts/context_vs_identity.py \
+    --models "['$MODEL']" \
+    --batch_size "${BATCH[$SLURM_ARRAY_TASK_ID]}" \
+    --out_path "data/results/context_vs_identity_${SHORT}.pt"

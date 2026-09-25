@@ -1,0 +1,15 @@
+#!/bin/bash
+# The deflation sweep at Cancedda's 5% band, alongside the existing 1% (Stolfo) run.
+# Reads stored covariances and stored head SVDs only -- no downloads.
+#SBATCH --partition=gpu_h100
+#SBATCH --gpus=1
+#SBATCH --job-name=deflate_k05
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --time=02:00:00
+#SBATCH --output=slurm/logs/deflate_k05_%j.out
+set -euo pipefail
+cd "$SLURM_SUBMIT_DIR" || exit 1
+export HF_HOME="/projects/prjs1815/hf_cache"
+time uv run oneoff_scripts/stream_deflation.py \
+    --k_frac 0.05 --out_path data/results/stream_deflation_k05.pt

@@ -1,0 +1,55 @@
+output_dir: data/inferences/loo_mean_samples
+# Mean-ablation LOO twin of loo_samples.yaml: computes loo_mean (subtract each write's
+# `loo` metric — S(final − group of writes) for every block, the four L/4 chunks, and
+# the middle half. Cross-term metrics skipped for speed; hooks trimmed to writes + final
+# leaves (no .in leaves — the ledger is off), which roughly halves the sample RAM.
+
+model_name:
+  - "allenai/OLMo-2-0425-1B"
+  - "allenai/OLMo-2-1124-7B"
+  - "EleutherAI/pythia-1b-deduped"
+  - "EleutherAI/pythia-6.9b-deduped"
+  - "EleutherAI/pythia-160m-deduped"
+  - "EleutherAI/pythia-410m-deduped"
+  - "nanochat-d12"
+
+#            OL1B    OL7B   Py1b    Py6.9b  Py160m   Py410m  nanochat
+batch_size: [  48,     32,   256,      72,     256,     256,   128]
+max_tokens: [262_144, 81_920, 262_144, 98_304, 262_144, 262_144, 262_144]
+
+packed_data_path:
+  allenai/*: data/mixes/olmo_mix_30M_512.pt
+  EleutherAI/*: data/mixes/pile_30M_512.pt
+  nanochat-d12: data/mixes/fineweb_edu_nanochat_1M_512.pt
+
+seq_len: 512
+min_length: 32
+max_checkpoints: 20
+checkpoint_spacing: log
+packing: packed
+token_selection: all
+activation_dtype: bf16
+
+hooks:
+  - blk*.attn.out          # attention's contribution to residual
+  - blk*.mlp.out           # MLP's contribution to residual
+  - before_final_norm
+  - after_final_norm
+
+max_layers_per_pass: 0
+collect_format: acts
+storage_format: eigenvalues
+compute_metrics: True
+drift_metrics: False
+loo_groups: auto
+metrics_skip:
+  - loo   # this run computes loo_mean only
+  - block_ledger
+  - incremental_overlap
+  - block_block_coupling
+  - block_residual_coupling
+  - ablation_contribution
+  - eigendirection_attrib
+  - gen_block_vs_residual
+  - mean_migration
+keep_cached: False

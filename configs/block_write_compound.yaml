@@ -1,0 +1,43 @@
+output_dir: data/inferences/block_write_compound
+# RankMe of each block's COMPOUND residual update (attn.out + mlp.out combined), via the new
+# inline block_write_compound metric (sample-space sum -> covariance -> RankMe). Mirrors
+# block_representations_samples' settings/models so the compound spectrum overlays the stored
+# per-sublayer RankMe. Only the two write leaves are hooked; heavy cross/ledger metrics skipped.
+
+model_name:
+  - "allenai/OLMo-2-0425-1B"
+  - "allenai/OLMo-2-1124-7B"
+  - "EleutherAI/pythia-1b-deduped"
+  - "EleutherAI/pythia-6.9b-deduped"
+  - "EleutherAI/pythia-160m-deduped"
+  - "EleutherAI/pythia-410m-deduped"
+  - "nanochat-d12"
+
+#            OL1B    OL7B   Py1b    Py6.9b  Py160m   Py410m  nanochat
+batch_size: [  48,     32,   256,      72,     256,     256,    128]
+max_tokens: [262_144, 81_920, 262_144, 98_304, 262_144, 262_144, 262_144]
+
+packed_data_path:
+  allenai/*: data/mixes/olmo_mix_30M_512.pt
+  EleutherAI/*: data/mixes/pile_30M_512.pt
+  nanochat-d12: data/mixes/fineweb_edu_nanochat_1M_512.pt
+
+seq_len: 512
+min_length: 32
+max_checkpoints: 50
+checkpoint_spacing: log
+packing: packed
+token_selection: all
+activation_dtype: bf16
+
+hooks:
+  - blk*.attn.out
+  - blk*.mlp.out
+
+max_layers_per_pass: 0
+collect_format: acts
+storage_format: eigenvalues
+compute_metrics: True
+metrics_skip: [block_block_coupling, overlap_chi, block_residual_coupling, ablation_contribution, eigendirection_attrib, gen_block_vs_residual, incremental_overlap, block_ledger, mean_migration]
+drift_metrics: False
+keep_cached: False

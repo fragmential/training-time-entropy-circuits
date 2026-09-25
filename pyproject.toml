@@ -18,6 +18,7 @@ dependencies = [
     "scikit-learn",
     "tqdm",
     "jsonargparse",
+    "tiktoken>=0.13.0",
 ]
 
 [project.optional-dependencies]
@@ -26,12 +27,58 @@ dev = ["pytest>=8.0"]
 [dependency-groups]
 dev = [
     "nbstripout>=0.9.1",
+    "import-linter>=2.0",
+    "jupytext>=1.19.5",
 ]
 notebook = ["ipykernel"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["e2e: end-to-end tests requiring model downloads (deselect with '-m not e2e')"]
+
+# Structural enforcement: the dependency direction is one-way. See utils/accessor.py (the library
+# top) and the leaves below it. Run: `uv run lint-imports`.
+[tool.importlinter]
+root_packages = ["utils", "scripts"]
+
+[[tool.importlinter.contracts]]
+name = "Nothing in utils imports the accessor (it sits at the top of the library)"
+type = "forbidden"
+source_modules = ["utils"]
+forbidden_modules = ["utils.accessor"]
+
+[[tool.importlinter.contracts]]
+name = "The library never imports its script consumers (collect / compute_metrics)"
+type = "forbidden"
+source_modules = ["utils"]
+forbidden_modules = ["scripts"]
+
+[tool.pyright]
+include = ["utils", "scripts"]
+exclude = [
+    "**/*backup*.py", "**/*_old.py", "**/__pycache__", "**/memorization*",
+    "analysis", "analysis/**", "**/analysis/**",
+    "scripts/activation_ratio.py", "scripts/profile_sweep.py",
+    "scripts/migrate_results.py", "scripts/merge_results.py",
+]
+# `exclude` drops files from the default set, but editors (Pylance) still analyze a file you
+# OPEN even if excluded; `ignore` suppresses diagnostics for these even when open.
+ignore = [
+    "**/*backup*.py", "**/*_old.py", "**/memorization*",
+    "analysis", "analysis/**", "**/analysis/**",
+    "scripts/activation_ratio.py", "scripts/profile_sweep.py",
+    "scripts/migrate_results.py", "scripts/merge_results.py",
+]
+pythonVersion = "3.14"
+typeCheckingMode = "basic"
+# reportPrivateUsage is a CONSUMER-boundary rule: within utils, Node/View/DataAccessor are one
+# unit and legitimately share protected members, so it's off here and re-enabled for scripts/
+# below (cross-module reach-ins are also blocked at the import level — tool.importlinter).
+reportPrivateUsage = "none"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts"
+reportPrivateUsage = "error"
 
 [tool.hatch.build.targets.wheel]
 packages = ["data", "utils"]

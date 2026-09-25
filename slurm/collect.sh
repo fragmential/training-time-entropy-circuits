@@ -29,6 +29,7 @@ MODELS=(
     "EleutherAI/pythia-12b-deduped"
     "allenai/OLMo-2-0425-1B"
     "allenai/OLMo-2-1124-7B"
+    "nanochat-d12"
 )
 
 # Override model list from CLI: --models "pythia-14m pythia-70m" (exact short-name match)
@@ -71,6 +72,7 @@ sbatch --array=0-$((${#MODELS[@]} - 1)) "$@" <<EOF
 INDICES=(${INDICES_STR})
 module purge
 export HF_HOME="/projects/prjs1815/hf_cache"
-cd "\$HOME/Tracing-representation-geometry-reproduction" || exit 1
+export MALLOC_ARENA_MAX=2
+cd "\$SLURM_SUBMIT_DIR" || exit 1
 time uv run scripts/collect.py --config "${CONFIG}" --array_id "\${INDICES[\$SLURM_ARRAY_TASK_ID]}"
 EOF

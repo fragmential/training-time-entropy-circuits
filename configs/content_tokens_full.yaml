@@ -1,0 +1,48 @@
+output_dir: data/inferences/content_tokens_full
+# Full-depth twin of content_tokens: ALL block-boundary leaves (so the per-block rank ledger
+# computes) on INTERIOR CONTENT tokens (exclude first-of-window / last / delimiters). Keeps the
+# ledger (block_ledger, incremental_overlap) + per-leaf spectra; skips every cross-cov / CKA /
+# NxN block-block and generalized-eigen metric (the chunky ones). Packed native data.
+
+model_name:
+  - "EleutherAI/pythia-410m-deduped"
+  - "EleutherAI/pythia-1b-deduped"
+  - "EleutherAI/pythia-6.9b-deduped"
+  - "nanochat-d12"
+  - "allenai/OLMo-2-0425-1B"
+  - "allenai/OLMo-2-1124-7B"
+
+#            Py410m  Py1b   Py6.9b  nanochat  OL1B   OL7B
+batch_size: [ 256,    256,     72,     128,     48,    32]
+max_tokens: [262_144, 262_144, 98_304, 262_144, 262_144, 81_920]
+
+packed_data_path:
+  EleutherAI/*: data/mixes/pile_30M_512.pt
+  allenai/*: data/mixes/olmo_mix_30M_512.pt
+  nanochat-d12: data/mixes/fineweb_edu_nanochat_1M_512.pt
+
+seq_len: 512
+min_length: 32
+max_checkpoints: 30
+checkpoint_spacing: log
+packing: packed
+token_selection: all
+exclude_first: true
+content_only: true
+activation_dtype: bf16
+
+hooks:
+  - blk*.attn.in
+  - blk*.attn.out
+  - blk*.mlp.in
+  - blk*.mlp.out
+  - before_final_norm
+  - after_final_norm
+
+max_layers_per_pass: 0
+collect_format: acts
+storage_format: eigenvalues
+compute_metrics: True
+metrics_skip: [block_block_coupling, overlap_chi, block_residual_coupling, gen_block_vs_residual, ablation_contribution, eigendirection_attrib, mean_migration]
+drift_metrics: False
+keep_cached: False

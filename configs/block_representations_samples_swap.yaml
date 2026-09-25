@@ -1,0 +1,41 @@
+output_dir: data/inferences/block_representations_samples_swap
+# Dataset-swap control for block_representations_samples: each 1B model runs on the
+# OTHER family's pretraining mix. Cross-mixes were built by decoding the original
+# data/mixes/*.pt with the source tokenizer and re-tokenizing with the target model's
+# tokenizer (scratchpad build_cross_mixes.py) — identical text content, so this isolates
+# the model variable. Everything else mirrors block_representations_samples.yaml.
+
+model_name:
+  - "EleutherAI/pythia-1b-deduped"
+  - "allenai/OLMo-2-0425-1B"
+
+#             Py1b   OL1B
+batch_size: [ 256,    48]
+max_tokens: 262_144
+
+packed_data_path:
+  EleutherAI/*: data/mixes/olmo_mix_pythiatok_512.pt   # pythia on olmo-mix text
+  allenai/*: data/mixes/pile_olmotok_512.pt            # OLMo on pile text
+
+seq_len: 512
+min_length: 32
+max_checkpoints: 50
+checkpoint_spacing: log
+packing: packed
+token_selection: all
+activation_dtype: bf16
+
+hooks:
+  - blk*.attn.in           # residual into attn sub-block
+  - blk*.attn.out          # attention's contribution to residual
+  - blk*.mlp.in            # OLMo-2 only: residual into MLP sub-block
+  - blk*.mlp.out           # MLP's contribution to residual
+  - before_final_norm
+  - after_final_norm
+
+max_layers_per_pass: 0
+collect_format: acts
+storage_format: eigenvalues
+compute_metrics: True
+drift_metrics: False
+keep_cached: False   # sweep: each checkpoint revision is deleted after use (True hoards ~2-4GB x 50 ckpts)

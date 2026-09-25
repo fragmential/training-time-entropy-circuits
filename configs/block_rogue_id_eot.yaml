@@ -1,0 +1,32 @@
+output_dir: data/inferences/block_rogue_id_eot
+# Prepended-EOT twin of block_rogue_id: same first 512 windows of the pile mix, but each
+# window starts with an explicit <|endoftext|> (id 0). Question: does an explicit resting
+# token at position 0 absorb the first-newline carrier slot (BOS protocol of the
+# attention-sinks paper)? Rows map back to token ids via data/mixes/pile_30M_512_eot.pt.
+
+model_name:
+  - "EleutherAI/pythia-1b-deduped"
+
+batch_size: [256]
+max_tokens: [262_144]
+
+packed_data_path:
+  EleutherAI/*: data/mixes/pile_30M_512_eot.pt
+
+seq_len: 512
+min_length: 32
+checkpoints: "final"
+packing: packed
+token_selection: all
+activation_dtype: bf16
+
+hooks:
+  - blk3.attn.in       # stream entering the rogue block
+  - blk3.mlp.out       # the rogue write itself
+  - before_final_norm  # does the final stream spike on the same tokens?
+
+max_layers_per_pass: 0
+collect_format: acts
+storage_format: acts   # persist raw samples — the whole point
+compute_metrics: False
+keep_cached: False

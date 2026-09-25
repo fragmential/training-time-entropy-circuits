@@ -8,7 +8,7 @@ decides which hooks register; everything lands under the single `leaf` name.
 
 import torch
 import torch.nn as nn
-from typing import Optional
+from abc import ABC, abstractmethod
 
 _DTYPE_MAP = {
     "float32": torch.float32, "fp32": torch.float32,
@@ -31,7 +31,19 @@ def _hook_input(args, kwargs):
     return next(iter(kwargs.values()))
 
 
-class HookCollector:
+class Capturer(ABC):
+    """A collection endpoint collect.py drives uniformly: set its token mask, read what it
+    captured ({leaf: {...}}), then close it. HookCollector covers one leaf; MultiHeadOVDispatcher
+    fans a block's OV heads out to per-head HookCollectors."""
+    @abstractmethod
+    def set_token_mask(self, mask) -> None: ...
+    @abstractmethod
+    def captured(self) -> dict: ...
+    @abstractmethod
+    def close(self) -> None: ...
+
+
+class HookCollector(Capturer):
     """Collect acts and/or grads at a single leaf capture-point.
 
     Modes (for acts only — grads are always accumulated as covariance):
@@ -39,7 +51,7 @@ class HookCollector:
         "acts" — stores raw (masked) activation tensors in a list.
 
     Args:
-        module: Module to hook. If None, call accumulate()/accumulate_grad() manually.
+        module: Module to hook. If None, feed data manually via feed()/feed_grad().
         capture: "input" (pre-hook / grad_input) or "output" (post-hook / grad_output).
         quantities: subset of {"acts","grads"} — decides which hooks register.
         mode: "cov" or "acts" (acts storage only).
@@ -51,14 +63,14 @@ class HookCollector:
 
     def __init__(
         self,
-        module: nn.Module = None,
+        module: nn.Module | None = None,
         capture: str = "input",
         quantities=("acts",),
         mode: str = "cov",
         collect_means: bool = False,
         accumulation_dtype: str = "fp64",
         activation_dtype: str = "fp32",
-        token_selection: str = None,
+        token_selection: str | None = None,
         leaf: str = "acts",
     ):
         assert mode in ("cov", "acts"), f"Unknown mode: {mode}"
@@ -75,37 +87,36 @@ class HookCollector:
         self._act_dtype = _DTYPE_MAP.get(activation_dtype, torch.float32)
 
         # Token mask — set externally per batch
-        self._token_mask: Optional[torch.BoolTensor] = None
+        self._token_mask: torch.BoolTensor | None = None
 
         # Forward (acts) storage (lazy-initialized on first data)
-        self._acts_init = False
-        self._acts_cov = None    # (d, d) covariance or None
+        self._acts_cov: torch.Tensor | None = None   # (d, d) covariance
         self._n_acts = 0
-        self._acts_sum = None    # (d,) running sum for means
-        self._acts_list = [] if mode == "acts" else None
+        self._acts_sum: torch.Tensor | None = None    # (d,) running sum for means
+        self._acts_list: list | None = [] if mode == "acts" else None
 
         # Backward (grads) storage (lazy-initialized)
-        self._grads_init = False
-        self._grads_cov = None
+        self._grads_cov: torch.Tensor | None = None
         self._n_grads = 0
-        self._grads_sum = None   # (d,) running sum for gradient means
+        self._grads_sum: torch.Tensor | None = None   # (d,) running sum for gradient means
 
         # Register hooks: forward for acts (side decides pre/post), backward for grads.
+        # Input-side grads go through per-tensor hooks attached in _fwd_pre — module-level
+        # full_backward_hook yields an EMPTY grad_input for kwarg-called modules (OLMo-2).
         self._handles = []
         if module is not None:
-            if "acts" in self.quantities:
-                if capture == "input":
-                    self._handles.append(module.register_forward_pre_hook(self._fwd_pre, with_kwargs=True))
-                else:
-                    self._handles.append(module.register_forward_hook(self._fwd_post))
-            if "grads" in self.quantities:
+            if capture == "input" and self.quantities:
+                self._handles.append(module.register_forward_pre_hook(self._fwd_pre, with_kwargs=True))
+            elif "acts" in self.quantities:
+                self._handles.append(module.register_forward_hook(self._fwd_post))
+            if "grads" in self.quantities and capture != "input":
                 self._handles.append(module.register_full_backward_hook(self._bwd))
 
     # ------------------------------------------------------------------
     # Token masking
     # ------------------------------------------------------------------
 
-    def set_token_mask(self, mask: Optional[torch.BoolTensor]):
+    def set_token_mask(self, mask: torch.BoolTensor | None):
         """Set per-batch token mask. Shape: (batch, seq_len). True = include."""
         self._token_mask = mask
 
@@ -135,16 +146,17 @@ class HookCollector:
 
         if self.mode == "cov":
             d = x_f.size(1)
-            if not self._acts_init:
+            if self._acts_cov is None:
                 self._acts_cov = torch.zeros(d, d, dtype=self._acc_dtype, device=x_f.device)
-                if self.collect_means:
-                    self._acts_sum = torch.zeros(d, dtype=torch.float32, device=x_f.device)
-                self._acts_init = True
             self._acts_cov.add_((x_f.T @ x_f).to(dtype=self._acc_dtype))
             self._n_acts += n
             if self.collect_means:
+                if self._acts_sum is None:
+                    self._acts_sum = torch.zeros(d, dtype=torch.float32, device=x_f.device)
                 self._acts_sum.add_(x_f.float().sum(dim=0))
         else:
+            if self._acts_list is None:
+                self._acts_list = []
             self._acts_list.append(x_f.cpu())
             self._n_acts += n
 
@@ -154,15 +166,22 @@ class HookCollector:
             return
         g_f = g_flat.to(dtype=self._act_dtype)
         d = g_f.size(1)
-        if not self._grads_init:
+        if self._grads_cov is None:
             self._grads_cov = torch.zeros(d, d, dtype=self._acc_dtype, device=g_f.device)
-            if self.collect_means:
-                self._grads_sum = torch.zeros(d, dtype=torch.float32, device=g_f.device)
-            self._grads_init = True
         self._grads_cov.add_((g_f.T @ g_f).to(dtype=self._acc_dtype))
         self._n_grads += g_f.size(0)
         if self.collect_means:
+            if self._grads_sum is None:
+                self._grads_sum = torch.zeros(d, dtype=torch.float32, device=g_f.device)
             self._grads_sum.add_(g_f.float().sum(dim=0))
+
+    def feed(self, raw: torch.Tensor):
+        """Mask a raw (B,T,d)/(N,d) activation tensor, then accumulate."""
+        self.accumulate(self._apply_mask(raw))
+
+    def feed_grad(self, raw: torch.Tensor):
+        """Mask a raw (B,T,d)/(N,d) gradient tensor, then accumulate."""
+        self.accumulate_grad(self._apply_mask(raw))
 
     # ------------------------------------------------------------------
     # Hook callbacks
@@ -171,8 +190,13 @@ class HookCollector:
     def _fwd_pre(self, module, args, kwargs):
         if not self.active:
             return
-        x = _hook_input(args, kwargs).detach()
-        self.accumulate(self._apply_mask(x))
+        x = _hook_input(args, kwargs)
+        if "acts" in self.quantities:
+            self.feed(x.detach())
+        if "grads" in self.quantities and x.requires_grad:
+            # Full dL/dh at the hookpoint (summed over ALL consumers of the tensor), not the
+            # through-this-module grad_input — the meaningful representation gradient.
+            x.register_hook(lambda g: self.feed_grad(g.detach()))
 
     def _fwd_post(self, module, inp, output):
         if not self.active:
@@ -181,38 +205,39 @@ class HookCollector:
         if isinstance(output, tuple):
             output = output[0]
         out = output.detach()
-        self.accumulate(self._apply_mask(out))
+        self.feed(out)
 
     def _bwd(self, module, grad_input, grad_output):
         if not self.active:
             return
-        go = grad_input[0] if self.capture == "input" else grad_output[0]
+        go = grad_output[0]   # input-side grads use tensor hooks (see _fwd_pre), never this path
         if go is None:
             return
-        g = go.detach()
-        self.accumulate_grad(self._apply_mask(g))
+        self.feed_grad(go.detach())
 
     # ------------------------------------------------------------------
     # Results
     # ------------------------------------------------------------------
 
-    def factors(self) -> dict:
+    def captured(self) -> dict:
         """Collected data as {leaf: {q-keyed tensors}} under this collector's single
-        leaf. Keys are uniform `{q}_{fmt}` — `acts_cov` (Σxxᵀ) or `acts_samples` (N,d),
-        `acts_n`, `acts_mean`; same for grads. Emits whatever was accumulated."""
+        leaf. Keys are uniform `{q}_{component}` — `acts_gram` (raw Σxxᵀ) or
+        `acts_samples` (N,d), `acts_n`, `acts_mean`; same for grads. Emits whatever
+        was accumulated."""
         e: dict = {}
         if self.mode == "cov":
             if self._acts_cov is not None:
-                e["acts_cov"] = self._acts_cov.cpu()
+                e["acts_gram"] = self._acts_cov.cpu()
                 e["acts_n"] = self._n_acts
                 if self.collect_means and self._acts_sum is not None:
                     e["acts_mean"] = (self._acts_sum / self._n_acts).cpu()
         elif self._acts_list:
             e["acts_samples"] = torch.cat(self._acts_list, dim=0)
+            self._acts_list = []   # hand off: keeping the per-batch chunks alive doubles peak RSS
             e["acts_n"] = self._n_acts
 
         if self._grads_cov is not None:
-            e["grads_cov"] = self._grads_cov.cpu()
+            e["grads_gram"] = self._grads_cov.cpu()
             e["grads_n"] = self._n_grads
             if self.collect_means and self._grads_sum is not None:
                 e["grads_mean"] = (self._grads_sum / self._n_grads).cpu()
@@ -281,7 +306,7 @@ def restore_head(model, original, attr_name):
 # Per-OV-head dispatcher
 # ---------------------------------------------------------------------------
 
-class MultiHeadOVDispatcher:
+class MultiHeadOVDispatcher(Capturer):
     """Collect per-OV-head pre-W_o slices at one block's o_proj.
 
     o_proj is always called on (B, T, num_heads*head_dim), so head h's pre-W_o
@@ -294,7 +319,7 @@ class MultiHeadOVDispatcher:
 
     def __init__(
         self,
-        o_proj_module: nn.Module,
+        o_proj_module: nn.Linear,
         num_heads: int,
         head_dim: int,
         block_idx: int,
@@ -304,7 +329,7 @@ class MultiHeadOVDispatcher:
         collect_means: bool = False,
         accumulation_dtype: str = "fp64",
         activation_dtype: str = "fp32",
-        token_selection: str = None,
+        token_selection: str | None = None,
     ):
         self.num_heads = num_heads
         self.head_dim = head_dim
@@ -313,7 +338,7 @@ class MultiHeadOVDispatcher:
         if selected_heads is None:
             selected_heads = list(range(num_heads))
         self.selected_heads = list(selected_heads)
-        self._weight_ref = o_proj_module.weight  # (d_model, num_heads * head_dim)
+        self._weight_ref: torch.Tensor = o_proj_module.weight  # (d_model, num_heads * head_dim)
         self.collectors = {
             h: HookCollector(
                 module=None, mode=mode,
@@ -340,7 +365,7 @@ class MultiHeadOVDispatcher:
         d = self.head_dim
         for h, collector in self.collectors.items():
             attended_h = x[..., h * d : (h + 1) * d]  # (B, T, d_head)
-            collector.accumulate(collector._apply_mask(attended_h))
+            collector.feed(attended_h)
 
     def _bwd(self, module, grad_input, grad_output):
         go = grad_output[0] if grad_output else None
@@ -352,12 +377,12 @@ class MultiHeadOVDispatcher:
         for h, collector in self.collectors.items():
             W_h = W[:, h * d : (h + 1) * d]  # (d_model, d_head)
             g_h = g @ W_h  # (B, T, d_head)
-            collector.accumulate_grad(collector._apply_mask(g_h))
+            collector.feed_grad(g_h)
 
-    def factors(self) -> dict:
+    def captured(self) -> dict:
         out: dict = {}
         for c in self.collectors.values():
-            out.update(c.factors())   # each per-head collector yields its own .slice leaf
+            out.update(c.captured())   # each per-head collector yields its own .slice leaf
         return out
 
     def close(self):

@@ -11,3 +11,4 @@ data/*
 slurm/logs/*
 analysis/transcriptions
 analysis/figures
+thesis-writing

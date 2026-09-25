@@ -1,0 +1,26 @@
+output_dir: data/inferences/rq2_general_packed_n1m_large
+# N-matched packed null for the large-model memorized populations: pythia-6.9b memorized
+# set is 16,384 x 64 tok = 1,048,045 tokens; null matched at 1,048,576 (as in the 1B design).
+model_name:
+  - "EleutherAI/pythia-6.9b-deduped"
+  - "allenai/OLMo-2-1124-7B"
+
+batch_size: [4, 2]   # 7B with retained graph (:both): VRAM estimator underestimates backward 2-3x
+max_tokens: 1_048_576
+dataset_name: native
+text_shuffle_seed: 47
+packing: packed
+token_selection: all
+seq_len: 512
+min_length: 32
+checkpoints: "final"
+
+hooks:
+  - blk*.attn.in:both
+  - blk*.mlp.up.in:both
+  - before_final_norm:both
+
+max_layers_per_pass: 0
+storage_format: cov_svd
+compute_metrics: True
+keep_cached: True   # concurrent same-model legs: a finishing job must not delete the cache under the others

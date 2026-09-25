@@ -1,0 +1,28 @@
+output_dir: data/inferences/sample_count_packed
+# Raw final-checkpoint acts at the two output leaves, packed, oversized token budget
+# (524k = 2x the usual 262k) so nested subsampling can bracket the standard budget.
+# Consumed by oneoff_scripts/sample_count_spectra.py -> showcase_appendix §E.
+
+model_name: "EleutherAI/pythia-1b-deduped"
+
+batch_size: 64
+max_tokens: 524_288
+
+packed_data_path: data/mixes/pile_30M_512.pt
+
+seq_len: 512
+min_length: 32
+checkpoints: "final"
+packing: packed
+token_selection: all
+activation_dtype: bf16
+
+hooks:
+  - before_final_norm
+  - after_final_norm
+
+max_layers_per_pass: 0
+collect_format: acts
+storage_format: acts
+compute_metrics: False
+keep_cached: True

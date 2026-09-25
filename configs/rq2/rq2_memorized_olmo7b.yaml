@@ -1,0 +1,26 @@
+output_dir: data/inferences/rq2_memorized_olmo7b
+# RQ2 T_mem for OLMo-2-7B: Merullo et al's 7B memorized set (554 seqs, ~112 tokens each),
+# decoded from reference/memorization_kfac olmo2_7b_64_48_118_extra_nodedup_test.jsonl.
+# PACKED all-token (N=554 < d would be rank-deficient padded/last); compare vs
+# rq2_general_packed_large / n62k null. NO shuffle seed (cache-key match).
+model_name:
+  - "allenai/OLMo-2-1124-7B"
+
+batch_size: 2   # 7B with retained graph (:both)
+num_samples: 554
+dataset_name: merullo_memorized_olmo7b
+packing: packed
+token_selection: all
+seq_len: 512
+min_length: 16
+checkpoints: "final"
+
+hooks:
+  - blk*.attn.in:both
+  - blk*.mlp.up.in:both
+  - before_final_norm:both
+
+max_layers_per_pass: 0
+storage_format: cov_svd
+compute_metrics: True
+keep_cached: True   # concurrent same-model legs: a finishing job must not delete the cache under the others

@@ -1,0 +1,26 @@
+output_dir: data/inferences/rq2_memorized_69b_a
+# RQ2 T_mem (verbatim) for pythia-6.9b: EleutherAI pythia-memorized-evals (deduped.6.9b),
+# served via the prebuilt cache data/filtered_texts/pythia_memorized_69b_8192.json (64-token
+# sequences, built exactly like the 1b cache). NO text_shuffle_seed (cache-key match).
+model_name:
+  - "EleutherAI/pythia-6.9b-deduped"
+
+batch_size: 32   # padded 64-tok seqs; 1B used 256, scaled ~1/8 for 6.9B with backward
+num_samples: 8_192
+dataset_name: pythia_memorized_69b_a
+packing: padded
+token_selection: last
+max_length: 512
+seq_len: 512
+min_length: 32
+checkpoints: "final"
+
+hooks:
+  - blk*.attn.in:both
+  - blk*.mlp.up.in:both
+  - before_final_norm:both
+
+max_layers_per_pass: 0
+storage_format: cov_svd
+compute_metrics: True
+keep_cached: True   # concurrent same-model legs: a finishing job must not delete the cache under the others

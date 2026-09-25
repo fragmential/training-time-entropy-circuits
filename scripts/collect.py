@@ -40,12 +40,15 @@ Usage:
 
 import gc
 import os
+import re
 import sys
+import tempfile
 import time
 import torch
 import torch.nn as nn
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, fields
+from typing import cast
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
@@ -58,15 +61,21 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from utils.model_registry import (
     get_model_config,
     get_checkpoint_schedule,
+    get_block_boundary_hooks,
     load_model,
     load_tokenizer,
     get_num_layers,
     prefetch_checkpoint,
     delete_cached_revision,
+    ModelWeights,
+    get_final_layernorm,
+    get_head_module,
+    get_mlp_projections,
+    get_post_mlp_norm,
 )
 from utils.hooks import HookCollector, MultiHeadOVDispatcher, setup_identity_head, restore_head
 from utils.hook_specs import resolve as resolve_hook_specs
-from utils.accessor import DataAccessor, parse_format, parse_format_spec
+from utils.accessor import DataAccessor
 from utils.data_utils import (
     get_loader,
     load_and_cache_texts,
@@ -78,7 +87,102 @@ from utils.data_utils import (
 
 # Fields that may vary per model in a sweep (accept scalar, list, or dict).
 VECTORIZABLE_FIELDS = {"batch_size", "max_checkpoints", "max_layers_per_pass", "dataset_name",
-                       "accumulation_dtype", "activation_dtype", "packed_data_path"}
+                       "accumulation_dtype", "activation_dtype", "packed_data_path", "max_tokens",
+                       "num_samples", "drift_metrics"}
+
+
+def _blk_tag(g):
+    contiguous = list(g) == list(range(g[0], g[-1] + 1))
+    return (f"blk{g[0]}" if len(g) == 1 else
+            f"blk{g[0]}-{g[-1]}" if contiguous else "blk" + "+".join(map(str, g)))
+
+
+def _spec_blocks(spec):
+    """A spec's block field, always as a list. Negative indices count from the end."""
+    b = spec["block"]
+    return list(b) if isinstance(b, (list, tuple)) else [b]
+
+
+def _neuron_tag(spec):
+    """Directory suffix for a neuron-subset intervention; blocks stay as written (possibly
+    negative) so the tag is model-independent and resume can build it without the model."""
+    b = _spec_blocks(spec)
+    span = f"{b[0]}" if len(b) == 1 else f"{b[0]}..{b[-1]}"
+    return f"blk{span}_{spec['rank']}{spec['n']}"
+
+
+def _down_proj(model, config, block_idx):
+    """The block's MLP down-projection module."""
+    return next(m for name, m in get_mlp_projections(model, config, block_idx)
+                if name.endswith(".mlp.down"))
+
+
+def _rho_scores(model, config, b, w_out):
+    """Null-space composition rho for every neuron of the block's MLP."""
+    from utils.nullspace import head_subspace, write_rho
+    gamma = getattr(get_final_layernorm(model, config), "weight", None)
+    v0 = head_subspace(get_head_module(model, config).weight.detach(), gamma,
+                       max(1, round(0.01 * w_out.shape[0])))
+    return write_rho(v0, w_out, getattr(get_post_mlp_norm(model, config, b), "weight", None))
+
+
+def _neuron_indices(model, config, spec, n_layers, seed=0):
+    """[(absolute block, indices), ...] for the neurons a spec selects, ranked from the
+    weights: rho (null-space composition), wnorm (||w_out||), or random at matched count.
+
+    With several blocks the ranking is POOLED across them and the global top-n taken, so
+    "the top-n of the last quarter" is n neurons in total, not n per block."""
+    blocks = [b if b >= 0 else n_layers + b for b in _spec_blocks(spec)]
+    w_outs = [_down_proj(model, config, b).weight.detach() for b in blocks]
+    n, dev = int(spec["n"]), w_outs[0].device
+    if n == 0:
+        return []
+    if spec["rank"] == "random":
+        g = torch.Generator().manual_seed(seed)
+        widths = [w.shape[1] for w in w_outs]
+        pick = torch.randperm(sum(widths), generator=g)[:n].to(dev)
+    else:
+        scores = [w.float().norm(dim=0) if spec["rank"] == "wnorm"
+                  else _rho_scores(model, config, b, w) for b, w in zip(blocks, w_outs)]
+        pick = torch.topk(torch.cat(scores), n).indices
+        widths = [s.numel() for s in scores]
+    offsets = torch.tensor([0] + list(torch.tensor(widths).cumsum(0)[:-1]), device=dev)
+    out = []
+    for i, b in enumerate(blocks):
+        sel = pick[(pick >= offsets[i]) & (pick < offsets[i] + widths[i])] - offsets[i]
+        if len(sel):
+            out.append((b, sel))
+    return out
+
+
+def _neuron_prehook(idx, mode):
+    """Pre-hook on a down-projection: mean- or zero-ablates the selected neurons. The
+    down-proj's input IS the post-nonlinearity activation vector, so patching it here is
+    exactly ablating those neurons."""
+    def hook(_mod, args):
+        a = args[0].clone()
+        sel = a[..., idx]
+        a[..., idx] = (sel.mean(dim=tuple(range(sel.dim() - 1)), keepdim=True).expand_as(sel)
+                       if mode == "mean" else torch.zeros_like(sel))
+        return (a, *args[1:])
+    return hook
+
+
+def _zero_output(_mod, _inp, out):
+    """Forward hook ablating a residual write: replaces the module output with zeros
+    (tuple-returning modules, e.g. Pythia attention, keep their non-tensor extras)."""
+    return ((torch.zeros_like(out[0]), *out[1:]) if isinstance(out, tuple)
+            else torch.zeros_like(out))
+
+
+def _mean_output(_mod, _inp, out):
+    """Forward hook mean-ablating a residual write: replaces the module output with its
+    mean over all token positions in the batch (broadcast back), keeping the write's mean
+    contribution but removing its fluctuation. Batch token counts here (~1e4–1e5) make the
+    per-batch mean numerically indistinguishable from the write's global mean."""
+    def _m(t):
+        return t.mean(dim=tuple(range(t.dim() - 1)), keepdim=True).expand_as(t)
+    return (_m(out[0]), *out[1:]) if isinstance(out, tuple) else _m(out)
 
 
 def _resolve_wildcard_dict(d: dict, model_name: str, default=None):
@@ -113,7 +217,8 @@ class CollectConfig:
     # --- Data ---
     dataset_name: "str | dict[str, str] | list[str]" = "fineweb"
     dataset_content_key: str = "text"
-    num_samples: int = 5000
+    num_samples: "int | dict[str, int] | list[int]" = 5000
+    text_shuffle_seed: "int | None" = None  # shuffle the text stream (padded runs otherwise sample the dataset HEAD)
     seq_len: int = 512
     max_length: int = 512
     min_length: int = 32
@@ -123,9 +228,11 @@ class CollectConfig:
     packing: str = "padded"
     token_selection: str = "last"
     skip_positions: int = 0
+    exclude_first: bool = False   # drop the first position of each window (attention-sink slot)
+    content_only: bool = False    # keep only word/number tokens (drop delimiters/punct/whitespace)
     boundary_token_ids: "list | None" = None
     max_bytes: "int | None" = None  # if set, replaces num_samples as data budget (e.g. 80_000_000)
-    max_tokens: "int | None" = None  # if set, limit packed data to this many tokens (rounds up to full chunks)
+    max_tokens: "int | None | dict[str, int] | list[int]" = None  # if set, limit packed data to this many tokens (rounds up to full chunks)
     packed_data_path: "str | dict[str, str] | list[str] | None" = None  # path to pre-built .pt of shape (n_chunks, seq_len)
 
     # --- What to collect ---
@@ -155,12 +262,41 @@ class CollectConfig:
 
     # --- Storage ---
     storage_format: str = "cov"
+    # Accumulator mode ("acts"|"cov"); None → from storage_format. "acts" + a small
+    # storage_format enables in-memory cross metrics (such runs can't be continue_from'd).
+    collect_format: "str | None" = None
     storage_dtype: "str | None" = None  # None → smart defaults (eigvals:fp64, eigvecs/acts/cov:fp32)
     cross_basis_refs: "list | None" = None
     output_dir: "str | None" = None
 
     # --- Metrics ---
     compute_metrics: bool = False  # compute spectral metrics inline while model is loaded
+    # Inline drift metrics vs the previous checkpoint: spills each checkpoint's raw data to
+    # $TMPDIR and mmap-reloads it next iteration. NOTE: $TMPDIR is RAM-backed tmpfs on the
+    # GPU nodes, so the spill counts against the job's memory — 7B-scale runs leave this off.
+    drift_metrics: "bool | dict[str, bool] | list[bool]" = False
+    # Per-layer vocabulary-entropy lens (utils/entropy_lens.py): mean next-token-distribution
+    # entropy AND its alphaReQ (rank-11–100 slope of the sorted probabilities) at each residual
+    # depth, computed teacher-forced on the collection batches.
+    # Saved into the results file under node "vocab_entropy" (requires compute_metrics).
+    vocab_entropy: bool = False
+    # Leave-one-out groups for the inline `loo` metric: list of block-index lists, or
+    # "auto" = every block + the four L/4 chunks + the middle half.
+    loo_groups: "list[list[int]] | str | None" = None
+    metrics_skip: "list[str] | None" = None  # metric names get_metrics should skip
+
+    # --- Intervention ---
+    # Interventions: each entry is a block-index list whose residual writes are zeroed
+    # during the forward pass. All interventions run per checkpoint (model loaded once),
+    # each writing to <output_dir>_<blk-tag>/<model>.
+    ablate: "list[list[int]] | None" = None
+    ablate_mode: str = "zero"  # "zero" = write→0; "mean" = write→its batch-token mean
+    # Neuron-subset interventions in one block's MLP, each `{block, rank, n}`:
+    #   block  block index; negative counts from the end (-1 = last block)
+    #   rank   "rho" (null-space composition, utils/nullspace) | "wnorm" (||w_out||) | "random"
+    #   n      how many top-ranked neurons to ablate; 0 = an untouched baseline run
+    # Ranking is weight-derived, so no baseline pass is needed to choose the neurons.
+    ablate_neurons: "list[dict] | None" = None
 
     # --- Cache ---
     keep_cached: bool = False  # don't delete HF checkpoints after processing
@@ -177,7 +313,8 @@ class CollectConfig:
     array_id: "int | None" = None
 
     def __post_init__(self):
-        _LIST_FIELDS = {"target_layers", "boundary_token_ids", "cross_basis_refs", "checkpoints", "hooks"}
+        _LIST_FIELDS = {"target_layers", "boundary_token_ids", "cross_basis_refs", "checkpoints", "hooks",
+                        "metrics_skip", "loo_groups", "ablate", "ablate_neurons"}
 
         if not isinstance(self.model_name, list):
             # Single model — validate no vectorized fields are lists
@@ -240,6 +377,28 @@ class CollectConfig:
             if isinstance(self.checkpoints, dict):
                 self.checkpoints = _resolve_wildcard_dict(self.checkpoints, model)
             self.model_name = model
+
+
+class ScalarConfig(CollectConfig):
+    """A `CollectConfig` after `__post_init__`/`array_id` resolution: every vectorizable field
+    now holds a single scalar, so we re-type them. Obtain via `scalarized(cfg)`."""
+    model_name: str
+    dataset_name: str
+    accumulation_dtype: str
+    activation_dtype: str
+    packed_data_path: "str | None"
+    batch_size: int
+    max_layers_per_pass: int
+    max_tokens: "int | None"
+    num_samples: int
+    drift_metrics: bool
+    max_checkpoints: "int | None"   # main() clears it to None when an explicit checkpoints list wins
+
+
+def scalarized(cfg: CollectConfig) -> ScalarConfig:
+    """Re-type an already-resolved config so call sites see scalar (not union) field types.
+    Resolution happened in __post_init__; this is just a checked cast of the same object."""
+    return cast(ScalarConfig, cfg)
 
 
 # ---------------------------------------------------------------------------
@@ -323,24 +482,33 @@ def _prepare_model_for_grad(model):
             m.p = 0.0
 
 
+def _parse_storage_format(spec: str) -> tuple[str, tuple[str, ...]]:
+    """Split a storage-format spec into (base, overrides). +b/+o add the derived-leaf
+    families (MLP_OUT / HEAD_CONTRIB), -b/-o drop them; legacy +m/-m are obsolete
+    (means are in every format)."""
+    m = re.match(r"([^+-]+)((?:[+-][^+-]+)*)$", spec)
+    if not m:
+        raise ValueError(f"Unknown storage format: {spec!r}")
+    base, mods = m.groups()
+    overrides = tuple(f"{sign}{ch}" for sign, chars in re.findall(r"([+-])([^+-]+)", mods)
+                      for ch in chars if ch in ("b", "o"))
+    return base, overrides
+
+
 def _collect_for_checkpoint(
     model, model_config, cfg, texts, tokenizer, packed_ids,
-    target_layers, device, boundary_token_ids,
+    target_layers, device, boundary_token_ids, content_vocab_mask=None,
 ):
     """Collect all requested data for one checkpoint.
 
     Resolves cfg.hooks into concrete SingleHookSpec / OVHeadSpec lists, registers
     HookCollectors per block-group pass, runs forward (+ optional backward),
-    returns the merged factors dict.
+    returns the merged captured dict.
     """
-    storage_base, storage_flags, storage_drop_flags = parse_format_spec(cfg.storage_format)
-    storage_mode = "acts" if storage_base == "acts" else "cov"
-    if "b" in storage_flags and "m" not in storage_flags and "m" not in storage_drop_flags:
-        print("  NOTE: +b implies +m — storing means for derived .out acts")
-    collect_means = (
-        "m" not in storage_drop_flags
-        and ("m" in storage_flags or "b" in storage_flags or storage_base in ("cov_svd", "eigenvalues"))
-    )
+    storage_base, _ = _parse_storage_format(cfg.storage_format)
+    storage_mode = cfg.collect_format or ("acts" if storage_base == "acts" else "cov")
+    assert storage_mode in ("acts", "cov"), f"collect_format must be acts|cov, got {storage_mode!r}"
+    collect_means = True   # every storage format includes means
 
     # Resolve patterns once against the model's leaf universe
     single_specs, ov_specs, _candidates = resolve_hook_specs(
@@ -367,7 +535,7 @@ def _collect_for_checkpoint(
         perblk_by_block.setdefault(int(s.leaf.split(".")[0][3:]), []).append(s)
     ov_by_block = {o.block_idx: o for o in ov_specs}
 
-    all_factors: dict = {}
+    captured: dict = {}
 
     # Block-group iteration only matters when there is per-block work
     if has_per_block_work:
@@ -436,14 +604,14 @@ def _collect_for_checkpoint(
         else:
             n_batches = (len(texts) + cfg.batch_size - 1) // cfg.batch_size
 
-        bar_kwargs = dict(desc=desc, total=n_batches)
+        bar_kwargs: dict[str, object] = dict(desc=desc, total=n_batches)
         if _IS_TTY:
             bar_kwargs.update(leave=False)
         else:
             # Non-TTY: write one clean line per update, no cursor codes
             bar_kwargs.update(leave=True, bar_format="{desc}: {n}/{total} [{elapsed}<{remaining}, {rate_fmt}]")
 
-        for input_ids, attention_mask in tqdm(batches, **bar_kwargs):
+        for input_ids, attention_mask in tqdm(batches, **bar_kwargs):  # type: ignore[arg-type]  # dynamic **kwargs vs tqdm's overloaded signature
             # Compute one mask per unique token_selection, cache by selection value
             _mask_cache = {}
 
@@ -454,6 +622,8 @@ def _collect_for_checkpoint(
                         token_selection=sel,
                         skip_positions=cfg.skip_positions,
                         boundary_token_ids=boundary_token_ids,
+                        exclude_first=cfg.exclude_first,
+                        content_mask_vocab=content_vocab_mask,
                     )
                 return _mask_cache[sel]
 
@@ -495,17 +665,16 @@ def _collect_for_checkpoint(
 
                 # fast_final_norm: model output IS the post-norm residual — feed it manually
                 if fast_norm_head is not None and fast_norm_collector is not None:
-                    acts_masked = fast_norm_collector._apply_mask(outputs.logits.detach())
-                    fast_norm_collector.accumulate(acts_masked)
+                    fast_norm_collector.feed(outputs.logits.detach())
 
-        # --- Collect factors and clean up (collectors yield {leaf: {...}}) ---
+        # --- Collect captured data and clean up (collectors yield {leaf: {...}}) ---
         for collector in collectors.values():
-            for leaf, fac in collector.factors().items():
-                all_factors.setdefault(leaf, fac)
+            for leaf, data in collector.captured().items():
+                captured.setdefault(leaf, data)
             collector.close()
         for disp in ov_dispatchers:
-            for leaf, fac in disp.factors().items():
-                all_factors.setdefault(leaf, fac)
+            for leaf, data in disp.captured().items():
+                captured.setdefault(leaf, data)
             disp.close()
 
         # Restore the original output head after the first (only) global pass
@@ -516,7 +685,7 @@ def _collect_for_checkpoint(
         del collectors, ov_dispatchers
         torch.cuda.empty_cache()
 
-    return all_factors
+    return captured
 
 
 # ---------------------------------------------------------------------------
@@ -529,10 +698,10 @@ def _entry_quantities(entry: dict):
     return [k[:-2] for k in entry if k.endswith("_n")]
 
 
-def _reconstruct_raw_factors(existing_data: dict) -> dict:
+def _reconstruct_captured(existing_data: dict) -> dict:
     """Rebuild collector-style raw accumulators ({q}_cov=Σxxᵀ or {q}_samples, {q}_n,
     {q}_mean) from a saved file so a continued run can merge into them."""
-    base_format, _ = parse_format(existing_data.get("__format__", "cov"))
+    base_format, _ = _parse_storage_format(existing_data.get("__format__", "cov"))
     raw = {}
     for leaf, entry in existing_data.items():
         if leaf.startswith("__"):
@@ -545,15 +714,15 @@ def _reconstruct_raw_factors(existing_data: dict) -> dict:
                 if f"{q}_samples" in entry:
                     re_entry[f"{q}_samples"] = entry[f"{q}_samples"]
             elif base_format == "cov":
-                if f"{q}_cov" in entry:
-                    re_entry[f"{q}_cov"] = entry[f"{q}_cov"].double()
+                if f"{q}_gram" in entry:
+                    re_entry[f"{q}_gram"] = entry[f"{q}_gram"].double()
             elif base_format in ("cov_svd", "acts_svd"):
                 if f"{q}_eigvals" not in entry:
                     continue
                 if f"{q}_eigvecs" not in entry:
                     raise ValueError(f"Cannot continue {leaf}.{q}: eigvecs missing")
                 V, lam = entry[f"{q}_eigvecs"].double(), entry[f"{q}_eigvals"].double()
-                re_entry[f"{q}_cov"] = (V * lam) @ V.T * n
+                re_entry[f"{q}_gram"] = (V * lam) @ V.T * n
             else:
                 raise ValueError(f"Cannot continue with storage format '{base_format}'")
             if f"{q}_mean" in entry:
@@ -562,17 +731,17 @@ def _reconstruct_raw_factors(existing_data: dict) -> dict:
     return raw
 
 
-def _merge_with_existing(existing_raw: dict, new_factors: dict) -> dict:
-    """Add existing raw accumulators into new_factors (in-place)."""
+def _merge_with_existing(existing_raw: dict, new_captured: dict) -> dict:
+    """Add existing raw accumulators into new_captured (in-place)."""
     for leaf, old in existing_raw.items():
-        if leaf not in new_factors:
+        if leaf not in new_captured:
             continue
-        new = new_factors[leaf]
+        new = new_captured[leaf]
         for q in _entry_quantities(old):
             old_n, new_n = old[f"{q}_n"], new.get(f"{q}_n", 0)
-            cov_k, samp_k = f"{q}_cov", f"{q}_samples"
-            if cov_k in old:
-                new[cov_k] = old[cov_k].to(new[cov_k].dtype) + new[cov_k] if cov_k in new else old[cov_k]
+            gram_k, samp_k = f"{q}_gram", f"{q}_samples"
+            if gram_k in old:
+                new[gram_k] = old[gram_k].to(new[gram_k].dtype) + new[gram_k] if gram_k in new else old[gram_k]
             elif samp_k in old:
                 new[samp_k] = torch.cat([old[samp_k], new[samp_k]], dim=0) if samp_k in new else old[samp_k]
             mean_k = f"{q}_mean"
@@ -582,7 +751,7 @@ def _merge_with_existing(existing_raw: dict, new_factors: dict) -> dict:
                 else:
                     new[mean_k] = old[mean_k]
             new[f"{q}_n"] = old_n + new_n
-    return new_factors
+    return new_captured
 
 
 # ---------------------------------------------------------------------------
@@ -591,7 +760,7 @@ def _merge_with_existing(existing_raw: dict, new_factors: dict) -> dict:
 
 def main(cfg: CollectConfig):
     if not cfg.hf_progress_bars:
-        from huggingface_hub.utils import disable_progress_bars
+        from huggingface_hub.utils import disable_progress_bars  # type: ignore[attr-defined]  # runtime-exported, missing from stubs
         from transformers.utils import logging as hf_logging
         disable_progress_bars()
         hf_logging.disable_progress_bar()
@@ -606,6 +775,7 @@ def main(cfg: CollectConfig):
             "model_name is still a list — pass --array_id to select a model, "
             "or pass a single --model_name."
         )
+    cfg = scalarized(cfg)   # resolution is done; re-type so vectorizable fields read as scalars
 
     model_config = get_model_config(model_name)
     short_name = model_name.split("/")[-1] if "/" in model_name else model_name
@@ -643,15 +813,16 @@ def main(cfg: CollectConfig):
         schedule = [t for t in schedule if t[0] in wanted]
     print(f"Total checkpoints: {len(schedule)}")
 
-    # Filter to unprocessed checkpoints
+    # Filter to unprocessed checkpoints (ablation runs: done = every intervention's file exists)
+    tags = ([_blk_tag(g) for g in (cfg.ablate or [])]
+            + [_neuron_tag(s) for s in (cfg.ablate_neurons or [])])
+    run_dirs = ([os.path.join(f"{cfg.output_dir}_{t}", short_name) for t in tags]
+                if tags else [output_dir])
     to_process = []
     for step_num, revision, step_model in schedule:
-        out_path = os.path.join(output_dir, f"step{step_num}.pt")
-        if os.path.exists(out_path):
-            continue
-        # Also check for old .npy format (backward compat)
-        npy_path = os.path.join(output_dir, f"step{step_num}.npy")
-        if os.path.exists(npy_path):
+        if all(os.path.exists(os.path.join(d, f"step{step_num}.pt"))
+               or os.path.exists(os.path.join(d, f"step{step_num}.npy"))  # old format, backward compat
+               for d in run_dirs):
             continue
         to_process.append((step_num, revision, step_model))
 
@@ -661,7 +832,10 @@ def main(cfg: CollectConfig):
 
     # Tokenizer
     first_revision = to_process[0][1]
-    tokenizer = load_tokenizer(model_config, revision=first_revision)
+    try:
+        tokenizer = load_tokenizer(model_config, revision=first_revision)
+    except Exception:   # e.g. OLMo early-training revisions live in a different repo
+        tokenizer = load_tokenizer(model_config)
 
     # Load data
     packed_ids = None
@@ -679,7 +853,7 @@ def main(cfg: CollectConfig):
         texts = load_and_cache_texts(
             loader_fn, cfg.num_samples, cfg.min_length, tokenizer,
             cfg.dataset_name, cfg.dataset_content_key,
-            max_bytes=cfg.max_bytes,
+            max_bytes=cfg.max_bytes, shuffle_seed=cfg.text_shuffle_seed,
         )
         if cfg.packing == "packed":
             packed_ids = pack_sequences(texts, tokenizer, cfg.seq_len)
@@ -690,6 +864,19 @@ def main(cfg: CollectConfig):
     if boundary_token_ids is None and cfg.packing == "packed" and cfg.token_selection == "last":
         if tokenizer.eos_token_id is not None:
             boundary_token_ids = [tokenizer.eos_token_id]
+
+    # content_only: bool vocab lookup — True for word/number tokens, False for delimiters
+    content_vocab_mask = None
+    if cfg.content_only:
+        vsize = int(packed_ids.max()) + 1 if packed_ids is not None else int(getattr(tokenizer, "vocab_size", 0))
+        content_vocab_mask = torch.zeros(vsize, dtype=torch.bool)
+        for i in range(vsize):
+            try:
+                if any(c.isalnum() for c in tokenizer.decode([i])):
+                    content_vocab_mask[i] = True
+            except Exception:
+                pass
+        print(f"  content_only: keeping {int(content_vocab_mask.sum())}/{vsize} vocab ids as word/number tokens")
 
     # Continue-from: determine how much data the previous run already processed and skip it
     n_chunks_done = 0  # for packed: chunks already accumulated in existing files
@@ -712,6 +899,7 @@ def main(cfg: CollectConfig):
             raise ValueError(f"storage_format must match continued data (existing={old_fmt!r}, new={cfg.storage_format!r})")
 
         if cfg.packing == "padded":
+            assert texts is not None  # padded ⇒ the else-branch above loaded texts (never the packed_ids path)
             # sample count == n_sequences for last-token padded collection
             n_done = next(
                 v[f"{q}_n"]
@@ -743,6 +931,13 @@ def main(cfg: CollectConfig):
     # Main loop
     device = "cuda" if torch.cuda.is_available() else "cpu"
     executor = ThreadPoolExecutor(max_workers=1)
+    if cfg.vocab_entropy and not cfg.compute_metrics:
+        raise ValueError("vocab_entropy results are saved via the metrics path; set compute_metrics: true")
+    drift_spill = (os.path.join(os.environ.get("TMPDIR") or tempfile.gettempdir(),
+                                f"drift_prev_{short_name}.pt")
+                   if cfg.drift_metrics and cfg.compute_metrics else None)
+    if drift_spill and os.path.exists(drift_spill):
+        os.remove(drift_spill)      # a stale spill from a dead run is NOT this run's prev
 
     print(f"Processing {len(to_process)} remaining checkpoints...")
     print(f"  hooks    = {cfg.hooks}")
@@ -757,7 +952,7 @@ def main(cfg: CollectConfig):
 
     t_load, t_collect, t_save, t_metrics = 0.0, 0.0, 0.0, 0.0
 
-    for idx, (step_num, revision, step_model) in enumerate(tqdm(to_process, **ckpt_bar_kwargs)):
+    for idx, (step_num, revision, step_model) in enumerate(tqdm(to_process, **ckpt_bar_kwargs)):  # type: ignore[arg-type]  # dynamic **kwargs vs tqdm's overloaded signature
         # Prefetch next
         if idx + 1 < len(to_process):
             _, next_rev, next_model = to_process[idx + 1]
@@ -769,81 +964,123 @@ def main(cfg: CollectConfig):
         try:
             _t0 = time.time()
             model = load_model(model_config, step_model, revision)
-            model.to(device)
+            model.to(device)  # type: ignore[arg-type]  # model is an HF model-class union; .to(str) is valid
 
             # Grad-run model setup (enable_input_require_grads etc.) now happens inside
             # _collect_for_checkpoint when any hook needs gradients.
             n_layers = get_num_layers(model, model_config)
             blocks = cfg.target_layers if cfg.target_layers is not None else list(range(n_layers))
 
-            if cfg.sample_labels and cfg.seed is not None:
-                torch.manual_seed(cfg.seed + step_num)
-
-            t_load += time.time() - _t0; _t0 = time.time()
-            factors = _collect_for_checkpoint(
-                model, model_config, cfg, texts, tokenizer, packed_ids,
-                blocks, device, boundary_token_ids,
-            )
-
-            # Merge with existing data if continuing a previous run
-            if cfg.continue_from:
-                exist_path = os.path.join(cfg.continue_from, short_name, f"step{step_num}.pt")
-                if os.path.exists(exist_path):
-                    existing_data = torch.load(exist_path, map_location="cpu", weights_only=False)
-                    existing_raw = _reconstruct_raw_factors(existing_data)
-                    factors = _merge_with_existing(existing_raw, factors)
+            t_load += time.time() - _t0
+            # One pass per intervention (cfg.ablate), model + checkpoint loaded once;
+            # a plain run is the single intervention None.
+            interventions = ([("blk", g) for g in (cfg.ablate or [])]
+                             + [("neurons", s) for s in (cfg.ablate_neurons or [])]) or [(None, None)]
+            for kind, spec in interventions:
+                if kind is None:
+                    run_dir, g_out = cfg.output_dir, output_dir
                 else:
-                    tqdm.write(f"  WARNING: no existing file to merge at {exist_path}")
+                    tag = _blk_tag(spec) if kind == "blk" else _neuron_tag(spec)
+                    run_dir = f"{cfg.output_dir}_{tag}"
+                    g_out = os.path.join(run_dir, short_name)
+                out_path = os.path.join(g_out, f"step{step_num}.pt")
+                if kind is not None and os.path.exists(out_path):
+                    continue
+                os.makedirs(g_out, exist_ok=True)
+                if kind == "neurons":
+                    handles = [
+                        _down_proj(model, model_config, blk).register_forward_pre_hook(
+                            _neuron_prehook(idx, cfg.ablate_mode))
+                        for blk, idx in _neuron_indices(model, model_config, spec, n_layers,
+                                                        cfg.seed or 0)]
+                else:
+                    ablate_hook = _mean_output if cfg.ablate_mode == "mean" else _zero_output
+                    handles = [mod.register_forward_hook(ablate_hook)
+                               for b in (spec or ())
+                               for leaf, mod, _cap in get_block_boundary_hooks(model, model_config, b)
+                               if leaf.endswith(".out")]
 
-            t_collect += time.time() - _t0; _t0 = time.time()
-            out_path = os.path.join(output_dir, f"step{step_num}.pt")
-            token_filter = {
-                "token_selection": cfg.token_selection,
-                "skip_positions": cfg.skip_positions,
-                "boundary_token_ids": cfg.boundary_token_ids,
-            }
-            if cfg.answer_only:
-                token_filter["answer_only"] = True
-                token_filter["answer_start_key"] = cfg.answer_start_key
-            # For packed runs: record total chunks so future continuations know where to start
-            save_n_chunks = None
-            if cfg.packing == "packed" and packed_ids is not None:
-                save_n_chunks = n_chunks_done + len(packed_ids)
-            acc = DataAccessor(factors, model=model, model_config=model_config,
-                               model_name=step_model, revision=revision)
-            acc.save(out_path, format=cfg.storage_format,
-                     cross_basis_refs=cfg.cross_basis_refs,
-                     storage_dtype=cfg.storage_dtype, token_filter=token_filter,
-                     n_chunks=save_n_chunks)
-            t_save += time.time() - _t0
-            tqdm.write(f"Step {step_num}: {len(factors)} hook points -> {out_path}")
+                if cfg.sample_labels and cfg.seed is not None:
+                    torch.manual_seed(cfg.seed + step_num)
 
-            if cfg.compute_metrics:
+                lens = None
+                if cfg.vocab_entropy:
+                    from utils.entropy_lens import EntropyLens
+                    lens = EntropyLens(model, model_config)
+
                 _t0 = time.time()
-                import numpy as np
-                from scripts.compute_metrics import compute_metrics_for_checkpoint
-                step_metrics = compute_metrics_for_checkpoint(acc, verbose=cfg.profile_metrics)
-                metrics_dir = os.path.join(cfg.output_dir.replace("inferences", "results", 1)
-                                           if cfg.output_dir else "data/results")
-                os.makedirs(metrics_dir, exist_ok=True)
-                metrics_path = os.path.join(metrics_dir, f"results_{short_name}.npy")
-                res_dict = {}
-                if os.path.exists(metrics_path):
-                    try:
-                        res_dict = np.load(metrics_path, allow_pickle=True).item()
-                    except (OSError, ValueError, TypeError):
-                        pass
-                res_dict[step_num] = step_metrics
-                np.save(metrics_path, res_dict)
-                t_metrics += time.time() - _t0
-                tqdm.write(f"  Metrics: {len(step_metrics)} hooks -> {metrics_path}")
+                captured = _collect_for_checkpoint(
+                    model, model_config, cfg, texts, tokenizer, packed_ids,
+                    blocks, device, boundary_token_ids, content_vocab_mask,
+                )
+                entropy_result = lens.close() if lens is not None else None
+                for h in handles:
+                    h.remove()
+
+                # Merge with existing data if continuing a previous run
+                if cfg.continue_from:
+                    exist_path = os.path.join(cfg.continue_from, short_name, f"step{step_num}.pt")
+                    if os.path.exists(exist_path):
+                        existing_data = torch.load(exist_path, map_location="cpu", weights_only=False)
+                        existing_raw = _reconstruct_captured(existing_data)
+                        captured = _merge_with_existing(existing_raw, captured)
+                    else:
+                        tqdm.write(f"  WARNING: no existing file to merge at {exist_path}")
+
+                t_collect += time.time() - _t0; _t0 = time.time()
+                token_filter = {
+                    "token_selection": cfg.token_selection,
+                    "skip_positions": cfg.skip_positions,
+                    "boundary_token_ids": cfg.boundary_token_ids,
+                }
+                if cfg.answer_only:
+                    token_filter["answer_only"] = True
+                    token_filter["answer_start_key"] = cfg.answer_start_key
+                # For packed runs: record total chunks so future continuations know where to start
+                save_n_chunks = None
+                if cfg.packing == "packed" and packed_ids is not None:
+                    save_n_chunks = n_chunks_done + len(packed_ids)
+                run = os.path.basename((run_dir or "default").rstrip("/"))
+                base_fmt, overrides = _parse_storage_format(cfg.storage_format)
+                acc = DataAccessor(captured, config=model_config,
+                                   weights=ModelWeights(model, model_config),
+                                   identity=(step_model, revision, run))
+                acc.stamp(token_filter=token_filter, n_chunks=save_n_chunks)
+                acc.save(out_path, format=base_fmt, overrides=overrides)
+                t_save += time.time() - _t0
+                tqdm.write(f"Step {step_num}: {len(captured)} hook points -> {out_path}")
+
+                if cfg.compute_metrics:
+                    _t0 = time.time()
+                    from scripts.compute_metrics import compute_metrics_for_checkpoint, save_step_metrics
+                    ctx: dict = ({"prev": DataAccessor(torch.load(drift_spill, mmap=True, weights_only=False)).v}
+                                 if drift_spill and os.path.exists(drift_spill) else {})
+                    if cfg.loo_groups:
+                        ctx["loo_groups"] = cfg.loo_groups
+                    if cfg.metrics_skip:
+                        ctx["skip"] = cfg.metrics_skip
+                    step_metrics = compute_metrics_for_checkpoint(acc, verbose=cfg.profile_metrics, ctx=ctx)
+                    if entropy_result is not None:
+                        step_metrics["vocab_entropy"] = {"entropy_lens": entropy_result}
+                    metrics_dir = (run_dir.replace("inferences", "results", 1)
+                                   if run_dir else "data/results")
+                    metrics_path = os.path.join(metrics_dir, f"results_{short_name}.npy")
+                    save_step_metrics(metrics_path, step_num, step_metrics)
+                    if drift_spill:
+                        torch.save(acc.data, drift_spill)
+                    t_metrics += time.time() - _t0
+                    tqdm.write(f"  Metrics: {len(step_metrics)} hooks -> {metrics_path}")
+                del captured, acc   # free this sweep's samples BEFORE the next intervention collects
+                gc.collect()        # accessor graph is cyclic — without this the buffers linger
 
         except Exception as e:
             tqdm.write(f"Skipping step {step_num}: {e}")
             import traceback
             traceback.print_exc()
         finally:
-            del model
+            # Release THIS checkpoint's model, samples and resolver caches now — otherwise
+            # they stay bound through the next checkpoint's collection (double residency).
+            model = captured = acc = None
             gc.collect()
             torch.cuda.empty_cache()
 
@@ -853,6 +1090,8 @@ def main(cfg: CollectConfig):
             delete_cached_revision(step_model, revision)
 
     executor.shutdown(wait=True)
+    if drift_spill and os.path.exists(drift_spill):
+        os.remove(drift_spill)
     print(f"Completed! Output saved to {output_dir}")
 
     total = t_load + t_collect + t_save + t_metrics
