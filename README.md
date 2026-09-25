@@ -1,6 +1,6 @@
-# Tracing Representation Geometry — Reproduction & Extension
+# Training-time entropy circuits
 
-Reproduction and extension of spectral analysis of LLM representations during pretraining. Tracks RankMe, α-ReQ, and K-FAC curvature across training checkpoints. Supports Pythia (14m–12b) and OLMo-2 (1B, 7B).
+Expanded spectral analysis of LLM representations during pretraining. Tracks RankMe, α-ReQ, and various layer-to-layer interactions across training checkpoints. Natively uses Pythia and OLMo-2.
 
 ## Installation
 
@@ -107,8 +107,6 @@ slurm/                    # SLURM job scripts and wrappers
 **RankMe** — effective dimensionality of representations
 
 **α-ReQ** — power-law exponent of eigenspectrum decay
-
-**K-FAC log-determinant** — damped: `L(α) = d_A·logdet(G + ε_G·I) + d_G·logdet(A + ε_A·I)`, computed at α ∈ {1e-4, 1e-5, 1e-6}
 
 ## License
 
